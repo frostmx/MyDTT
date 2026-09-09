@@ -31,9 +31,11 @@ public:
     void HandleSelfDrivingChanged(AFGTrain* Train, bool bEnabled);
     void HandleStationNameChanged(AFGTrainStationIdentifier* Identifier);
 
-    // Truck counterparts of the four train events above.
-    void HandleTruckDocking(AFGWheeledVehicleIdentifier* Vehicle, bool bIsDocking);
-    void HandleTruckWaypointChanged(AFGWheeledVehicleIdentifier* Vehicle, int32 WaypointIndex);
+    // Truck counterparts of the train events above. There is no hook for "the autopilot picked
+    // its next waypoint" or "the truck docked": those setters carry no UFUNCTION and the game
+    // does not call them through an address a hook can reach - measured in game, the handlers
+    // never fired once across 17 waypoint changes. Those two signals are polled instead, see
+    // PollTruckStates.
     void HandleVehicleRouteChanged(AFGWheeledVehicleIdentifier* Vehicle);
     void HandleAutopilotChanged(AFGWheeledVehicleIdentifier* Vehicle, bool bEnabled);
     void HandleDockingStationNameChanged(AFGDockingStationIdentifier* Identifier);
@@ -83,6 +85,15 @@ private:
     bool bTimeTableReevaluationScheduled = false;
     bool bRouteReevaluationScheduled = false;
 
+    /** What the last poll saw for one vehicle. A change in either field is a signal to act on. */
+    struct FDTTTruckPollState
+    {
+        int32 TargetIndex = INDEX_NONE;
+        bool bDocking = false;
+    };
+    TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTTruckPollState> TruckPollStates;
+    FTimerHandle TruckPollTimerHandle;
+
     void InitializePersistence();
     void SchedulePrunePermission();
     bool PruneMissingStations();
@@ -123,6 +134,8 @@ private:
     bool RefreshDockDisplayName(AFGDockingStationIdentifier* Identifier);
     void RemoveInvalidTruckBookings();
     void ReleaseTruckBooking(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason);
+    void StartTruckPolling();
+    void PollTruckStates();
     void SchedulePendingRouteReevaluation();
     void ProcessPendingRouteReevaluations();
     void ProcessCurrentTruckTarget(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Trigger);

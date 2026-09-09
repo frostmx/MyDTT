@@ -52,6 +52,11 @@ void UDynamicTimeTableSubsystem::Deinitialize()
     bTimeTableReevaluationScheduled = false;
     bRouteReevaluationScheduled = false;
     GroupRotationCursor.Reset();
+    TruckPollStates.Reset();
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(TruckPollTimerHandle);
+    }
     bPruneAllowed = false;
     StationGroups.Reset();
     SaveDataActor.Reset();
@@ -143,6 +148,7 @@ void UDynamicTimeTableSubsystem::InitializePersistence()
     RecalculateBookingsFromVanilla();
     SyncConfigurationToSaveActor();
     SchedulePrunePermission();
+    StartTruckPolling();
     OnGroupsChanged.Broadcast(); OnGroupsChangedNative.Broadcast();
 }
 
@@ -608,7 +614,16 @@ void UDynamicTimeTableSubsystem::ProcessCurrentTruckTarget(AFGWheeledVehicleIden
 
     AFGDockingStationIdentifier* Current = FindDockByPathNode(Route[Index]);
     FDTTStationGroup* Group = FindGroupByDock(Current);
-    if (!Group || TruckBookings.Contains(Vehicle)) return;
+    if (!Group) return;
+
+    // A booking always names the dock the vehicle is heading for right now. Anything else is
+    // stale and gets dropped here rather than blocking the vehicle forever - a booking that
+    // could not be released was what made the mod go permanently inert.
+    if (auto* Existing = TruckBookings.Find(Vehicle))
+    {
+        if (Existing->Get() == Current) return;
+        ReleaseTruckBooking(Vehicle, TEXT("target changed"));
+    }
 
     // The player listed several stations of the group by hand - that is an explicit route, not
     // something to balance. Same rule as for trains.
@@ -642,24 +657,62 @@ void UDynamicTimeTableSubsystem::ProcessCurrentTruckTarget(AFGWheeledVehicleIden
     OnGroupsChanged.Broadcast(); OnGroupsChangedNative.Broadcast();
 }
 
-void UDynamicTimeTableSubsystem::HandleTruckDocking(AFGWheeledVehicleIdentifier* Vehicle, bool bIsDocking)
+void UDynamicTimeTableSubsystem::StartTruckPolling()
 {
-    if (!IsServer() || !IsValid(Vehicle) || !bIsDocking) return;
-    if (!bPersistenceReady) InitializePersistence();
-    RemoveInvalidTruckBookings();
-    // Only the booking is released here. The substitution happens when the autopilot picks the
-    // next waypoint - rewriting the current one while the truck stands on it would send it away.
-    ReleaseTruckBooking(Vehicle, TEXT("truck docked"));
+    UWorld* World = GetWorld();
+    if (!IsValid(World) || !IsServer()) return;
+    World->GetTimerManager().ClearTimer(TruckPollTimerHandle);
+    World->GetTimerManager().SetTimer(TruckPollTimerHandle, this,
+        &UDynamicTimeTableSubsystem::PollTruckStates, 1.0f, true);
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("Truck polling started at 1 Hz."));
 }
 
-void UDynamicTimeTableSubsystem::HandleTruckWaypointChanged(AFGWheeledVehicleIdentifier* Vehicle, int32 WaypointIndex)
+void UDynamicTimeTableSubsystem::PollTruckStates()
 {
-    (void)WaypointIndex;
-    if (!IsServer() || !IsValid(Vehicle) || !Vehicle->IsAutopilotEnabled()) return;
-    // Deferred by one tick: this fires from inside the autopilot update, and the reaction to it
-    // writes the vehicle route.
-    PendingRouteReevaluations.Add(Vehicle);
-    SchedulePendingRouteReevaluation();
+    if (!IsServer()) return;
+    AFGVehicleSubsystem* V = AFGVehicleSubsystem::Get(GetWorld());
+    if (!IsValid(V)) return;
+
+    for (auto It = TruckPollStates.CreateIterator(); It; ++It)
+        if (!It.Key().IsValid()) It.RemoveCurrent();
+
+    for (AFGWheeledVehicleIdentifier* Vehicle : V->GetAllVehicles())
+    {
+        if (!IsValid(Vehicle)) continue;
+        if (!Vehicle->IsAutopilotEnabled())
+        {
+            TruckPollStates.Remove(Vehicle);
+            continue;
+        }
+
+        const int32 TargetIndex = Vehicle->GetCurrentTargetWaypointIndex();
+        const bool bDocking = Vehicle->IsCurrentlyDocking();
+        FDTTTruckPollState* Previous = TruckPollStates.Find(Vehicle);
+
+        // First sighting only records. Acting here would redirect a vehicle that is already most
+        // of the way to its target, every time the world loads.
+        if (!Previous)
+        {
+            TruckPollStates.Add(Vehicle, FDTTTruckPollState{TargetIndex, bDocking});
+            continue;
+        }
+
+        // Arrival frees the slot, but does not re-evaluate: the target is still the dock the
+        // vehicle is standing on, and rewriting that waypoint would send it away again.
+        if (bDocking && !Previous->bDocking)
+        {
+            ReleaseTruckBooking(Vehicle, TEXT("truck docked"));
+        }
+
+        // The autopilot moving on to the next waypoint is the moment to substitute.
+        if (TargetIndex != Previous->TargetIndex)
+        {
+            ProcessCurrentTruckTarget(Vehicle, TEXT("waypoint changed"));
+        }
+
+        Previous->TargetIndex = TargetIndex;
+        Previous->bDocking = bDocking;
+    }
 }
 
 void UDynamicTimeTableSubsystem::HandleVehicleRouteChanged(AFGWheeledVehicleIdentifier* Vehicle)
