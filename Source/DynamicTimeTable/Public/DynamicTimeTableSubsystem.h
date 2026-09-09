@@ -57,11 +57,24 @@ public:
     FDTTGroupsChangedNativeDelegate OnGroupsChangedNative;
 
 private:
+    // UPROPERTY is load-bearing, not decoration: a TObjectPtr inside a plain member container is
+    // an ordinary raw pointer with no GC awareness, so IsValid() on a dismantled station would
+    // read freed memory. Under UPROPERTY the reference is nulled for us instead.
+    UPROPERTY()
     TArray<FDTTStationGroup> StationGroups;
-    TMap<AFGTrain*, AFGTrainStationIdentifier*> ActiveBookings;
-    TMap<AFGWheeledVehicleIdentifier*, AFGDockingStationIdentifier*> TruckBookings;
+    // Weak on both sides for the same reason - a booking outlives the actors it names.
+    TMap<TWeakObjectPtr<AFGTrain>, TWeakObjectPtr<AFGTrainStationIdentifier>> ActiveBookings;
+    TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, TWeakObjectPtr<AFGDockingStationIdentifier>> TruckBookings;
     TWeakObjectPtr<ADTTSaveDataActor> SaveDataActor;
     bool bPersistenceReady = false;
+    /**
+     * Dead entries are only pruned once this is up. It is raised by a timer a few seconds after
+     * persistence is initialised, because at OnWorldBeginPlay the railroad and vehicle subsystems
+     * have not registered their identifiers yet and an eager prune would wipe the whole config.
+     */
+    bool bPruneAllowed = false;
+    /** Group -> PriorityIndex of the station picked last. Runtime only, deliberately not saved. */
+    TMap<FGuid, int32> GroupRotationCursor;
     int32 ConfigurationRevision = 0;
     TSet<AFGRailroadTimeTable*> InternalTimeTableChanges;
     TSet<AFGWheeledVehicleIdentifier*> InternalRouteChanges;
@@ -71,6 +84,8 @@ private:
     bool bRouteReevaluationScheduled = false;
 
     void InitializePersistence();
+    void SchedulePrunePermission();
+    bool PruneMissingStations();
     void RegisterDTTChatCommand();
     void SyncConfigurationToSaveActor();
     bool IsRuntimeGameWorld() const;
