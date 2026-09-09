@@ -9,6 +9,8 @@ class AFGTrain;
 class AFGBuildableRailroadStation;
 class AFGTrainStationIdentifier;
 class AFGRailroadTimeTable;
+class AFGDockingStationIdentifier;
+class AFGWheeledVehicleIdentifier;
 class ADTTSaveDataActor;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FDTTGroupsChangedDelegate);
@@ -29,13 +31,21 @@ public:
     void HandleSelfDrivingChanged(AFGTrain* Train, bool bEnabled);
     void HandleStationNameChanged(AFGTrainStationIdentifier* Identifier);
 
-    UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") FGuid CreateGroup(const FString& GroupName);
+    // Truck counterparts of the four train events above.
+    void HandleTruckDocking(AFGWheeledVehicleIdentifier* Vehicle, bool bIsDocking);
+    void HandleTruckWaypointChanged(AFGWheeledVehicleIdentifier* Vehicle, int32 WaypointIndex);
+    void HandleVehicleRouteChanged(AFGWheeledVehicleIdentifier* Vehicle);
+    void HandleAutopilotChanged(AFGWheeledVehicleIdentifier* Vehicle, bool bEnabled);
+    void HandleDockingStationNameChanged(AFGDockingStationIdentifier* Identifier);
+
+    UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") FGuid CreateGroup(const FString& GroupName, EDTTGroupKind Kind = EDTTGroupKind::Train);
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") bool RemoveGroup(FGuid GroupId);
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") bool RenameGroup(FGuid GroupId, const FString& NewName);
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") bool AddStationByName(FGuid GroupId, const FString& StationName, int32 TargetSlots = 1);
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") bool RemoveStationByName(FGuid GroupId, const FString& StationName);
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") bool SetTargetSlots(FGuid GroupId, const FString& StationName, int32 TargetSlots);
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") void GetAllVanillaStationNames(TArray<FString>& OutStationNames) const;
+    UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") void GetAllDockingStationNames(TArray<FString>& OutStationNames) const;
     UFUNCTION(BlueprintPure, Category = "Dynamic Time Table|Groups") const TArray<FDTTStationGroup>& GetStationGroups() const;
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") void GetGroupRuntimeLoad(FGuid GroupId, TArray<FDTTStationRuntimeLoad>& OutLoads) const;
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Runtime") void RecalculateBookingsFromVanilla();
@@ -49,17 +59,22 @@ public:
 private:
     TArray<FDTTStationGroup> StationGroups;
     TMap<AFGTrain*, AFGTrainStationIdentifier*> ActiveBookings;
+    TMap<AFGWheeledVehicleIdentifier*, AFGDockingStationIdentifier*> TruckBookings;
     TWeakObjectPtr<ADTTSaveDataActor> SaveDataActor;
     bool bPersistenceReady = false;
     int32 ConfigurationRevision = 0;
     TSet<AFGRailroadTimeTable*> InternalTimeTableChanges;
+    TSet<AFGWheeledVehicleIdentifier*> InternalRouteChanges;
     TSet<TWeakObjectPtr<AFGRailroadTimeTable>> PendingTimeTableReevaluations;
+    TSet<TWeakObjectPtr<AFGWheeledVehicleIdentifier>> PendingRouteReevaluations;
     bool bTimeTableReevaluationScheduled = false;
+    bool bRouteReevaluationScheduled = false;
 
     void InitializePersistence();
     void RegisterDTTChatCommand();
     void SyncConfigurationToSaveActor();
     bool IsRuntimeGameWorld() const;
+    bool IsServer() const;
 
     FDTTStationGroup* FindGroup(FGuid GroupId);
     const FDTTStationGroup* FindGroup(FGuid GroupId) const;
@@ -81,6 +96,24 @@ private:
     void ConfigurationChanged(bool bRecalculateBookings = true);
     FDTTStationEntry* SelectBestStation(FDTTStationGroup& Group);
     int32 GetAssignedCount(AFGTrainStationIdentifier* Identifier) const;
+    int32 GetEntryAssignedCount(const FDTTStationGroup& Group, const FDTTStationEntry& Entry) const;
     int32 CountStopsInGroup(AFGRailroadTimeTable* TimeTable, const FDTTStationGroup& Group) const;
     bool ReplaceCurrentStop(AFGRailroadTimeTable* TimeTable, int32 CurrentStop, AFGTrainStationIdentifier* NewIdentifier);
+
+    // Truck side. Mirrors the train helpers above one for one; the balancing rule itself is shared.
+    FDTTStationGroup* FindGroupByDock(AFGDockingStationIdentifier* Identifier);
+    const FDTTStationGroup* FindGroupByDock(AFGDockingStationIdentifier* Identifier) const;
+    AFGDockingStationIdentifier* FindDockByName(const FString& StationName) const;
+    AFGDockingStationIdentifier* FindDockByPathNode(const FGuid& PathNodeGuid) const;
+    bool RefreshDockDisplayName(AFGDockingStationIdentifier* Identifier);
+    void RemoveInvalidTruckBookings();
+    void ReleaseTruckBooking(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason);
+    void SchedulePendingRouteReevaluation();
+    void ProcessPendingRouteReevaluations();
+    void ProcessCurrentTruckTarget(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Trigger);
+    int32 GetDockAssignedCount(AFGDockingStationIdentifier* Identifier) const;
+    int32 CountWaypointsInGroup(AFGWheeledVehicleIdentifier* Vehicle, const FDTTStationGroup& Group) const;
+    bool ReplaceCurrentWaypoint(AFGWheeledVehicleIdentifier* Vehicle, int32 WaypointIndex, const FGuid& NewPathNodeGuid);
+    /** Path network the group's vehicles travel, or INDEX_NONE when nothing in the group is moving yet. Diagnostics only. */
+    int32 GetGroupPathNetworkID(const FDTTStationGroup& Group) const;
 };

@@ -1,9 +1,9 @@
 {
     "FileVersion": 3,
     "Version": 1,
-    "VersionName": "0.10.0-beta.2",
+    "VersionName": "0.11.0-beta.1",
     "FriendlyName": "DynamicTimeTable",
-    "Description": "Dual singleplayer and multiplayer dynamic train timetable routing.",
+    "Description": "Dual singleplayer and multiplayer dynamic train and truck routing.",
     "Category": "Modding",
     "CreatedBy": "Zuzzla",
     "CreatedByURL": "",

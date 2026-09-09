@@ -31,7 +31,7 @@ public:
 
 private:
     UPROPERTY(SaveGame)
-    int32 DataVersion = 2;
+    int32 DataVersion = 3;
 
     UPROPERTY(SaveGame)
     TArray<FDTTStationGroup> SavedGroups;
