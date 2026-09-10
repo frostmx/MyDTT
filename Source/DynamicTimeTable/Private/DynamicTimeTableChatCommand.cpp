@@ -18,7 +18,7 @@ ADynamicTimeTableChatCommand::ADynamicTimeTableChatCommand()
     Usage = NSLOCTEXT(
         "DynamicTimeTable",
         "ChatCommand.DTT.Usage",
-        "/dtt - Open DynamicTimeTable; /dtt recalc - rebuild active bookings");
+        "/dtt - Open DynamicTimeTable; /dtt recalc - rebuild active bookings (trains and trucks)");
     Aliases.Add(TEXT("dynamictimetable"));
 }
 
@@ -57,7 +57,7 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
     {
         Subsystem->RecalculateBookingsFromVanilla();
         Sender->SendChatMessage(
-            TEXT("dTT: Active bookings were rebuilt from Vanilla timetables."),
+            TEXT("dTT: Active bookings were rebuilt from Vanilla timetables and truck routes."),
             FLinearColor(0.20f, 0.80f, 1.00f));
         return EExecutionStatus::COMPLETED;
     }

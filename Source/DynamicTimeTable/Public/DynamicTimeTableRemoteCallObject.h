@@ -7,10 +7,11 @@ USTRUCT(BlueprintType)
 struct FDTTClientSnapshot
 {
     GENERATED_BODY()
-    UPROPERTY(BlueprintReadOnly) int32 ProtocolVersion = 2;
+    UPROPERTY(BlueprintReadOnly) int32 ProtocolVersion = 3;
     UPROPERTY(BlueprintReadOnly) int32 Revision = 0;
     UPROPERTY(BlueprintReadOnly) TArray<FDTTStationGroup> Groups;
     UPROPERTY(BlueprintReadOnly) TArray<FString> AvailableStations;
+    UPROPERTY(BlueprintReadOnly) TArray<FString> AvailableTruckStations;
     UPROPERTY(BlueprintReadOnly) TArray<FDTTStationRuntimeLoad> RuntimeLoads;
 };
 DECLARE_MULTICAST_DELEGATE(FDTTClientSnapshotChanged);
@@ -20,13 +21,13 @@ class DYNAMICTIMETABLE_API UDynamicTimeTableRemoteCallObject : public UFGRemoteC
 {
     GENERATED_BODY()
 public:
-    static constexpr int32 ProtocolVersion = 2;
+    static constexpr int32 ProtocolVersion = 3;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     const FDTTClientSnapshot& GetSnapshot() const { return CachedSnapshot; }
     FDTTClientSnapshotChanged OnSnapshotChanged;
     FDTTClientOperationResult OnOperationResult;
     void RequestSnapshot();
-    void RequestCreateGroup(const FString& GroupName);
+    void RequestCreateGroup(const FString& GroupName, EDTTGroupKind Kind);
     void RequestRenameGroup(FGuid GroupId, const FString& NewName);
     void RequestDeleteGroup(FGuid GroupId);
     void RequestAddStation(FGuid GroupId, const FString& StationName);
@@ -39,7 +40,7 @@ private:
     UPROPERTY(Replicated) bool bReplicationAnchor = true;
     UPROPERTY() FDTTClientSnapshot CachedSnapshot;
     UFUNCTION(Server, Reliable) void Server_RequestSnapshot(int32 ClientProtocol);
-    UFUNCTION(Server, Reliable) void Server_CreateGroup(const FString& GroupName, int32 ClientProtocol);
+    UFUNCTION(Server, Reliable) void Server_CreateGroup(const FString& GroupName, EDTTGroupKind Kind, int32 ClientProtocol);
     UFUNCTION(Server, Reliable) void Server_RenameGroup(FGuid GroupId, const FString& NewName, int32 ClientProtocol);
     UFUNCTION(Server, Reliable) void Server_DeleteGroup(FGuid GroupId, int32 ClientProtocol);
     UFUNCTION(Server, Reliable) void Server_AddStation(FGuid GroupId, const FString& StationName, int32 ClientProtocol);

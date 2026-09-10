@@ -1,5 +1,6 @@
 #include "DTTSaveDataActor.h"
 #include "FGTrainStationIdentifier.h"
+#include "WheeledVehicles/FGDockingStationIdentifier.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDynamicTimeTableSaveData, Log, All);
 
@@ -56,6 +57,10 @@ void ADTTSaveDataActor::GatherDependencies_Implementation(TArray<UObject*>& out_
             if (IsValid(Entry.StationIdentifier.Get()))
             {
                 out_dependentObjects.AddUnique(Entry.StationIdentifier.Get());
+            }
+            if (IsValid(Entry.DockingStationIdentifier.Get()))
+            {
+                out_dependentObjects.AddUnique(Entry.DockingStationIdentifier.Get());
             }
         }
     }

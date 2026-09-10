@@ -40,6 +40,7 @@ private:
     UPROPERTY() TObjectPtr<UComboBoxString> GroupSelector;
     UPROPERTY() TObjectPtr<UEditableTextBox> GroupNameInput;
     UPROPERTY() TObjectPtr<UEditableTextBox> NewGroupNameInput;
+    UPROPERTY() TObjectPtr<UComboBoxString> NewGroupKindSelector;
     UPROPERTY() TObjectPtr<UButton> CreateGroupButton;
     UPROPERTY() TObjectPtr<UButton> RenameGroupButton;
     UPROPERTY() TObjectPtr<UButton> DeleteGroupButton;

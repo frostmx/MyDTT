@@ -4,6 +4,16 @@
 #include "DynamicTimeTableTypes.generated.h"
 
 class AFGTrainStationIdentifier;
+class AFGDockingStationIdentifier;
+
+/** Kind of vehicle a station group balances. A group never mixes kinds: trains and trucks travel different networks. */
+UENUM(BlueprintType)
+enum class EDTTGroupKind : uint8
+{
+    // Value 0 so that groups loaded from a pre-truck save stay train groups.
+    Train = 0 UMETA(DisplayName = "Trains"),
+    Truck = 1 UMETA(DisplayName = "Trucks"),
+};
 
 USTRUCT(BlueprintType)
 struct FDTTStationEntry
@@ -22,6 +32,14 @@ struct FDTTStationEntry
     // Persistent identity; DisplayName is only a live display cache.
     UPROPERTY(SaveGame)
     TObjectPtr<AFGTrainStationIdentifier> StationIdentifier = nullptr;
+
+    // Truck groups use these two instead. The path node GUID is the canonical identity: it is
+    // stable, it survives a rename, and it is what a vehicle route is actually made of.
+    UPROPERTY(SaveGame)
+    TObjectPtr<AFGDockingStationIdentifier> DockingStationIdentifier = nullptr;
+
+    UPROPERTY(SaveGame)
+    FGuid DockingPathNodeGuid;
 };
 
 USTRUCT(BlueprintType)
@@ -34,6 +52,9 @@ struct FDTTStationGroup
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "Dynamic Time Table")
     FString GroupName;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, SaveGame, Category = "Dynamic Time Table")
+    EDTTGroupKind Kind = EDTTGroupKind::Train;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, SaveGame, Category = "Dynamic Time Table")
     TArray<FDTTStationEntry> Stations;
@@ -58,4 +79,12 @@ struct FDTTStationRuntimeLoad
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dynamic Time Table")
     bool bOverloaded = false;
+
+    /**
+     * Truck groups only: this docking station is not on the path network the group's vehicles
+     * travel, so the autopilot cannot reach it. Purely diagnostic - the station is still picked
+     * as a target, because hiding it would hide the misconfiguration from the player.
+     */
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dynamic Time Table")
+    bool bUnreachable = false;
 };

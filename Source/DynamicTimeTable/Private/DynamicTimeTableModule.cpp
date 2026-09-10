@@ -8,6 +8,8 @@
 #include "FGRailroadTimeTable.h"
 #include "FGTrainStationIdentifier.h"
 #include "Buildables/FGBuildableRailroadStation.h"
+#include "WheeledVehicles/FGDockingStationIdentifier.h"
+#include "WheeledVehicles/FGWheeledVehicleIdentifier.h"
 #include "DynamicTimeTableSubsystem.h"
 #include "DynamicTimeTableRemoteCallObject.h"
 #include "Engine/World.h"
@@ -22,6 +24,14 @@ SUBSCRIBE_METHOD_AFTER(AFGTrain::OnDocked,[](AFGTrain* Train,AFGBuildableRailroa
 SUBSCRIBE_METHOD_AFTER(AFGRailroadTimeTable::SetStops,[](const bool& Ok,AFGRailroadTimeTable* T,const TArray<FTimeTableStop>& Stops){(void)Stops;if(Ok&&IsValid(T)&&IsValid(T->GetWorld()))if(auto* S=T->GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())S->HandleTimeTableChanged(T);});
 SUBSCRIBE_METHOD_AFTER(AFGTrainStationIdentifier::SetStationName,[](AFGTrainStationIdentifier* Id,const FText& Name){(void)Name;if(IsValid(Id)&&IsValid(Id->GetWorld()))if(auto* S=Id->GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())S->HandleStationNameChanged(Id);});
 SUBSCRIBE_METHOD_AFTER(AFGTrain::SetSelfDrivingEnabled,[](AFGTrain* Train,bool Enabled){if(IsValid(Train)&&IsValid(Train->GetWorld()))if(auto* S=Train->GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())S->HandleSelfDrivingChanged(Train,Enabled);});
+// Truck counterparts. AFGWheeledVehicleIdentifier is to a truck what AFGRailroadTimeTable plus
+// AFGTrain are to a train: it owns the route, the current target and the autopilot flag.
+// Only the two BlueprintCallable setters are hooked. SetCurrentTargetWaypoint and
+// SetIsCurrentlyDocking are plain native methods with no UFUNCTION, and hooks on them never
+// fired in game - the subsystem polls for those two signals instead.
+SUBSCRIBE_METHOD_AFTER(AFGWheeledVehicleIdentifier::SetVehicleRoute,[](AFGWheeledVehicleIdentifier* V,const TArray<FGuid>& Route){(void)Route;if(IsValid(V)&&IsValid(V->GetWorld()))if(auto* S=V->GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())S->HandleVehicleRouteChanged(V);});
+SUBSCRIBE_METHOD_AFTER(AFGWheeledVehicleIdentifier::SetAutopilotEnabled,[](AFGWheeledVehicleIdentifier* V,bool Enabled){if(IsValid(V)&&IsValid(V->GetWorld()))if(auto* S=V->GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())S->HandleAutopilotChanged(V,Enabled);});
+SUBSCRIBE_METHOD_AFTER(AFGDockingStationIdentifier::SetStationName,[](AFGDockingStationIdentifier* Id,const FText& Name){(void)Name;if(IsValid(Id)&&IsValid(Id->GetWorld()))if(auto* S=Id->GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())S->HandleDockingStationNameChanged(Id);});
 #endif
 }
 void FDynamicTimeTableModule::ShutdownModule(){
