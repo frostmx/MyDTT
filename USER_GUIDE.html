@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>DynamicTimeTable — руководство пользователя</title>
+  <title>MyDTT — руководство пользователя</title>
   <style>
     :root{--bg:#111317;--panel:#1b1f25;--panel2:#242a32;--text:#f4f1e8;--muted:#aeb5bf;--line:#39414c;--orange:#ff9f32;--orange2:#ffbf6b;--green:#63d89b;--blue:#6ab9ff;--red:#ff7777;--shadow:0 18px 48px #00000047;font-family:"Segoe UI",Arial,sans-serif}
     *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;color:var(--text);background:radial-gradient(circle at 80% 0%,#ff9f321f,transparent 35rem),linear-gradient(145deg,#0d0f12,var(--bg) 40%,#15191e);line-height:1.58}a{color:var(--orange2)}
@@ -30,7 +30,7 @@
 <body>
   <div class="layout">
     <nav aria-label="Содержание">
-      <div class="brand"><span class="brand-mark">dTT</span> DynamicTimeTable</div>
+      <div class="brand"><span class="brand-mark">dTT</span> MyDTT</div>
       <div class="links">
         <a href="#quick-start">Быстрый старт</a><a href="#tags">Теги станций</a><a href="#route">Базовый маршрут</a><a href="#fuel">Заправка (F)</a><a href="#groups">Теги групп</a><a href="#examples">Примеры</a><a href="#diagnostics">Диагностика</a><a href="#troubleshooting">Если не работает</a>
       </div>
@@ -39,7 +39,7 @@
       <header>
         <div class="eyebrow">Руководство пользователя</div>
         <h1>Доставка по реальному спросу</h1>
-        <p class="lead">DynamicTimeTable автоматически строит маршрут грузовика от производителя ко всем станциям, где запас выбранного ресурса опустился ниже заданного порога. Несколько грузовиков делят заявки между собой, а отдельную заправку можно сделать опциональной.</p>
+        <p class="lead">MyDTT автоматически строит маршрут грузовика от производителя ко всем станциям, где запас выбранного ресурса опустился ниже заданного порога. Несколько грузовиков делят заявки между собой, а отдельную заправку можно сделать опциональной.</p>
         <div class="callout"><strong>Главное правило:</strong> роль станции задаётся одновременно тегом в имени и её штатным переключателем. Производитель должен быть в режиме <span class="mode load">LOAD</span>, потребитель — <span class="mode unload">UNLOAD</span>.</div>
       </header>
 
@@ -63,7 +63,7 @@
             <tr><td><code>АЗС (F)</code></td><td>любой</td><td>Необязательная выделенная заправка. Тег ровно <code>(F)</code>, без имени ресурса.</td></tr>
           </tbody>
         </table>
-        <div class="callout warning"><strong>Тег не переключает станцию.</strong> Если <code>(Ресурс+)</code> стоит на станции в режиме UNLOAD или <code>(Ресурс-N)</code> — на станции в режиме LOAD, DynamicTimeTable покажет несовпадение режима и не будет использовать такую станцию.</div>
+        <div class="callout warning"><strong>Тег не переключает станцию.</strong> Если <code>(Ресурс+)</code> стоит на станции в режиме UNLOAD или <code>(Ресурс-N)</code> — на станции в режиме LOAD, MyDTT покажет несовпадение режима и не будет использовать такую станцию.</div>
         <p>Количество предметов считается в <strong>полных стаках</strong>: неполный остаток округляется вниз. Порог относится к складу станции, а не к инвентарю грузовика.</p>
       </section>
 
@@ -82,7 +82,7 @@
 
       <section id="fuel">
         <h2>Выделенная заправка <code>(F)</code></h2>
-        <p>Заправка может находиться в любом месте базового маршрута. DynamicTimeTable запоминает её позицию и рассчитывает расход по реальному пути через сеть путевых узлов.</p>
+        <p>Заправка может находиться в любом месте базового маршрута. MyDTT запоминает её позицию и рассчитывает расход по реальному пути через сеть путевых узлов.</p>
         <ul class="checklist">
           <li>Если топлива <strong>больше, чем на два рассчитанных круга</strong>, остановка <code>(F)</code> временно исключается из маршрута.</li>
           <li>Когда запас падает, заправка возвращается на запомненную позицию.</li>
@@ -128,9 +128,9 @@ Fuel (F) | Дорожная АЗС | guid=…</pre></div>
       </section>
 
       <section>
-        <h2>Существующий интерфейс расписаний</h2><p>Диспетчер ресурсов дополняет прежнюю систему групп и динамических расписаний. Короткая демонстрация основного интерфейса:</p><img class="media" src="media/screenshots/DTT_Main.gif" alt="Анимация основного интерфейса DynamicTimeTable" loading="lazy">
+        <h2>Существующий интерфейс расписаний</h2><p>Диспетчер ресурсов дополняет прежнюю систему групп и динамических расписаний. Короткая демонстрация основного интерфейса:</p><img class="media" src="media/screenshots/DTT_Main.gif" alt="Анимация основного интерфейса MyDTT" loading="lazy">
       </section>
-      <footer>DynamicTimeTable · руководство для ветки <code>tags</code> · работает локально без подключения к интернету.</footer>
+      <footer>MyDTT 1.0.0 · персональная сборка · работает локально без подключения к интернету.</footer>
     </main>
   </div>
 </body>

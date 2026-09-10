@@ -1,9 +1,9 @@
 {
     "FileVersion": 3,
     "Version": 1,
-    "VersionName": "0.14.0-beta.1",
-    "FriendlyName": "DynamicTimeTable",
-    "Description": "Dual singleplayer and multiplayer dynamic train and truck routing.",
+    "VersionName": "1.0.0",
+    "FriendlyName": "MyDTT",
+    "Description": "Personal DynamicTimeTable fork with demand-based train and truck routing.",
     "Category": "Modding",
     "CreatedBy": "Zuzzla",
     "CreatedByURL": "",
@@ -29,7 +29,7 @@
             "LoadingPhase": "Default"
         }
     ],
-    "SemVersion": "1.3.1",
+    "SemVersion": "1.0.0",
     "RequiredOnRemote": false,
     "GameVersion": ">=491125"
 }
