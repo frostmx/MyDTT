@@ -10,7 +10,12 @@
 #include "Buildables/FGBuildableRailroadStation.h"
 #include "WheeledVehicles/FGVehicleSubsystem.h"
 #include "WheeledVehicles/FGDockingStationIdentifier.h"
+#include "WheeledVehicles/FGWheeledVehicle.h"
 #include "WheeledVehicles/FGWheeledVehicleIdentifier.h"
+#include "Buildables/FGBuildableDockingStation.h"
+#include "FGInventoryComponent.h"
+#include "FGBlueprintFunctionLibrary.h"
+#include "Resources/FGItemDescriptor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "TimerManager.h"
@@ -40,6 +45,27 @@ namespace
         if (Text.IsEmpty()) return false;
         for (const TCHAR Ch : Text) if (Ch < TEXT('0') || Ch > TEXT('9')) return false;
         return true;
+    }
+
+    TArray<FString> DTSExtractParenthesizedTags(const FString& Text)
+    {
+        TArray<FString> Tags;
+        int32 SearchFrom = 0;
+        while (SearchFrom < Text.Len())
+        {
+            const int32 Open = Text.Find(TEXT("("), ESearchCase::CaseSensitive,
+                ESearchDir::FromStart, SearchFrom);
+            if (Open == INDEX_NONE) break;
+            const int32 Close = Text.Find(TEXT(")"), ESearchCase::CaseSensitive,
+                ESearchDir::FromStart, Open + 1);
+            if (Close == INDEX_NONE) break;
+            if (!Text.Mid(Open + 1, Close - Open - 1).TrimStartAndEnd().IsEmpty())
+            {
+                Tags.Add(Text.Mid(Open, Close - Open + 1));
+            }
+            SearchFrom = Close + 1;
+        }
+        return Tags;
     }
 
     /**
@@ -95,7 +121,21 @@ bool UDynamicTimeTableSubsystem::ParseStationTag(const FString& FullName, FStrin
 
     if (Inner.IsEmpty()) return false;
     OutGroupName = Inner;
-    OutBaseName = (FullName.Left(Open) + FullName.Mid(Close + 1)).TrimStartAndEnd();
+
+    // Tags inherited from a group are written immediately after its [group] marker. Remove only
+    // that canonical suffix from the base; identical station-owned tags before [group] survive.
+    FString After = FullName.Mid(Close + 1).TrimStartAndEnd();
+    for (const FString& InheritedTag : DTSExtractParenthesizedTags(OutGroupName))
+    {
+        if (!After.StartsWith(InheritedTag, ESearchCase::IgnoreCase)) break;
+        After = After.Mid(InheritedTag.Len()).TrimStartAndEnd();
+    }
+    OutBaseName = FullName.Left(Open).TrimStartAndEnd();
+    if (!After.IsEmpty())
+    {
+        OutBaseName = OutBaseName.IsEmpty() ? After
+            : FString::Printf(TEXT("%s %s"), *OutBaseName, *After);
+    }
     return true;
 }
 
@@ -123,7 +163,97 @@ FString UDynamicTimeTableSubsystem::MakeTaggedName(const FString& BaseName, cons
     const int32 Slots = FMath::Max(1, TargetSlots);
     const FString Tag = Slots > 1 ? FString::Printf(TEXT("[%s,%d]"), *Group, Slots)
                                   : FString::Printf(TEXT("[%s]"), *Group);
+    const FString InheritedTags = FString::Join(DTSExtractParenthesizedTags(Group), TEXT(" "));
+    FString Result = Base.IsEmpty() ? Tag : FString::Printf(TEXT("%s %s"), *Base, *Tag);
+    if (!InheritedTags.IsEmpty()) Result += FString::Printf(TEXT(" %s"), *InheritedTags);
+    return Result;
+}
+
+bool UDynamicTimeTableSubsystem::ParseDispatchTag(const FString& FullName, FString& OutBaseName, FString& OutResourceId, EDTTDispatchRole& OutRole, int32& OutThreshold)
+{
+    OutBaseName = FullName.TrimStartAndEnd();
+    OutResourceId.Reset();
+    OutRole = EDTTDispatchRole::None;
+    OutThreshold = 0;
+
+    // Walk parenthesized suffixes backwards. This keeps the independent (F) marker composable
+    // with dispatch names in either order: "Dock (Iron+) (F)" and "Dock (F) (Iron+)".
+    int32 SearchEnd = FullName.Len();
+    while (SearchEnd > 0)
+    {
+        int32 Close = INDEX_NONE;
+        if (!FullName.Left(SearchEnd).FindLastChar(TEXT(')'), Close)) break;
+        int32 Open = INDEX_NONE;
+        if (!FullName.Left(Close).FindLastChar(TEXT('('), Open)) break;
+
+        const FString Inner = FullName.Mid(Open + 1, Close - Open - 1).TrimStartAndEnd();
+        FString Resource;
+        EDTTDispatchRole Role = EDTTDispatchRole::None;
+        int32 Threshold = 0;
+        if (Inner.EndsWith(TEXT("+")))
+        {
+            Resource = Inner.LeftChop(1).TrimStartAndEnd();
+            if (!Resource.IsEmpty()) Role = EDTTDispatchRole::Producer;
+        }
+        else
+        {
+            // The threshold is whatever follows the last '-', and only if it is a plain
+            // non-negative number, so a resource named "Iron Ore" still works.
+            int32 Dash = INDEX_NONE;
+            if (Inner.FindLastChar(TEXT('-'), Dash))
+            {
+                const FString Tail = Inner.Mid(Dash + 1).TrimStartAndEnd();
+                Resource = Inner.Left(Dash).TrimStartAndEnd();
+                if (!Resource.IsEmpty() && DTSIsAllDigits(Tail))
+                {
+                    Role = EDTTDispatchRole::Requester;
+                    Threshold = FCString::Atoi(*Tail);
+                }
+            }
+        }
+
+        if (Role != EDTTDispatchRole::None)
+        {
+            OutBaseName = (FullName.Left(Open) + FullName.Mid(Close + 1)).TrimStartAndEnd();
+            OutResourceId = Resource;
+            OutRole = Role;
+            OutThreshold = Threshold;
+            return true;
+        }
+        SearchEnd = Open;
+    }
+    return false;
+}
+
+FString UDynamicTimeTableSubsystem::StripDispatchTag(const FString& FullName)
+{
+    FString Base, ResourceId; EDTTDispatchRole Role; int32 Threshold;
+    ParseDispatchTag(FullName, Base, ResourceId, Role, Threshold);
+    return Base;
+}
+
+FString UDynamicTimeTableSubsystem::MakeDispatchTaggedName(const FString& BaseName, const FString& ResourceId, EDTTDispatchRole Role, int32 Threshold)
+{
+    const FString Base = StripDispatchTag(BaseName);
+    // Reuses SanitizeGroupName: '(' / ')' / '-' would break this tag's own syntax the same way
+    // '[' / ']' / ',' would break the balancing tag's, so the same strip-to-space rule applies.
+    FString Resource = SanitizeGroupName(ResourceId).Replace(TEXT("("), TEXT(" ")).Replace(TEXT(")"), TEXT(" ")).Replace(TEXT("-"), TEXT(" ")).Replace(TEXT("+"), TEXT(" ")).TrimStartAndEnd();
+    if (Resource.IsEmpty() || Role == EDTTDispatchRole::None) return Base;
+
+    const FString Tag = Role == EDTTDispatchRole::Producer
+        ? FString::Printf(TEXT("(%s+)"), *Resource)
+        : FString::Printf(TEXT("(%s-%d)"), *Resource, FMath::Max(0, Threshold));
     return Base.IsEmpty() ? Tag : FString::Printf(TEXT("%s %s"), *Base, *Tag);
+}
+
+bool UDynamicTimeTableSubsystem::ParseFuelStopTag(const FString& FullName, FString& OutBaseName)
+{
+    OutBaseName = FullName.TrimStartAndEnd();
+    static const FString Tag = TEXT("(F)");
+    const int32 TagIndex = FullName.Find(Tag, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    if (TagIndex == INDEX_NONE) return false;
+    OutBaseName = (FullName.Left(TagIndex) + FullName.Mid(TagIndex + Tag.Len())).TrimStartAndEnd();
+    return true;
 }
 
 void UDynamicTimeTableSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -136,6 +266,12 @@ void UDynamicTimeTableSubsystem::Deinitialize()
 {
     ActiveBookings.Reset();
     TruckBookings.Reset();
+    DispatchStations.Reset();
+    DispatchFuelStopGuids.Reset();
+    RequesterClaims.Reset();
+    RequesterClaimedAtWorldSeconds.Reset();
+    ItemClassByNameCache.Reset();
+    DispatchTruckAnchors.Reset();
     InternalTimeTableChanges.Reset();
     InternalRouteChanges.Reset();
     PendingTimeTableReevaluations.Reset();
@@ -455,6 +591,75 @@ void UDynamicTimeTableSubsystem::GetAllDockingStationNames(TArray<FString>& Out)
 
 const TArray<FDTTStationGroup>& UDynamicTimeTableSubsystem::GetStationGroups() const { return StationGroups; }
 
+void UDynamicTimeTableSubsystem::GetDispatchStatusLines(TArray<FString>& OutLines) const
+{
+    OutLines.Reset();
+    OutLines.Add(FString::Printf(
+        TEXT("dTT dispatch: stations=%d fuel-stops=%d active-claims=%d"),
+        DispatchStations.Num(), DispatchFuelStopGuids.Num(), RequesterClaims.Num()));
+
+    TArray<FDTTDispatchStation> Stations = DispatchStations;
+    Stations.Sort([](const FDTTDispatchStation& A, const FDTTDispatchStation& B)
+    {
+        const int32 ResourceCompare = A.ResourceId.Compare(B.ResourceId, ESearchCase::IgnoreCase);
+        if (ResourceCompare != 0) return ResourceCompare < 0;
+        if (A.Role != B.Role) return static_cast<uint8>(A.Role) < static_cast<uint8>(B.Role);
+        return A.DisplayName < B.DisplayName;
+    });
+
+    for (const FDTTDispatchStation& Station : Stations)
+    {
+        const AFGDockingStationIdentifier* Identifier = Station.DockingStationIdentifier.Get();
+        const AFGBuildableDockingStation* Dock = IsValid(Identifier) ? Identifier->GetStation() : nullptr;
+        const TCHAR* ActualMode = !IsValid(Dock) ? TEXT("unavailable")
+            : (Dock->GetIsInLoadMode() ? TEXT("LOAD") : TEXT("UNLOAD"));
+        const bool bModeMatches = DoesDispatchStationMatchMode(Station);
+        const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassByName(Station.ResourceId);
+        const int32 StockStacks = ItemClass
+            ? ReadDockStockInStacks(Station.DockingStationIdentifier.Get(), ItemClass) : INDEX_NONE;
+        const FString BaseName = StripDispatchTag(Station.DisplayName);
+
+        if (Station.Role == EDTTDispatchRole::Producer)
+        {
+            OutLines.Add(FString::Printf(
+                TEXT("%s | Producer | %s | mode=%s active=%s | stock=%s"),
+                *Station.ResourceId, *BaseName, ActualMode, bModeMatches ? TEXT("yes") : TEXT("no"),
+                StockStacks >= 0 ? *FString::Printf(TEXT("%d stacks"), StockStacks) : TEXT("unknown")));
+            continue;
+        }
+
+        FString Claim = TEXT("free");
+        if (const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Owner =
+            RequesterClaims.Find(Station.DockingPathNodeGuid))
+        {
+            Claim = Owner->IsValid() ? DTSVehicleName(Owner->Get()) : TEXT("<invalid vehicle>");
+        }
+        const bool bOpen = bModeMatches && StockStacks >= 0 && StockStacks < Station.Threshold;
+        OutLines.Add(FString::Printf(
+            TEXT("%s | Requester | %s | mode=%s active=%s | stock=%s/%d open=%s | claim=%s"),
+            *Station.ResourceId, *BaseName, ActualMode, bModeMatches ? TEXT("yes") : TEXT("no"),
+            StockStacks >= 0 ? *FString::FromInt(StockStacks) : TEXT("unknown"), Station.Threshold,
+            bOpen ? TEXT("yes") : TEXT("no"), *Claim));
+    }
+
+    TArray<FGuid> FuelStops = DispatchFuelStopGuids.Array();
+    FuelStops.Sort([](const FGuid& A, const FGuid& B){ return A.ToString() < B.ToString(); });
+    for (const FGuid& FuelGuid : FuelStops)
+    {
+        const AFGDockingStationIdentifier* FuelDock = FindDockByPathNode(FuelGuid);
+        const FString Name = IsValid(FuelDock)
+            ? FuelDock->GetStationName().ToString() : TEXT("<missing dock>");
+        OutLines.Add(FString::Printf(TEXT("Fuel (F) | %s | guid=%s"),
+            *Name, *FuelGuid.ToString()));
+    }
+
+    if (DispatchStations.Num() == 0 && DispatchFuelStopGuids.Num() == 0)
+    {
+        OutLines.Add(TEXT("No dispatch tags. Use (Resource+) on a LOAD producer, "
+            "(Resource-N) on an UNLOAD requester, and optional (F) on a dedicated fuel stop."));
+    }
+}
+
 void UDynamicTimeTableSubsystem::GetGroupRuntimeLoad(FGuid GroupId, TArray<FDTTStationRuntimeLoad>& Out) const
 {
     Out.Reset();
@@ -524,9 +729,17 @@ void UDynamicTimeTableSubsystem::RebuildGroupsFromNames()
         for (AFGTrainStationIdentifier* Identifier : Identifiers)
         {
             if (!IsValid(Identifier)) continue;
-            const FString FullName = Identifier->GetStationName().ToString();
+            FString FullName = Identifier->GetStationName().ToString();
             FString Base, GroupName; int32 Slots = 1;
             if (!ParseStationTag(FullName, Base, GroupName, Slots)) continue;
+            const FString CanonicalName = MakeTaggedName(FullName, GroupName, Slots);
+            if (CanonicalName != FullName && RenameStationGuarded(Identifier, CanonicalName))
+            {
+                FullName = CanonicalName;
+                UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+                    TEXT("GROUP_TAGS_INHERITED Kind=Train Group='%s' Station='%s'"),
+                    *GroupName, *FullName);
+            }
             FDTTStationEntry Entry;
             Entry.DisplayName = FullName;
             Entry.TargetSlots = Slots;
@@ -535,20 +748,92 @@ void UDynamicTimeTableSubsystem::RebuildGroupsFromNames()
         }
     }
 
+    TArray<FDTTDispatchStation> RebuiltDispatch;
+    TSet<FGuid> RebuiltFuelStops;
     if (AFGVehicleSubsystem* Vehicles = AFGVehicleSubsystem::Get(GetWorld()))
     {
         for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
         {
             if (!IsValid(Identifier)) continue;
-            const FString FullName = Identifier->GetStationName().ToString();
+            FString FullName = Identifier->GetStationName().ToString();
+
             FString Base, GroupName; int32 Slots = 1;
-            if (!ParseStationTag(FullName, Base, GroupName, Slots)) continue;
-            FDTTStationEntry Entry;
-            Entry.DisplayName = FullName;
-            Entry.TargetSlots = Slots;
-            Entry.DockingStationIdentifier = Identifier;
-            Entry.DockingPathNodeGuid = Identifier->GetPathNodeGUID();
-            Bucket(EDTTGroupKind::Truck, GroupName).Stations.Add(Entry);
+            const bool bHasGroup = ParseStationTag(FullName, Base, GroupName, Slots);
+            if (bHasGroup)
+            {
+                const FString CanonicalName = MakeTaggedName(FullName, GroupName, Slots);
+                if (CanonicalName != FullName && RenameDockGuarded(Identifier, CanonicalName))
+                {
+                    FullName = CanonicalName;
+                    UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+                        TEXT("GROUP_TAGS_INHERITED Kind=Truck Group='%s' Station='%s'"),
+                        *GroupName, *FullName);
+                }
+            }
+
+            FString FuelBase;
+            if (ParseFuelStopTag(FullName, FuelBase))
+            {
+                RebuiltFuelStops.Add(Identifier->GetPathNodeGUID());
+                UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+                    TEXT("DISPATCH_FUEL_TAG_FOUND Name=\"%s\" Guid=%s"),
+                    *FullName, *Identifier->GetPathNodeGUID().ToString());
+            }
+
+            if (bHasGroup)
+            {
+                FDTTStationEntry Entry;
+                Entry.DisplayName = FullName;
+                Entry.TargetSlots = Slots;
+                Entry.DockingStationIdentifier = Identifier;
+                Entry.DockingPathNodeGuid = Identifier->GetPathNodeGUID();
+                Bucket(EDTTGroupKind::Truck, GroupName).Stations.Add(Entry);
+            }
+
+            // Independent tag, different bracket family - a dock can carry both, either, or neither.
+            FString DispatchBase, ResourceId; EDTTDispatchRole Role; int32 Threshold;
+            if (ParseDispatchTag(FullName, DispatchBase, ResourceId, Role, Threshold) && Role != EDTTDispatchRole::None)
+            {
+                FDTTDispatchStation Dispatch;
+                Dispatch.DisplayName = FullName;
+                Dispatch.ResourceId = ResourceId;
+                Dispatch.Role = Role;
+                Dispatch.Threshold = Threshold;
+                Dispatch.DockingStationIdentifier = Identifier;
+                Dispatch.DockingPathNodeGuid = Identifier->GetPathNodeGUID();
+                RebuiltDispatch.Add(Dispatch);
+
+                const bool bHasStation = IsValid(Identifier->GetStation());
+                const bool bIsLoadMode = bHasStation && Identifier->GetStation()->GetIsInLoadMode();
+                const bool bModeMatches = DoesDispatchStationMatchMode(Dispatch);
+                UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+                    TEXT("DISPATCH_TAG_FOUND Name=\"%s\" Resource=\"%s\" Role=%s Threshold=%d GetIsInLoadMode=%s ModeMatches=%s"),
+                    *FullName, *ResourceId, Role == EDTTDispatchRole::Producer ? TEXT("Producer") : TEXT("Requester"),
+                    Threshold, bIsLoadMode ? TEXT("true") : TEXT("false"), bModeMatches ? TEXT("true") : TEXT("false"));
+                if (!bModeMatches)
+                {
+                    UE_LOG(LogDynamicTimeTableSubsystem, Warning,
+                        TEXT("DISPATCH_MODE_MISMATCH Name=\"%s\" TaggedRole=%s ActualMode=%s Action=ignored"),
+                        *FullName, Role == EDTTDispatchRole::Producer ? TEXT("Producer") : TEXT("Requester"),
+                        !bHasStation ? TEXT("Unavailable") : (bIsLoadMode ? TEXT("LOAD") : TEXT("UNLOAD")));
+                }
+
+                // Keep a detailed rebuild-time probe so a server operator can compare the value
+                // used by dispatch with the station's visible storage.
+                if (const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassByName(ResourceId))
+                {
+                    const int32 Stock = ReadDockStockInStacks(Identifier, ItemClass);
+                    UE_LOG(LogDynamicTimeTableSubsystem, VeryVerbose,
+                        TEXT("DISPATCH_STOCK_PROBE Name=\"%s\" Resource=\"%s\" StockStacks=%d Threshold=%d"),
+                        *FullName, *ResourceId, Stock, Threshold);
+                }
+                else
+                {
+                    UE_LOG(LogDynamicTimeTableSubsystem, Warning,
+                        TEXT("DISPATCH_STOCK_PROBE Name=\"%s\" Resource=\"%s\" could not resolve an item class for this name"),
+                        *FullName, *ResourceId);
+                }
+            }
         }
     }
 
@@ -585,6 +870,26 @@ void UDynamicTimeTableSubsystem::RebuildGroupsFromNames()
     StationGroups = MoveTemp(Rebuilt);
     LastStationFingerprint = ComputeStationFingerprint();
     bStationFingerprintValid = true;
+
+    // Dispatch config can change independently of the balancing groups above (e.g. only a
+    // "(Iron-10)" tag was edited), so this does not wait on bChanged - RebuildGroupsFromNames
+    // itself only ever runs on a name-fingerprint change, that is throttling enough.
+    DispatchStations = MoveTemp(RebuiltDispatch);
+    DispatchFuelStopGuids = MoveTemp(RebuiltFuelStops);
+    for (auto It = DispatchTruckAnchors.CreateIterator(); It; ++It)
+    {
+        if (!It.Key().IsValid() ||
+            (It.Value().FuelGuid.IsValid() && !DispatchFuelStopGuids.Contains(It.Value().FuelGuid)))
+        {
+            It.RemoveCurrent();
+        }
+    }
+    for (auto It = RequesterClaims.CreateIterator(); It; ++It)
+    {
+        const bool bStillRequester = DispatchStations.ContainsByPredicate([&](const FDTTDispatchStation& S)
+            { return S.Role == EDTTDispatchRole::Requester && S.DockingPathNodeGuid == It.Key(); });
+        if (!bStillRequester) { RequesterClaimedAtWorldSeconds.Remove(It.Key()); It.RemoveCurrent(); }
+    }
 
     if (!bChanged) return;
 
@@ -961,6 +1266,468 @@ bool UDynamicTimeTableSubsystem::ReplaceCurrentWaypoint(AFGWheeledVehicleIdentif
     return Vehicle->GetVehicleRoute().IsValidIndex(WaypointIndex) && Vehicle->GetVehicleRoute()[WaypointIndex] == NewPathNodeGuid;
 }
 
+bool UDynamicTimeTableSubsystem::DoesDispatchStationMatchMode(const FDTTDispatchStation& Station) const
+{
+    const AFGDockingStationIdentifier* Identifier = Station.DockingStationIdentifier.Get();
+    const AFGBuildableDockingStation* Dock = IsValid(Identifier) ? Identifier->GetStation() : nullptr;
+    if (!IsValid(Dock)) return false;
+    return Station.Role == EDTTDispatchRole::Producer
+        ? Dock->GetIsInLoadMode()
+        : Station.Role == EDTTDispatchRole::Requester && !Dock->GetIsInLoadMode();
+}
+
+bool UDynamicTimeTableSubsystem::IsDispatchTruck(const FString& ResourceId) const
+{
+    const FString Resource = ResourceId.TrimStartAndEnd();
+    return !Resource.IsEmpty() && DispatchStations.ContainsByPredicate([&](const FDTTDispatchStation& Station)
+    {
+        return Station.ResourceId.Equals(Resource, ESearchCase::IgnoreCase) && DoesDispatchStationMatchMode(Station);
+    });
+}
+
+bool UDynamicTimeTableSubsystem::UpdateRememberedAnchors(
+    AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId, const TArray<FGuid>& Route)
+{
+    if (!IsValid(Vehicle) || Route.Num() < 2 || !Route[0].IsValid()) return false;
+
+    const bool bProducerMatches = DispatchStations.ContainsByPredicate([&](const FDTTDispatchStation& Station)
+    {
+        return Station.Role == EDTTDispatchRole::Producer &&
+            Station.ResourceId.Equals(ResourceId, ESearchCase::IgnoreCase) &&
+            Station.DockingPathNodeGuid == Route[0] && DoesDispatchStationMatchMode(Station);
+    });
+    if (!bProducerMatches)
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+            TEXT("DISPATCH_ANCHORS_PENDING Truck='%s' Resource='%s' Reason=route-zero-is-not-load-producer"),
+            *DTSVehicleName(Vehicle), *ResourceId);
+        return false;
+    }
+
+    const FDTTDispatchTruckAnchors* Existing = DispatchTruckAnchors.Find(Vehicle);
+    if (Existing && Existing->ProducerGuid != Route[0])
+    {
+        // Route[0] changing is a manual base-route edit. The old fuel anchor belongs to that old
+        // base route and must not leak into the new one.
+        DispatchTruckAnchors.Remove(Vehicle);
+        Existing = nullptr;
+    }
+
+    FGuid FuelGuid;
+    int32 FuelInsertIndex = INDEX_NONE;
+    int32 FuelTagsInRoute = 0;
+    for (int32 Index = 1; Index < Route.Num(); ++Index)
+    {
+        const FGuid& Candidate = Route[Index];
+        if (!Candidate.IsValid() || !DispatchFuelStopGuids.Contains(Candidate)) continue;
+        ++FuelTagsInRoute;
+        if (!FuelGuid.IsValid())
+        {
+            FuelGuid = Candidate;
+            FuelInsertIndex = Index;
+        }
+    }
+
+    if (FuelTagsInRoute > 1)
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Warning,
+            TEXT("DISPATCH_MULTIPLE_FUEL_TAGS Truck='%s' Resource='%s' Count=%d Action=use-first-in-route"),
+            *DTSVehicleName(Vehicle), *ResourceId, FuelTagsInRoute);
+    }
+
+    // A skipped lap removes (F) from the live route. Keep its GUID and position until the tag is
+    // removed from the station name or Route[0] is manually changed.
+    if (!FuelGuid.IsValid() && Existing && Existing->FuelGuid.IsValid() &&
+        DispatchFuelStopGuids.Contains(Existing->FuelGuid))
+    {
+        return true;
+    }
+
+    // On load after a lap that skipped (F), infer the anchor only when it is unambiguous on this
+    // path network. If several tagged fuel stops share the network, wait for a route that names
+    // one explicitly rather than choosing a potentially wrong stop.
+    if (!FuelGuid.IsValid() && DispatchFuelStopGuids.Num() > 0)
+    {
+        AFGVehicleSubsystem* VehicleSubsystem = AFGVehicleSubsystem::Get(GetWorld());
+        UFGVehiclePathNetwork* ProducerNetwork = IsValid(VehicleSubsystem)
+            ? VehicleSubsystem->FindNetworkByPathNodeGuid(Route[0]) : nullptr;
+        TArray<FGuid> NetworkFuelStops;
+        if (IsValid(ProducerNetwork))
+        {
+            for (const FGuid& Candidate : DispatchFuelStopGuids)
+            {
+                if (Candidate != Route[0] &&
+                    VehicleSubsystem->FindNetworkByPathNodeGuid(Candidate) == ProducerNetwork)
+                {
+                    NetworkFuelStops.Add(Candidate);
+                }
+            }
+        }
+
+        if (NetworkFuelStops.Num() == 1)
+        {
+            FuelGuid = NetworkFuelStops[0];
+            FuelInsertIndex = Route.Num();
+        }
+        else if (NetworkFuelStops.Num() > 1)
+        {
+            UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+                TEXT("DISPATCH_ANCHORS_PENDING Truck='%s' Resource='%s' Reason=fuel-tag-ambiguous Candidates=%d"),
+                *DTSVehicleName(Vehicle), *ResourceId, NetworkFuelStops.Num());
+            return false;
+        }
+    }
+
+    FDTTDispatchTruckAnchors Anchors;
+    Anchors.ProducerGuid = Route[0];
+    Anchors.FuelGuid = FuelGuid;
+    Anchors.FuelInsertIndex = FuelGuid.IsValid() ? FuelInsertIndex : INDEX_NONE;
+    DispatchTruckAnchors.Add(Vehicle, Anchors);
+    UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+        TEXT("DISPATCH_ANCHORS_REMEMBERED Truck='%s' Resource='%s' Producer=%s Fuel=%s FuelInsertIndex=%d DedicatedFuel=%s"),
+        *DTSVehicleName(Vehicle), *ResourceId, *Anchors.ProducerGuid.ToString(),
+        *Anchors.FuelGuid.ToString(), Anchors.FuelInsertIndex,
+        Anchors.FuelGuid.IsValid() ? TEXT("true") : TEXT("false"));
+    return true;
+}
+
+bool UDynamicTimeTableSubsystem::ReplaceRoute(
+    AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& NewRoute)
+{
+    if (!IsValid(Vehicle) || NewRoute.Num() < 2) return false;
+    for (const FGuid& Node : NewRoute) if (!Node.IsValid()) return false;
+    if (Vehicle->GetVehicleRoute() == NewRoute) return true;
+
+    InternalRouteChanges.Add(Vehicle);
+    Vehicle->SetVehicleRoute(NewRoute);
+    InternalRouteChanges.Remove(Vehicle);
+    return Vehicle->GetVehicleRoute() == NewRoute;
+}
+
+float UDynamicTimeTableSubsystem::SumSegmentFuelConsumption(
+    AFGVehicleSubsystem* VehicleSubsystem,
+    const FGuid& FromNodeGuid,
+    const FGuid& ToNodeGuid,
+    TSubclassOf<AFGWheeledVehicle> VehicleType) const
+{
+    if (!IsValid(VehicleSubsystem) || !FromNodeGuid.IsValid() || !ToNodeGuid.IsValid() || !VehicleType)
+    {
+        return -1.0f;
+    }
+
+    UFGVehiclePathNetwork* Network = VehicleSubsystem->FindNetworkByPathNodeGuid(FromNodeGuid);
+    if (!IsValid(Network) || Network != VehicleSubsystem->FindNetworkByPathNodeGuid(ToNodeGuid))
+    {
+        return -1.0f;
+    }
+
+    const int32 FromNodeIndex = Network->FindPathNodeIndexByGuid(FromNodeGuid);
+    const int32 ToNodeIndex = Network->FindPathNodeIndexByGuid(ToNodeGuid);
+    if (FromNodeIndex == INDEX_NONE || ToNodeIndex == INDEX_NONE) return -1.0f;
+
+    const int32 SegmentIndex = Network->FindPathIndexBetweenPathNodes(FromNodeIndex, ToNodeIndex);
+    if (SegmentIndex == INDEX_NONE) return -1.0f;
+
+    const FVehiclePathNetworkSegmentData Segment = Network->GetPathSegmentAtIndex(SegmentIndex);
+    const float Consumption = Network->GetVehicleFuelConsumptionForSegment(Segment, VehicleType);
+    return FMath::IsFinite(Consumption) && Consumption >= 0.0f ? Consumption : -1.0f;
+}
+
+float UDynamicTimeTableSubsystem::EstimateLoopFuelConsumptionMW(
+    AFGWheeledVehicle* Vehicle, const TArray<FGuid>& Loop) const
+{
+    // A route containing only Producer cannot omit Fuel: the resulting one-stop vehicle route
+    // would be invalid, and there is no delivery leg whose fuel requirement could be estimated.
+    if (!IsValid(Vehicle) || Loop.Num() < 2) return -1.0f;
+
+    const UFGVehiclePathPreset* Preset = Vehicle->GetVehiclePathPreset();
+    AFGVehicleSubsystem* VehicleSubsystem = AFGVehicleSubsystem::Get(Vehicle->GetWorld());
+    if (!Preset || !IsValid(VehicleSubsystem)) return -1.0f;
+
+    float Total = 0.0f;
+    for (int32 LegIndex = 0; LegIndex < Loop.Num(); ++LegIndex)
+    {
+        const FGuid& From = Loop[LegIndex];
+        const FGuid& To = Loop[(LegIndex + 1) % Loop.Num()];
+        if (!From.IsValid() || !To.IsValid() || From == To) return -1.0f;
+
+        UFGVehiclePathNetwork* Network = VehicleSubsystem->FindNetworkByPathNodeGuid(From);
+        if (!IsValid(Network) || Network != VehicleSubsystem->FindNetworkByPathNodeGuid(To)) return -1.0f;
+
+        TArray<FGuid> PathNodes;
+        if (!Network->FindVehiclePath(From, To, Preset, PathNodes) || PathNodes.Num() == 0) return -1.0f;
+
+        // FindVehiclePath excludes the source docking GUID and includes the destination. Prepend
+        // From explicitly; otherwise the first physical path segment of every leg is omitted.
+        FGuid Previous = From;
+        for (const FGuid& Node : PathNodes)
+        {
+            if (!Node.IsValid()) return -1.0f;
+            if (Node == Previous) continue;
+            const float SegmentConsumption = SumSegmentFuelConsumption(
+                VehicleSubsystem, Previous, Node, Vehicle->GetClass());
+            if (SegmentConsumption < 0.0f) return -1.0f;
+            Total += SegmentConsumption;
+            Previous = Node;
+        }
+        if (Previous != To) return -1.0f;
+    }
+
+    return FMath::IsFinite(Total) && Total > 0.0f ? Total : -1.0f;
+}
+
+bool UDynamicTimeTableSubsystem::ShouldSkipFuelStop(
+    AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& LoopWithoutFuel) const
+{
+    if (!IsValid(Vehicle) || LoopWithoutFuel.Num() < 2) return false;
+
+    AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
+    const TSubclassOf<UFGItemDescriptor> FuelClass = Vehicle->GetFuelTypeDescriptor();
+    if (!IsValid(WheeledVehicle) || !FuelClass) return false;
+
+    UFGInventoryComponent* FuelInventory = WheeledVehicle->GetFuelInventory();
+    const float EnergyPerItem = UFGItemDescriptor::GetEnergyValue(FuelClass);
+    const float PerLapMW = EstimateLoopFuelConsumptionMW(WheeledVehicle, LoopWithoutFuel);
+    if (!IsValid(FuelInventory) || PerLapMW <= 0.0f || !FMath::IsFinite(EnergyPerItem) || EnergyPerItem <= 0.0f)
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+            TEXT("DISPATCH_FUEL_KEEP Truck='%s' Reason=estimate-unavailable LoopStops=%d RouteCost=%.3f EnergyPerItem=%.3f"),
+            *DTSVehicleName(Vehicle), LoopWithoutFuel.Num(), PerLapMW, EnergyPerItem);
+        return false;
+    }
+
+    const float PerLapItems = PerLapMW / EnergyPerItem;
+    const float RequiredForTwoLaps = 2.0f * PerLapItems;
+    const int32 CurrentFuelItems = FuelInventory->GetNumItems(FuelClass);
+    const bool bSkip = static_cast<float>(CurrentFuelItems) > RequiredForTwoLaps;
+    UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+        TEXT("DISPATCH_FUEL_EVALUATED Truck='%s' LoopStops=%d RouteCost=%.3f EnergyPerItem=%.3f PerLapItems=%.3f CurrentFuelItems=%d RequiredForTwoLaps=%.3f Skip=%s"),
+        *DTSVehicleName(Vehicle), LoopWithoutFuel.Num(), PerLapMW, EnergyPerItem, PerLapItems,
+        CurrentFuelItems, RequiredForTwoLaps, bSkip ? TEXT("true") : TEXT("false"));
+    return bSkip;
+}
+
+TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
+    const FString& ResourceId, AFGWheeledVehicleIdentifier* Vehicle)
+{
+    TArray<FGuid> Result;
+    if (!IsValid(Vehicle)) return Result;
+
+    const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassByName(ResourceId);
+    if (!ItemClass)
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Warning,
+            TEXT("DISPATCH_REQUESTER_SKIPPED Truck='%s' Resource='%s' Reason=item-class-not-found"),
+            *DTSVehicleName(Vehicle), *ResourceId);
+        return Result;
+    }
+
+    struct FDispatchCandidate
+    {
+        const FDTTDispatchStation* Station = nullptr;
+        int32 StockStacks = 0;
+        double FillRatio = 0.0;
+    };
+    TArray<FDispatchCandidate> Candidates;
+    for (const FDTTDispatchStation& Station : DispatchStations)
+    {
+        if (Station.Role != EDTTDispatchRole::Requester ||
+            !Station.ResourceId.Equals(ResourceId, ESearchCase::IgnoreCase) ||
+            !DoesDispatchStationMatchMode(Station) ||
+            !IsValid(Station.DockingStationIdentifier.Get()) ||
+            !IsValid(Station.DockingStationIdentifier->GetStation()) ||
+            !Station.DockingPathNodeGuid.IsValid())
+        {
+            continue;
+        }
+
+        if (const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Claim = RequesterClaims.Find(Station.DockingPathNodeGuid))
+        {
+            if (Claim->IsValid() && Claim->Get() != Vehicle) continue;
+        }
+
+        const int32 StockStacks = ReadDockStockInStacks(Station.DockingStationIdentifier.Get(), ItemClass);
+        UE_LOG(LogDynamicTimeTableSubsystem, VeryVerbose,
+            TEXT("DISPATCH_CANDIDATE Truck='%s' Resource='%s' Station='%s' StockStacks=%d Threshold=%d Open=%s"),
+            *DTSVehicleName(Vehicle), *ResourceId, *Station.DisplayName, StockStacks, Station.Threshold,
+            StockStacks < Station.Threshold ? TEXT("true") : TEXT("false"));
+        if (StockStacks < Station.Threshold)
+        {
+            FDispatchCandidate Candidate;
+            Candidate.Station = &Station;
+            Candidate.StockStacks = StockStacks;
+            Candidate.FillRatio = Station.Threshold > 0
+                ? static_cast<double>(StockStacks) / static_cast<double>(Station.Threshold)
+                : 1.0;
+            Candidates.Add(Candidate);
+        }
+    }
+
+    if (Candidates.Num() == 0) return Result;
+    // Lowest stock/threshold ratio is the most starved requester. Name and GUID make ties stable
+    // across subsystem rebuilds and server restarts.
+    Candidates.Sort([](const FDispatchCandidate& A, const FDispatchCandidate& B)
+    {
+        if (!FMath::IsNearlyEqual(A.FillRatio, B.FillRatio)) return A.FillRatio < B.FillRatio;
+        if (A.Station->DisplayName != B.Station->DisplayName)
+            return A.Station->DisplayName < B.Station->DisplayName;
+        return A.Station->DockingPathNodeGuid.ToString() < B.Station->DockingPathNodeGuid.ToString();
+    });
+
+    const UWorld* World = GetWorld();
+    const double ClaimedAt = IsValid(World) ? World->GetTimeSeconds() : 0.0;
+    Result.Reserve(Candidates.Num());
+    for (int32 Priority = 0; Priority < Candidates.Num(); ++Priority)
+    {
+        const FDispatchCandidate& Candidate = Candidates[Priority];
+        const FDTTDispatchStation* Selected = Candidate.Station;
+        RequesterClaims.Add(Selected->DockingPathNodeGuid, Vehicle);
+        RequesterClaimedAtWorldSeconds.Add(Selected->DockingPathNodeGuid, ClaimedAt);
+        Result.Add(Selected->DockingPathNodeGuid);
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+            TEXT("DISPATCH_CLAIMED Truck='%s' Resource='%s' Requester='%s' Guid=%s Priority=%d StockStacks=%d Threshold=%d FillRatio=%.6f"),
+            *DTSVehicleName(Vehicle), *ResourceId, *Selected->DisplayName,
+            *Selected->DockingPathNodeGuid.ToString(), Priority, Candidate.StockStacks,
+            Selected->Threshold, Candidate.FillRatio);
+    }
+    return Result;
+}
+
+void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
+    AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId, const TCHAR* Trigger)
+{
+    if (!IsValid(Vehicle) || !Vehicle->IsAutopilotEnabled()) return;
+    const TArray<FGuid> Route = Vehicle->GetVehicleRoute();
+    const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
+    if (Index != 0 || Route.Num() < 2 || !Route.IsValidIndex(Index)) return;
+    if (!UpdateRememberedAnchors(Vehicle, ResourceId, Route)) return;
+
+    const FDTTDispatchTruckAnchors* Anchors = DispatchTruckAnchors.Find(Vehicle);
+    if (!Anchors || !Anchors->ProducerGuid.IsValid()) return;
+
+    // Index zero starts a new lap. A docking transition normally released the previous claim;
+    // this also closes the gap if that transition was missed while the actor was not observable.
+    ReleaseRequesterClaimsForVehicle(Vehicle, TEXT("producer boundary"));
+    const TArray<FGuid> Requesters = SelectRequestersForResource(ResourceId, Vehicle);
+    TArray<FGuid> NewRoute;
+    NewRoute.Reserve(2 + Requesters.Num());
+    NewRoute.Add(Anchors->ProducerGuid);
+    NewRoute.Append(Requesters);
+
+    const bool bHasDedicatedFuel = Anchors->FuelGuid.IsValid();
+    bool bSkipFuel = false;
+    if (bHasDedicatedFuel)
+    {
+        const bool bFuelAlreadyPresent = NewRoute.Contains(Anchors->FuelGuid);
+        bSkipFuel = !bFuelAlreadyPresent && ShouldSkipFuelStop(Vehicle, NewRoute);
+        if (!bSkipFuel && !bFuelAlreadyPresent)
+        {
+            const int32 InsertIndex = FMath::Clamp(Anchors->FuelInsertIndex, 1, NewRoute.Num());
+            NewRoute.Insert(Anchors->FuelGuid, InsertIndex);
+        }
+    }
+    else if (Requesters.Num() == 0)
+    {
+        // Without a dedicated (F) anchor, [Producer] is not a valid useful route. Preserve the
+        // truck's last working route until demand appears instead of guessing another stop.
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+            TEXT("DISPATCH_ROUTE_KEPT Truck='%s' Resource='%s' Reason=no-requester-and-no-fuel-anchor Trigger=%s"),
+            *DTSVehicleName(Vehicle), *ResourceId, Trigger);
+        return;
+    }
+
+    if (NewRoute == Route) return;
+    if (!ReplaceRoute(Vehicle, NewRoute))
+    {
+        // Selection claims before the write so two trucks cannot select in the same poll. Roll it
+        // back if the route mutation failed; otherwise the requester would be blocked for 10 min.
+        for (const FGuid& Requester : Requesters)
+        {
+            const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Owner = RequesterClaims.Find(Requester);
+            if (Owner && Owner->Get() == Vehicle)
+            {
+                RequesterClaims.Remove(Requester);
+                RequesterClaimedAtWorldSeconds.Remove(Requester);
+            }
+        }
+        UE_LOG(LogDynamicTimeTableSubsystem, Warning,
+            TEXT("DISPATCH_ROUTE_FAILED Truck='%s' Resource='%s' Trigger=%s"),
+            *DTSVehicleName(Vehicle), *ResourceId, Trigger);
+        return;
+    }
+
+    UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+        TEXT("DISPATCH_ROUTE_REPLACED Truck='%s' Resource='%s' Requesters=%d DedicatedFuel=%s FuelSkipped=%s FuelInsertIndex=%d Trigger=%s"),
+        *DTSVehicleName(Vehicle), *ResourceId, Requesters.Num(),
+        bHasDedicatedFuel ? TEXT("true") : TEXT("false"), bSkipFuel ? TEXT("true") : TEXT("false"),
+        Anchors->FuelInsertIndex, Trigger);
+}
+
+void UDynamicTimeTableSubsystem::ReleaseRequesterClaimIfDocked(AFGWheeledVehicleIdentifier* Vehicle)
+{
+    if (!IsValid(Vehicle)) return;
+    const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+    const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
+    if (!Route.IsValidIndex(Index)) return;
+
+    const FGuid DockGuid = Route[Index];
+    const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Owner = RequesterClaims.Find(DockGuid);
+    if (!Owner || Owner->Get() != Vehicle) return;
+
+    RequesterClaims.Remove(DockGuid);
+    RequesterClaimedAtWorldSeconds.Remove(DockGuid);
+    UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+        TEXT("DISPATCH_CLAIM_RELEASED Truck='%s' RequesterGuid=%s Reason=truck-docked"),
+        *DTSVehicleName(Vehicle), *DockGuid.ToString());
+}
+
+void UDynamicTimeTableSubsystem::ReleaseRequesterClaimsForVehicle(
+    AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason)
+{
+    if (!IsValid(Vehicle)) return;
+    for (auto It = RequesterClaims.CreateIterator(); It; ++It)
+    {
+        if (It.Value().Get() != Vehicle) continue;
+        const FGuid RequesterGuid = It.Key();
+        RequesterClaimedAtWorldSeconds.Remove(RequesterGuid);
+        It.RemoveCurrent();
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+            TEXT("DISPATCH_CLAIM_RELEASED Truck='%s' RequesterGuid=%s Reason=%s"),
+            *DTSVehicleName(Vehicle), *RequesterGuid.ToString(), Reason);
+    }
+}
+
+void UDynamicTimeTableSubsystem::PruneStaleRequesterClaims()
+{
+    const UWorld* World = GetWorld();
+    const double Now = IsValid(World) ? World->GetTimeSeconds() : 0.0;
+    for (auto It = RequesterClaims.CreateIterator(); It; ++It)
+    {
+        const double* ClaimedAt = RequesterClaimedAtWorldSeconds.Find(It.Key());
+        const bool bTimedOut = !ClaimedAt || Now - *ClaimedAt > RequesterClaimTimeoutSeconds;
+        const FDTTDispatchStation* Requester = DispatchStations.FindByPredicate([&](const FDTTDispatchStation& Station)
+        {
+            return Station.Role == EDTTDispatchRole::Requester && Station.DockingPathNodeGuid == It.Key();
+        });
+        const bool bRequesterActive = Requester && DoesDispatchStationMatchMode(*Requester);
+        if (It.Value().IsValid() && !bTimedOut && bRequesterActive) continue;
+
+        const FGuid RequesterGuid = It.Key();
+        const FString TruckName = It.Value().IsValid() ? DTSVehicleName(It.Value().Get()) : TEXT("<destroyed>");
+        RequesterClaimedAtWorldSeconds.Remove(RequesterGuid);
+        It.RemoveCurrent();
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+            TEXT("DISPATCH_CLAIM_PRUNED Truck='%s' RequesterGuid=%s Reason=%s"),
+            *TruckName, *RequesterGuid.ToString(), bTimedOut ? TEXT("timeout") :
+                (!bRequesterActive ? TEXT("requester-not-in-unload-mode") : TEXT("vehicle-invalid")));
+    }
+
+    for (auto It = RequesterClaimedAtWorldSeconds.CreateIterator(); It; ++It)
+        if (!RequesterClaims.Contains(It.Key())) It.RemoveCurrent();
+    for (auto It = DispatchTruckAnchors.CreateIterator(); It; ++It)
+        if (!It.Key().IsValid()) It.RemoveCurrent();
+}
+
 void UDynamicTimeTableSubsystem::ReleaseTruckBooking(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason)
 {
     if (!IsValid(Vehicle)) return;
@@ -1004,6 +1771,17 @@ void UDynamicTimeTableSubsystem::ProcessCurrentTruckTarget(AFGWheeledVehicleIden
     if (!IsValid(Vehicle) || !Vehicle->IsAutopilotEnabled()) return;
     if (!bPersistenceReady) InitializePersistence();
     RemoveInvalidTruckBookings();
+    PruneStaleRequesterClaims();
+
+    const FString ResourceId = Vehicle->GetVehicleName().ToString().TrimStartAndEnd();
+    if (IsDispatchTruck(ResourceId))
+    {
+        // Dispatch and load-balancing are independent modes. A resource-named truck must not
+        // also have one of its freshly built waypoints substituted by the balancing algorithm.
+        ReleaseTruckBooking(Vehicle, TEXT("resource dispatch"));
+        ProcessDispatchTruckTarget(Vehicle, ResourceId, Trigger);
+        return;
+    }
 
     const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
     const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
@@ -1074,6 +1852,7 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
     // Building or demolishing a station fires no hook at all, and the train half has no timer of
     // its own, so both kinds are checked here.
     RebuildGroupsIfStationsChanged(TEXT("poll"));
+    PruneStaleRequesterClaims();
 
     for (auto It = TruckPollStates.CreateIterator(); It; ++It)
         if (!It.Key().IsValid()) It.RemoveCurrent();
@@ -1083,6 +1862,8 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         if (!IsValid(Vehicle)) continue;
         if (!Vehicle->IsAutopilotEnabled())
         {
+            ReleaseRequesterClaimsForVehicle(Vehicle, TEXT("autopilot disabled"));
+            DispatchTruckAnchors.Remove(Vehicle);
             TruckPollStates.Remove(Vehicle);
             continue;
         }
@@ -1104,6 +1885,7 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         if (bDocking && !Previous->bDocking)
         {
             ReleaseTruckBooking(Vehicle, TEXT("truck docked"));
+            ReleaseRequesterClaimIfDocked(Vehicle);
         }
 
         // The autopilot moving on to the next waypoint is the moment to substitute.
@@ -1121,6 +1903,8 @@ void UDynamicTimeTableSubsystem::HandleVehicleRouteChanged(AFGWheeledVehicleIden
 {
     if (!IsServer() || !IsValid(Vehicle) || InternalRouteChanges.Contains(Vehicle)) return;
     ReleaseTruckBooking(Vehicle, TEXT("route saved"));
+    ReleaseRequesterClaimsForVehicle(Vehicle, TEXT("route saved"));
+    DispatchTruckAnchors.Remove(Vehicle);
     PendingRouteReevaluations.Add(Vehicle);
     SchedulePendingRouteReevaluation();
     UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("ROUTE_CHANGED Truck='%s' Waypoints=%d AutoPilot=%s BookingCleared=true Reevaluation=next-tick"),
@@ -1131,6 +1915,8 @@ void UDynamicTimeTableSubsystem::HandleAutopilotChanged(AFGWheeledVehicleIdentif
 {
     if (!IsServer() || !IsValid(Vehicle)) return;
     ReleaseTruckBooking(Vehicle, bEnabled ? TEXT("autopilot enabled") : TEXT("autopilot disabled"));
+    ReleaseRequesterClaimsForVehicle(Vehicle, bEnabled ? TEXT("autopilot enabled") : TEXT("autopilot disabled"));
+    DispatchTruckAnchors.Remove(Vehicle);
     if (!bEnabled) return;
     PendingRouteReevaluations.Add(Vehicle);
     SchedulePendingRouteReevaluation();
@@ -1155,4 +1941,36 @@ void UDynamicTimeTableSubsystem::ScheduleWorldStationsReady()
         WeakThis->RebuildGroupsFromNames();
         WeakThis->RecalculateBookingsFromVanilla();
     }), 15.0f, false);
+}
+
+TSubclassOf<UFGItemDescriptor> UDynamicTimeTableSubsystem::ResolveItemClassByName(const FString& Name) const
+{
+    const FString Key = Name.ToLower();
+    if (const auto* Found = ItemClassByNameCache.Find(Key)) return *Found;
+
+    // Populated once, not per lookup: GetAllDescriptorsSorted walks every item descriptor in the game.
+    if (ItemClassByNameCache.Num() == 0)
+    {
+        TArray<TSubclassOf<UFGItemDescriptor>> All;
+        UFGBlueprintFunctionLibrary::GetAllDescriptorsSorted(const_cast<UDynamicTimeTableSubsystem*>(this), All,
+            /*includeFluids*/ false, /*includeBuildings*/ false, /*onlyUnlocked*/ false);
+        for (const TSubclassOf<UFGItemDescriptor>& Class : All)
+        {
+            if (!Class) continue;
+            ItemClassByNameCache.Add(UFGItemDescriptor::GetItemName(Class).ToString().ToLower(), Class);
+        }
+    }
+
+    const auto* Found = ItemClassByNameCache.Find(Key);
+    return Found ? *Found : nullptr;
+}
+
+int32 UDynamicTimeTableSubsystem::ReadDockStockInStacks(AFGDockingStationIdentifier* Dock, TSubclassOf<UFGItemDescriptor> ItemClass) const
+{
+    if (!IsValid(Dock) || !ItemClass) return 0;
+    AFGBuildableDockingStation* Building = Dock->GetStation();
+    UFGInventoryComponent* Storage = IsValid(Building) ? Building->GetInventory() : nullptr;
+    if (!IsValid(Storage)) return 0;
+    const int32 StackSize = FMath::Max(1, UFGItemDescriptor::GetStackSize(ItemClass));
+    return Storage->GetNumItems(ItemClass) / StackSize;
 }

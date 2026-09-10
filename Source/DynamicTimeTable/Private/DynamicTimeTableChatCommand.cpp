@@ -18,7 +18,7 @@ ADynamicTimeTableChatCommand::ADynamicTimeTableChatCommand()
     Usage = NSLOCTEXT(
         "DynamicTimeTable",
         "ChatCommand.DTT.Usage",
-        "/dtt - Open DynamicTimeTable; /dtt groups - list the groups; /dtt recalc - rebuild active bookings");
+        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch - list resource dispatch; /dtt recalc - rebuild active bookings");
     Aliases.Add(TEXT("dynamictimetable"));
 }
 
@@ -52,8 +52,8 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::UNCOMPLETED;
     }
 
-    if (Arguments.Num() >= 2 &&
-        Arguments[1].Equals(TEXT("groups"), ESearchCase::IgnoreCase))
+    if (Arguments.Num() >= 1 &&
+        Arguments[0].Equals(TEXT("groups"), ESearchCase::IgnoreCase))
     {
         const TArray<FDTTStationGroup>& Groups = Subsystem->GetStationGroups();
         if (Groups.Num() == 0)
@@ -84,8 +84,20 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::COMPLETED;
     }
 
-    if (Arguments.Num() >= 2 &&
-        Arguments[1].Equals(TEXT("recalc"), ESearchCase::IgnoreCase))
+    if (Arguments.Num() >= 1 &&
+        Arguments[0].Equals(TEXT("dispatch"), ESearchCase::IgnoreCase))
+    {
+        TArray<FString> Lines;
+        Subsystem->GetDispatchStatusLines(Lines);
+        for (const FString& Line : Lines)
+        {
+            Sender->SendChatMessage(Line, FLinearColor(0.20f, 0.80f, 1.00f));
+        }
+        return EExecutionStatus::COMPLETED;
+    }
+
+    if (Arguments.Num() >= 1 &&
+        Arguments[0].Equals(TEXT("recalc"), ESearchCase::IgnoreCase))
     {
         Subsystem->RecalculateBookingsFromVanilla();
         Sender->SendChatMessage(
@@ -167,4 +179,3 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
     UE_LOG(LogDynamicTimeTableChatCommand, Verbose, TEXT("dTT: virtual window attached directly to viewport."));
     return EExecutionStatus::COMPLETED;
 }
-

@@ -60,6 +60,62 @@ struct FDTTStationGroup
     TArray<FDTTStationEntry> Stations;
 };
 
+/** What a docking station tagged with "(ResourceId+)" or "(ResourceId-N)" does for resource dispatch. */
+UENUM(BlueprintType)
+enum class EDTTDispatchRole : uint8
+{
+    None = 0,
+    Producer = 1 UMETA(DisplayName = "Producer"),
+    Requester = 2 UMETA(DisplayName = "Requester"),
+};
+
+/**
+ * A docking station tagged for resource dispatch. Rebuilt wholesale from live station names
+ * alongside FDTTStationGroup, same as the rest of this mod's config - nothing here is SaveGame.
+ */
+USTRUCT(BlueprintType)
+struct FDTTDispatchStation
+{
+    GENERATED_BODY()
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dynamic Time Table")
+    FString DisplayName;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dynamic Time Table")
+    FString ResourceId;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dynamic Time Table")
+    EDTTDispatchRole Role = EDTTDispatchRole::None;
+
+    // Requester only: open (a candidate for dispatch) while the dock's stock is below this many stacks.
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dynamic Time Table")
+    int32 Threshold = 0;
+
+    UPROPERTY()
+    TObjectPtr<AFGDockingStationIdentifier> DockingStationIdentifier = nullptr;
+
+    UPROPERTY()
+    FGuid DockingPathNodeGuid;
+};
+
+/** Remembered producer/optional explicit fuel anchors for one dispatch truck. */
+USTRUCT()
+struct FDTTDispatchTruckAnchors
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    FGuid ProducerGuid;
+
+    UPROPERTY()
+    FGuid FuelGuid;
+
+    // Position of the explicitly tagged (F) stop in the route where it was discovered.
+    // Clamped to the rebuilt route size when the number of requesters changes.
+    UPROPERTY()
+    int32 FuelInsertIndex = INDEX_NONE;
+};
+
 USTRUCT(BlueprintType)
 struct FDTTStationRuntimeLoad
 {

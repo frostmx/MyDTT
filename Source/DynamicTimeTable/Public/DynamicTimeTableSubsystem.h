@@ -49,6 +49,8 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") void GetAllVanillaStationNames(TArray<FString>& OutStationNames) const;
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") void GetAllDockingStationNames(TArray<FString>& OutStationNames) const;
     UFUNCTION(BlueprintPure, Category = "Dynamic Time Table|Groups") const TArray<FDTTStationGroup>& GetStationGroups() const;
+    /** Human-readable server-authoritative resource-dispatch diagnostics for /dtt dispatch. */
+    void GetDispatchStatusLines(TArray<FString>& OutLines) const;
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") void GetGroupRuntimeLoad(FGuid GroupId, TArray<FDTTStationRuntimeLoad>& OutLoads) const;
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Runtime") void RecalculateBookingsFromVanilla();
     int32 GetConfigurationRevision() const { return ConfigurationRevision; }
@@ -68,6 +70,21 @@ public:
     static FString MakeTaggedName(const FString& BaseName, const FString& GroupName, int32 TargetSlots);
     /** Strips the characters that would break the tag syntax out of a group name. */
     static FString SanitizeGroupName(const FString& GroupName);
+
+    /**
+     * A dispatch role is written in a *separate* tag, in parentheses, e.g. "Iron Mine (Iron+)" or
+     * "Foundry Input (Iron-10)" - open as a requester while stock is below 10 stacks. Deliberately
+     * a different bracket family from the "[group,N]" balancing tag above: ParseStationTag only
+     * ever looks at '[' / ']', this only ever looks at '(' / ')', so a station can carry both tags
+     * without either parser seeing the other's.
+     */
+    static bool ParseDispatchTag(const FString& FullName, FString& OutBaseName, FString& OutResourceId, EDTTDispatchRole& OutRole, int32& OutThreshold);
+    /** The name without its dispatch tag, for display. */
+    static FString StripDispatchTag(const FString& FullName);
+    /** The inverse of ParseDispatchTag. */
+    static FString MakeDispatchTaggedName(const FString& BaseName, const FString& ResourceId, EDTTDispatchRole Role, int32 Threshold);
+    /** Exact, resource-independent marker for an optional dedicated refuelling waypoint. */
+    static bool ParseFuelStopTag(const FString& FullName, FString& OutBaseName);
 
     UPROPERTY(BlueprintAssignable, Category = "Dynamic Time Table")
     FDTTGroupsChangedDelegate OnGroupsChanged;
@@ -121,6 +138,24 @@ private:
     };
     TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTTruckPollState> TruckPollStates;
     FTimerHandle TruckPollTimerHandle;
+
+    // Resource dispatch (producer/requester). Rebuilt alongside StationGroups in
+    // RebuildGroupsFromNames; nothing here is SaveGame, same philosophy as the rest of this mod.
+    UPROPERTY()
+    TArray<FDTTDispatchStation> DispatchStations;
+    /** Dock GUIDs carrying the exact reserved marker "(F)"; LOAD/UNLOAD does not matter. */
+    TSet<FGuid> DispatchFuelStopGuids;
+    // Which truck currently owns a requester stop, keyed by the requester's stable dock path-node
+    // GUID (survives a rename, unlike the array index). Released on docking, pruned on timeout/
+    // despawn/retag - see PruneStaleRequesterClaims and the cleanup in RebuildGroupsFromNames.
+    TMap<FGuid, TWeakObjectPtr<AFGWheeledVehicleIdentifier>> RequesterClaims;
+    TMap<FGuid, double> RequesterClaimedAtWorldSeconds;
+    static constexpr double RequesterClaimTimeoutSeconds = 600.0;
+    // Built once from UFGBlueprintFunctionLibrary::GetAllDescriptorsSorted, not per poll tick.
+    mutable TMap<FString, TSubclassOf<class UFGItemDescriptor>> ItemClassByNameCache;
+    // Producer is always Route[0]. A dedicated fuel anchor is optional and comes only from an
+    // explicit (F) tag; it is remembered because a skipped lap removes it from the live route.
+    TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTDispatchTruckAnchors> DispatchTruckAnchors;
 
     void InitializePersistence();
     void ScheduleWorldStationsReady();
@@ -183,4 +218,38 @@ private:
     bool ReplaceCurrentWaypoint(AFGWheeledVehicleIdentifier* Vehicle, int32 WaypointIndex, const FGuid& NewPathNodeGuid);
     /** Path network the group's vehicles travel, or INDEX_NONE when nothing in the group is moving yet. Diagnostics only. */
     int32 GetGroupPathNetworkID(const FDTTStationGroup& Group) const;
+
+    // Resource dispatch.
+    /** LOAD is producer, UNLOAD is requester; a contradictory tag is never actionable. */
+    bool DoesDispatchStationMatchMode(const FDTTDispatchStation& Station) const;
+    /** True when at least one live dispatch station uses this resource id. */
+    bool IsDispatchTruck(const FString& ResourceId) const;
+    /**
+     * Producer is structurally Route[0]. An optional dedicated Fuel stop is selected only by its
+     * explicit (F) station tag and remembered with its route position while a lap omits it.
+     */
+    bool UpdateRememberedAnchors(AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId, const TArray<FGuid>& Route);
+    /** Rewrites the complete route while suppressing this mod's SetVehicleRoute hook. */
+    bool ReplaceRoute(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& NewRoute);
+    /** Fuel cost for one directed edge in the vehicle path network, or a negative value on failure. */
+    float SumSegmentFuelConsumption(class AFGVehicleSubsystem* VehicleSubsystem, const FGuid& FromNodeGuid,
+        const FGuid& ToNodeGuid, TSubclassOf<class AFGWheeledVehicle> VehicleType) const;
+    /** Cost of the closed Producer/requester loop in the same units as the vanilla route-cost UI. */
+    float EstimateLoopFuelConsumptionMW(class AFGWheeledVehicle* Vehicle, const TArray<FGuid>& Loop) const;
+    /** Omits Fuel only when the live fuel inventory contains strictly more than two loop costs. */
+    bool ShouldSkipFuelStop(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& LoopWithoutFuel) const;
+    /** Selects and claims every open requester, most starved stock/threshold ratio first. */
+    TArray<FGuid> SelectRequestersForResource(const FString& ResourceId, AFGWheeledVehicleIdentifier* Vehicle);
+    /** Rebuilds the route at the producer boundary, preserving the remembered (F) position. */
+    void ProcessDispatchTruckTarget(AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId, const TCHAR* Trigger);
+    /** Releases this truck's claim when the waypoint it just docked at is the claimed requester. */
+    void ReleaseRequesterClaimIfDocked(AFGWheeledVehicleIdentifier* Vehicle);
+    /** Drops claims whose truck disappeared or whose safety timeout elapsed. */
+    void PruneStaleRequesterClaims();
+    /** Drops every claim owned by a vehicle that no longer follows its dispatched route. */
+    void ReleaseRequesterClaimsForVehicle(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason);
+    /** Resolves a resource id (matched against the item's display name) to its item class. Cached after the first call. */
+    TSubclassOf<class UFGItemDescriptor> ResolveItemClassByName(const FString& Name) const;
+    /** Current stock at a dock's connected storage, in whole stacks (rounded down). */
+    int32 ReadDockStockInStacks(AFGDockingStationIdentifier* Dock, TSubclassOf<class UFGItemDescriptor> ItemClass) const;
 };
