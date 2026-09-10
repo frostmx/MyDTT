@@ -14,6 +14,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "TimerManager.h"
+#include "Misc/SecureHash.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDynamicTimeTableSubsystem, Log, All);
 
@@ -33,6 +34,96 @@ namespace
     {
         return IsValid(Vehicle) ? Vehicle->GetVehicleName().ToString() : TEXT("<none>");
     }
+
+    bool DTSIsAllDigits(const FString& Text)
+    {
+        if (Text.IsEmpty()) return false;
+        for (const TCHAR Ch : Text) if (Ch < TEXT('0') || Ch > TEXT('9')) return false;
+        return true;
+    }
+
+    /**
+     * A group has no stored identity any more - it is just a name on a station - so its id has to
+     * be derived from that name. It has to stay the same across rebuilds, or the rotation cursor
+     * and any open client window would lose their group every time a station is renamed.
+     */
+    FGuid DTSMakeGroupId(EDTTGroupKind Kind, const FString& GroupName)
+    {
+        const FString Key = FString::Printf(TEXT("%d|%s"), static_cast<int32>(Kind), *GroupName.ToLower());
+        const auto Utf8 = StringCast<UTF8CHAR>(*Key);
+        FMD5 Md5;
+        Md5.Update(reinterpret_cast<const uint8*>(Utf8.Get()), Utf8.Length());
+        uint8 Digest[16];
+        Md5.Final(Digest);
+        uint32 Parts[4];
+        FMemory::Memcpy(Parts, Digest, sizeof(Parts));
+        return FGuid(Parts[0], Parts[1], Parts[2], Parts[3]);
+    }
+}
+
+bool UDynamicTimeTableSubsystem::ParseStationTag(const FString& FullName, FString& OutBaseName, FString& OutGroupName, int32& OutTargetSlots)
+{
+    OutBaseName = FullName.TrimStartAndEnd();
+    OutGroupName.Reset();
+    OutTargetSlots = 1;
+
+    int32 Close = INDEX_NONE;
+    if (!FullName.FindLastChar(TEXT(']'), Close)) return false;
+    int32 Open = INDEX_NONE;
+    if (!FullName.Left(Close).FindLastChar(TEXT('['), Open)) return false;
+
+    FString Inner = FullName.Mid(Open + 1, Close - Open - 1).TrimStartAndEnd();
+    if (Inner.IsEmpty()) return false;
+
+    // The slot count is whatever follows the last comma, and only if it is a plain number - so a
+    // group genuinely called "Depot, North" keeps its comma instead of losing half its name.
+    int32 Comma = INDEX_NONE;
+    if (Inner.FindLastChar(TEXT(','), Comma))
+    {
+        const FString Tail = Inner.Mid(Comma + 1).TrimStartAndEnd();
+        if (DTSIsAllDigits(Tail))
+        {
+            const int32 Parsed = FCString::Atoi(*Tail);
+            const FString Head = Inner.Left(Comma).TrimStartAndEnd();
+            if (Parsed >= 1 && !Head.IsEmpty())
+            {
+                OutTargetSlots = Parsed;
+                Inner = Head;
+            }
+        }
+    }
+
+    if (Inner.IsEmpty()) return false;
+    OutGroupName = Inner;
+    OutBaseName = (FullName.Left(Open) + FullName.Mid(Close + 1)).TrimStartAndEnd();
+    return true;
+}
+
+FString UDynamicTimeTableSubsystem::StripStationTag(const FString& FullName)
+{
+    FString Base, Group; int32 Slots = 1;
+    ParseStationTag(FullName, Base, Group, Slots);
+    return Base;
+}
+
+FString UDynamicTimeTableSubsystem::SanitizeGroupName(const FString& GroupName)
+{
+    FString Clean = GroupName;
+    Clean.ReplaceInline(TEXT("["), TEXT(" "));
+    Clean.ReplaceInline(TEXT("]"), TEXT(" "));
+    Clean.ReplaceInline(TEXT(","), TEXT(" "));
+    return Clean.TrimStartAndEnd();
+}
+
+FString UDynamicTimeTableSubsystem::MakeTaggedName(const FString& BaseName, const FString& GroupName, int32 TargetSlots)
+{
+    const FString Base = StripStationTag(BaseName);
+    const FString Group = SanitizeGroupName(GroupName);
+    if (Group.IsEmpty()) return Base;
+    const int32 Slots = FMath::Max(1, TargetSlots);
+    const FString Tag = Slots > 1 ? FString::Printf(TEXT("[%s,%d]"), *Group, Slots)
+                                  : FString::Printf(TEXT("[%s]"), *Group);
+    return Base.IsEmpty() ? Tag : FString::Printf(TEXT("%s %s"), *Base, *Tag);
 }
 
 void UDynamicTimeTableSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -53,11 +144,15 @@ void UDynamicTimeTableSubsystem::Deinitialize()
     bRouteReevaluationScheduled = false;
     GroupRotationCursor.Reset();
     TruckPollStates.Reset();
+    DraftGroups.Reset();
+    InternalNameChanges.Reset();
+    bStationFingerprintValid = false;
+    MigrationAttempts = 0;
     if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().ClearTimer(TruckPollTimerHandle);
     }
-    bPruneAllowed = false;
+    bWorldStationsReady = false;
     StationGroups.Reset();
     SaveDataActor.Reset();
     bPersistenceReady = false;
@@ -117,9 +212,10 @@ void UDynamicTimeTableSubsystem::InitializePersistence()
     if (IsValid(Found))
     {
         SaveDataActor = Found;
-        StationGroups = Found->GetGroups();
+        // Deliberately not copied into StationGroups. Groups are derived from station names now;
+        // what the actor holds is only a legacy configuration waiting to be migrated into tags.
         UE_LOG(LogDynamicTimeTableSubsystem, Display,
-            TEXT("Imported persistent dTT configuration. Groups=%d DataVersion=%d"), StationGroups.Num(), Found->GetDataVersion());
+            TEXT("Found dTT save actor. LegacyGroups=%d DataVersion=%d"), Found->GetGroups().Num(), Found->GetDataVersion());
     }
     else if (GetWorld()->GetNetMode() != NM_Client)
     {
@@ -130,119 +226,209 @@ void UDynamicTimeTableSubsystem::InitializePersistence()
             ADTTSaveDataActor::StaticClass(), FTransform::Identity, Params);
         SaveDataActor = Found;
 
-        StationGroups.Reset();
         UE_LOG(LogDynamicTimeTableSubsystem, Display,
-            TEXT("Created new DynamicTimeTable save-data actor with an empty configuration."));
+            TEXT("Created new DynamicTimeTable save-data actor."));
     }
 
     bPersistenceReady = true;
-    const bool bStationDataChanged = ResolveStationReferences();
-    if (SaveDataActor.IsValid() && SaveDataActor->GetDataVersion() < 3)
-    {
-        // Groups written before trucks existed carry no Kind at all; the enum defaults to Train,
-        // which is what they are. Nothing else to convert.
-        const int32 PreviousVersion = SaveDataActor->GetDataVersion();
-        SaveDataActor->SetDataVersion(3);
-        UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("Migrated dTT configuration from DataVersion=%d to 3. Changed=%s"), PreviousVersion, bStationDataChanged ? TEXT("true") : TEXT("false"));
-    }
-    RecalculateBookingsFromVanilla();
-    SyncConfigurationToSaveActor();
-    SchedulePrunePermission();
+    StationGroups.Reset();
+    // Nothing is read from the world yet: at OnWorldBeginPlay the railroad and vehicle subsystems
+    // have not registered their identifiers, so every station lookup would come back empty.
+    ScheduleWorldStationsReady();
     StartTruckPolling();
     OnGroupsChanged.Broadcast(); OnGroupsChangedNative.Broadcast();
 }
 
 void UDynamicTimeTableSubsystem::SyncConfigurationToSaveActor()
 {
-    if (SaveDataActor.IsValid() && GetWorld()->GetNetMode() != NM_Client)
+    // The save actor no longer stores anything: the configuration lives in the station names,
+    // which the game saves itself. It is kept, empty, because the class is referenced by existing
+    // saves and pulling a class out from under a load is worse than an idle actor.
+    if (SaveDataActor.IsValid() && IsServer())
     {
-        SaveDataActor->SetGroups(StationGroups);
+        SaveDataActor->SetGroups(TArray<FDTTStationGroup>());
+        SaveDataActor->SetDataVersion(4);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Editing a group means editing a station name. Every entry point below ends in
+// a rename plus a rebuild, so the window and the vanilla station panel are two
+// ways of doing exactly the same thing and cannot disagree.
+// ---------------------------------------------------------------------------
+
+const FDTTStationGroup* UDynamicTimeTableSubsystem::FindGroupOrDraft(FGuid GroupId) const
+{
+    if (const FDTTStationGroup* Group = FindGroup(GroupId)) return Group;
+    return DraftGroups.Find(GroupId);
+}
+
+bool UDynamicTimeTableSubsystem::RenameStationGuarded(AFGTrainStationIdentifier* Identifier, const FString& NewName)
+{
+    if (!IsValid(Identifier) || !IsServer()) return false;
+    if (Identifier->GetStationName().ToString() == NewName) return true;
+    // The rename hook has to be able to tell this apart from a player edit, or it would rebuild
+    // from the middle of the loop that is still renaming.
+    InternalNameChanges.Add(Identifier);
+    Identifier->SetStationName(FText::FromString(NewName));
+    InternalNameChanges.Remove(Identifier);
+    const bool bOk = Identifier->GetStationName().ToString() == NewName;
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("STATION_RETAGGED Kind=Train New='%s' Applied=%s"),
+        *NewName, bOk ? TEXT("true") : TEXT("false"));
+    return bOk;
+}
+
+bool UDynamicTimeTableSubsystem::RenameDockGuarded(AFGDockingStationIdentifier* Identifier, const FString& NewName)
+{
+    if (!IsValid(Identifier) || !IsServer()) return false;
+    if (Identifier->GetStationName().ToString() == NewName) return true;
+    InternalNameChanges.Add(Identifier);
+    Identifier->SetStationName(FText::FromString(NewName));
+    InternalNameChanges.Remove(Identifier);
+    const bool bOk = Identifier->GetStationName().ToString() == NewName;
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("STATION_RETAGGED Kind=Truck New='%s' Applied=%s"),
+        *NewName, bOk ? TEXT("true") : TEXT("false"));
+    return bOk;
+}
+
+bool UDynamicTimeTableSubsystem::RetagStation(const FDTTStationGroup& Group, const FDTTStationEntry& Entry, const FString& NewGroupName, int32 NewTargetSlots)
+{
+    const FString NewName = MakeTaggedName(Entry.DisplayName, NewGroupName, NewTargetSlots);
+    if (Group.Kind == EDTTGroupKind::Truck)
+    {
+        AFGDockingStationIdentifier* Dock = Entry.DockingStationIdentifier.Get();
+        if (!IsValid(Dock)) Dock = FindDockByName(Entry.DisplayName);
+        return RenameDockGuarded(Dock, NewName);
+    }
+    AFGTrainStationIdentifier* Station = Entry.StationIdentifier.Get();
+    if (!IsValid(Station)) Station = FindVanillaStationByName(Entry.DisplayName);
+    return RenameStationGuarded(Station, NewName);
 }
 
 FGuid UDynamicTimeTableSubsystem::CreateGroup(const FString& GroupName, EDTTGroupKind Kind)
 {
-    FString Name = GroupName.TrimStartAndEnd();
+    FString Name = SanitizeGroupName(GroupName);
     if (Name.IsEmpty()) Name = TEXT("New Station Group");
-    FDTTStationGroup Group;
-    Group.GroupId = FGuid::NewGuid();
-    Group.GroupName = Name;
-    Group.Kind = Kind;
-    StationGroups.Add(Group);
-    ConfigurationChanged();
+    const FGuid GroupId = DTSMakeGroupId(Kind, Name);
+
+    // Creating a group writes nothing anywhere: a group exists exactly as long as some station
+    // carries its tag. Until the first station is added it is only a draft, kept for this session
+    // so the window has something to show.
+    if (!FindGroup(GroupId) && !DraftGroups.Contains(GroupId))
+    {
+        FDTTStationGroup Draft;
+        Draft.GroupId = GroupId;
+        Draft.GroupName = Name;
+        Draft.Kind = Kind;
+        DraftGroups.Add(GroupId, Draft);
+        ConfigurationChanged(false);
+    }
+
     UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("Created group '%s' Kind=%s GUID=%s"), *Name,
-        Kind == EDTTGroupKind::Truck ? TEXT("Truck") : TEXT("Train"), *Group.GroupId.ToString());
-    return Group.GroupId;
+        Kind == EDTTGroupKind::Truck ? TEXT("Truck") : TEXT("Train"), *GroupId.ToString());
+    return GroupId;
 }
 
 bool UDynamicTimeTableSubsystem::RemoveGroup(FGuid GroupId)
 {
-    const int32 Removed = StationGroups.RemoveAll([GroupId](const FDTTStationGroup& G){ return G.GroupId == GroupId; });
-    if (Removed == 0) return false;
+    const bool bWasDraft = DraftGroups.Remove(GroupId) > 0;
+    const FDTTStationGroup* Group = FindGroup(GroupId);
+    if (!Group)
+    {
+        if (bWasDraft) ConfigurationChanged(false);
+        return bWasDraft;
+    }
+
+    const FDTTStationGroup Snapshot = *Group;
+    for (const FDTTStationEntry& Entry : Snapshot.Stations)
+    {
+        RetagStation(Snapshot, Entry, FString(), 1);
+    }
     GroupRotationCursor.Remove(GroupId);
-    ConfigurationChanged();
+    RebuildGroupsFromNames();
     return true;
 }
 
 bool UDynamicTimeTableSubsystem::RenameGroup(FGuid GroupId, const FString& NewName)
 {
-    FDTTStationGroup* G = FindGroup(GroupId);
-    const FString Name = NewName.TrimStartAndEnd();
-    if (!G || Name.IsEmpty()) return false;
-    G->GroupName = Name;
-    ConfigurationChanged(false);
+    const FString Name = SanitizeGroupName(NewName);
+    if (Name.IsEmpty()) return false;
+
+    if (FDTTStationGroup* Draft = DraftGroups.Find(GroupId))
+    {
+        FDTTStationGroup Renamed = *Draft;
+        Renamed.GroupName = Name;
+        Renamed.GroupId = DTSMakeGroupId(Renamed.Kind, Name);
+        DraftGroups.Remove(GroupId);
+        DraftGroups.Add(Renamed.GroupId, Renamed);
+        ConfigurationChanged(false);
+        return true;
+    }
+
+    const FDTTStationGroup* Group = FindGroup(GroupId);
+    if (!Group) return false;
+
+    const FDTTStationGroup Snapshot = *Group;
+    bool bAny = false;
+    for (const FDTTStationEntry& Entry : Snapshot.Stations)
+    {
+        bAny |= RetagStation(Snapshot, Entry, Name, Entry.TargetSlots);
+    }
+    if (!bAny) return false;
+    GroupRotationCursor.Remove(GroupId);
+    RebuildGroupsFromNames();
     return true;
 }
 
 bool UDynamicTimeTableSubsystem::AddStationByName(FGuid GroupId, const FString& StationName, int32 TargetSlots)
 {
-    FDTTStationGroup* G = FindGroup(GroupId);
+    const FDTTStationGroup* Group = FindGroupOrDraft(GroupId);
     const FString Name = StationName.TrimStartAndEnd();
-    if (!G || Name.IsEmpty() || FindStationEntry(*G, Name)) return false;
-    // A station may only live in one group - but a rail station and a docking station are allowed
-    // to share a name, so only groups of the same kind are checked.
-    for (const FDTTStationGroup& Other : StationGroups)
-        if (Other.GroupId != GroupId && Other.Kind == G->Kind && FindStationEntry(Other, Name)) return false;
-    FDTTStationEntry E;
-    E.DisplayName = Name;
-    E.TargetSlots = FMath::Max(1, TargetSlots);
-    E.PriorityIndex = G->Stations.Num();
-    if (G->Kind == EDTTGroupKind::Truck)
+    if (!Group || Name.IsEmpty()) return false;
+
+    const FString GroupName = Group->GroupName;
+    const int32 Slots = FMath::Max(1, TargetSlots);
+    const FString NewName = MakeTaggedName(Name, GroupName, Slots);
+
+    bool bOk = false;
+    if (Group->Kind == EDTTGroupKind::Truck)
     {
-        AFGDockingStationIdentifier* Dock = FindDockByName(Name);
-        if (!IsValid(Dock)) return false;
-        E.DockingStationIdentifier = Dock;
-        E.DockingPathNodeGuid = Dock->GetPathNodeGUID();
+        bOk = RenameDockGuarded(FindDockByName(Name), NewName);
     }
     else
     {
-        AFGTrainStationIdentifier* Id = FindVanillaStationByName(Name);
-        if (!IsValid(Id)) return false;
-        E.StationIdentifier = Id;
+        bOk = RenameStationGuarded(FindVanillaStationByName(Name), NewName);
     }
-    G->Stations.Add(E);
-    ConfigurationChanged();
+    if (!bOk) return false;
+
+    DraftGroups.Remove(GroupId);
+    RebuildGroupsFromNames();
     return true;
 }
 
 bool UDynamicTimeTableSubsystem::RemoveStationByName(FGuid GroupId, const FString& StationName)
 {
-    FDTTStationGroup* G = FindGroup(GroupId);
-    if (!G) return false;
-    const int32 Removed = G->Stations.RemoveAll([&](const FDTTStationEntry& E){ return E.DisplayName == StationName; });
-    if (!Removed) return false;
-    RefreshPriorityIndices(*G);
-    ConfigurationChanged();
+    const FDTTStationGroup* Group = FindGroup(GroupId);
+    const FDTTStationEntry* Entry = Group ? FindStationEntry(*Group, StationName) : nullptr;
+    if (!Entry) return false;
+
+    const FDTTStationGroup Snapshot = *Group;
+    const FDTTStationEntry EntrySnapshot = *Entry;
+    if (!RetagStation(Snapshot, EntrySnapshot, FString(), 1)) return false;
+    RebuildGroupsFromNames();
     return true;
 }
 
 bool UDynamicTimeTableSubsystem::SetTargetSlots(FGuid GroupId, const FString& StationName, int32 TargetSlots)
 {
-    FDTTStationGroup* G = FindGroup(GroupId);
-    FDTTStationEntry* E = G ? FindStationEntry(*G, StationName) : nullptr;
-    if (!E) return false;
-    E->TargetSlots = FMath::Max(1, TargetSlots);
-    ConfigurationChanged();
+    const FDTTStationGroup* Group = FindGroup(GroupId);
+    const FDTTStationEntry* Entry = Group ? FindStationEntry(*Group, StationName) : nullptr;
+    if (!Entry) return false;
+
+    const FDTTStationGroup Snapshot = *Group;
+    const FDTTStationEntry EntrySnapshot = *Entry;
+    if (!RetagStation(Snapshot, EntrySnapshot, Snapshot.GroupName, FMath::Max(1, TargetSlots))) return false;
+    RebuildGroupsFromNames();
     return true;
 }
 
@@ -306,49 +492,274 @@ AFGTrainStationIdentifier* UDynamicTimeTableSubsystem::FindVanillaStationByName(
     return nullptr;
 }
 
-bool UDynamicTimeTableSubsystem::ResolveStationReferences()
+// ---------------------------------------------------------------------------
+// Groups are not stored - they are read out of the station names every time the
+// world's stations change. Nothing here can go stale, so there is nothing to
+// resolve, prune or migrate at runtime.
+// ---------------------------------------------------------------------------
+
+void UDynamicTimeTableSubsystem::RebuildGroupsFromNames()
 {
-    bool bChanged=false;
-    for(auto& G:StationGroups) for(auto& E:G.Stations)
+    if (!IsServer()) return;
+
+    TArray<FDTTStationGroup> Rebuilt;
+    auto Bucket = [&Rebuilt](EDTTGroupKind Kind, const FString& GroupName) -> FDTTStationGroup&
     {
-        if(G.Kind==EDTTGroupKind::Truck)
+        if (FDTTStationGroup* Found = Rebuilt.FindByPredicate([&](const FDTTStationGroup& G)
+            { return G.Kind == Kind && G.GroupName.Equals(GroupName, ESearchCase::IgnoreCase); }))
         {
-            // Canonical identity is the path node GUID; the name is only a cache, so it is tried
-            // second and only for an entry whose node is gone.
-            AFGDockingStationIdentifier* Dock=E.DockingStationIdentifier.Get();
-            if(!IsValid(Dock)){Dock=FindDockByPathNode(E.DockingPathNodeGuid);if(!IsValid(Dock))Dock=FindDockByName(E.DisplayName);if(IsValid(Dock)){E.DockingStationIdentifier=Dock;bChanged=true;}}
-            if(IsValid(Dock))
-            {
-                const FGuid NodeGuid=Dock->GetPathNodeGUID();
-                if(E.DockingPathNodeGuid!=NodeGuid){E.DockingPathNodeGuid=NodeGuid;bChanged=true;}
-                // A freshly built dock can be nameless; blanking the row would be the
-                // "unnamed entries" half of the 1.4.2 report.
-                const FString N=Dock->GetStationName().ToString();
-                if(!N.IsEmpty()&&E.DisplayName!=N){E.DisplayName=N;bChanged=true;}
-            }
-            continue;
+            return *Found;
         }
-        AFGTrainStationIdentifier* Id=E.StationIdentifier.Get();
-        if(!IsValid(Id)){Id=FindVanillaStationByName(E.DisplayName);if(IsValid(Id)){E.StationIdentifier=Id;bChanged=true;}}
-        if(IsValid(Id)){const FString N=Id->GetStationName().ToString();if(!N.IsEmpty()&&E.DisplayName!=N){E.DisplayName=N;bChanged=true;}}
+        FDTTStationGroup New;
+        New.Kind = Kind;
+        New.GroupName = GroupName;
+        New.GroupId = DTSMakeGroupId(Kind, GroupName);
+        return Rebuilt[Rebuilt.Add(New)];
+    };
+
+    if (AFGRailroadSubsystem* Railroad = AFGRailroadSubsystem::Get(GetWorld()))
+    {
+        TArray<AFGTrainStationIdentifier*> Identifiers;
+        Railroad->GetAllTrainStations(Identifiers);
+        for (AFGTrainStationIdentifier* Identifier : Identifiers)
+        {
+            if (!IsValid(Identifier)) continue;
+            const FString FullName = Identifier->GetStationName().ToString();
+            FString Base, GroupName; int32 Slots = 1;
+            if (!ParseStationTag(FullName, Base, GroupName, Slots)) continue;
+            FDTTStationEntry Entry;
+            Entry.DisplayName = FullName;
+            Entry.TargetSlots = Slots;
+            Entry.StationIdentifier = Identifier;
+            Bucket(EDTTGroupKind::Train, GroupName).Stations.Add(Entry);
+        }
     }
-    bChanged |= PruneMissingStations();
-    return bChanged;
+
+    if (AFGVehicleSubsystem* Vehicles = AFGVehicleSubsystem::Get(GetWorld()))
+    {
+        for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
+        {
+            if (!IsValid(Identifier)) continue;
+            const FString FullName = Identifier->GetStationName().ToString();
+            FString Base, GroupName; int32 Slots = 1;
+            if (!ParseStationTag(FullName, Base, GroupName, Slots)) continue;
+            FDTTStationEntry Entry;
+            Entry.DisplayName = FullName;
+            Entry.TargetSlots = Slots;
+            Entry.DockingStationIdentifier = Identifier;
+            Entry.DockingPathNodeGuid = Identifier->GetPathNodeGUID();
+            Bucket(EDTTGroupKind::Truck, GroupName).Stations.Add(Entry);
+        }
+    }
+
+    // PriorityIndex drives the tie-breaking rotation, so it has to mean the same thing from one
+    // rebuild to the next - hence a name sort rather than whatever order the subsystem hands out.
+    for (FDTTStationGroup& Group : Rebuilt)
+    {
+        Group.Stations.Sort([](const FDTTStationEntry& A, const FDTTStationEntry& B){ return A.DisplayName < B.DisplayName; });
+        RefreshPriorityIndices(Group);
+    }
+
+    // A draft that now has a tagged station is a real group; the rest stay visible for the session.
+    for (const FDTTStationGroup& Group : Rebuilt) DraftGroups.Remove(Group.GroupId);
+    for (const auto& Pair : DraftGroups) Rebuilt.Add(Pair.Value);
+    Rebuilt.Sort([](const FDTTStationGroup& A, const FDTTStationGroup& B){ return A.GroupName < B.GroupName; });
+
+    auto SameConfiguration = [](const TArray<FDTTStationGroup>& Left, const TArray<FDTTStationGroup>& Right)
+    {
+        if (Left.Num() != Right.Num()) return false;
+        for (int32 i = 0; i < Left.Num(); ++i)
+        {
+            if (Left[i].GroupId != Right[i].GroupId) return false;
+            if (Left[i].Stations.Num() != Right[i].Stations.Num()) return false;
+            for (int32 j = 0; j < Left[i].Stations.Num(); ++j)
+            {
+                if (Left[i].Stations[j].DisplayName != Right[i].Stations[j].DisplayName) return false;
+                if (Left[i].Stations[j].TargetSlots != Right[i].Stations[j].TargetSlots) return false;
+            }
+        }
+        return true;
+    };
+
+    const bool bChanged = !SameConfiguration(StationGroups, Rebuilt);
+    StationGroups = MoveTemp(Rebuilt);
+    LastStationFingerprint = ComputeStationFingerprint();
+    bStationFingerprintValid = true;
+
+    if (!bChanged) return;
+
+    // A station that left its group must not keep a booking: it would count against a group it is
+    // no longer part of, and nothing would ever release it.
+    for (auto It = ActiveBookings.CreateIterator(); It; ++It)
+        if (!It.Key().IsValid() || !FindGroupByStation(It.Value().Get())) It.RemoveCurrent();
+    for (auto It = TruckBookings.CreateIterator(); It; ++It)
+        if (!It.Key().IsValid() || !FindGroupByDock(It.Value().Get())) It.RemoveCurrent();
+
+    // The cursor names a PriorityIndex, and those are renumbered on every rebuild.
+    GroupRotationCursor.Reset();
+
+    ++ConfigurationRevision;
+    int32 StationCount = 0;
+    for (const FDTTStationGroup& Group : StationGroups) StationCount += Group.Stations.Num();
+    UE_LOG(LogDynamicTimeTableSubsystem, Display,
+        TEXT("GROUPS_REBUILT Groups=%d Stations=%d ConfigurationRevision=%d"),
+        StationGroups.Num(), StationCount, ConfigurationRevision);
+    OnGroupsChanged.Broadcast(); OnGroupsChangedNative.Broadcast();
 }
-bool UDynamicTimeTableSubsystem::RefreshStationDisplayName(AFGTrainStationIdentifier* Id)
+
+uint32 UDynamicTimeTableSubsystem::ComputeStationFingerprint() const
 {
-    if(!IsValid(Id))return false;bool bChanged=false;const FString N=Id->GetStationName().ToString();
-    for(auto& G:StationGroups)for(auto& E:G.Stations)if(E.StationIdentifier.Get()==Id&&E.DisplayName!=N){E.DisplayName=N;bChanged=true;}
-    return bChanged;
+    // Summed, not combined in order: the subsystems make no promise about the order they hand
+    // stations out in, and a reordering must not read as a change.
+    uint32 Hash = 0;
+    int32 Count = 0;
+    if (AFGRailroadSubsystem* Railroad = AFGRailroadSubsystem::Get(GetWorld()))
+    {
+        TArray<AFGTrainStationIdentifier*> Identifiers;
+        Railroad->GetAllTrainStations(Identifiers);
+        for (AFGTrainStationIdentifier* Identifier : Identifiers)
+        {
+            if (!IsValid(Identifier)) continue;
+            Hash += GetTypeHash(Identifier->GetStationName().ToString());
+            ++Count;
+        }
+    }
+    if (AFGVehicleSubsystem* Vehicles = AFGVehicleSubsystem::Get(GetWorld()))
+    {
+        for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
+        {
+            if (!IsValid(Identifier)) continue;
+            Hash += GetTypeHash(Identifier->GetStationName().ToString()) * 31u;
+            ++Count;
+        }
+    }
+    return HashCombine(Hash, static_cast<uint32>(Count));
 }
+
+void UDynamicTimeTableSubsystem::RebuildGroupsIfStationsChanged(const TCHAR* Trigger)
+{
+    if (!IsServer() || !bWorldStationsReady) return;
+    const uint32 Fingerprint = ComputeStationFingerprint();
+    if (bStationFingerprintValid && Fingerprint == LastStationFingerprint) return;
+    UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("Station set changed, rebuilding groups. Trigger=%s"), Trigger);
+    RebuildGroupsFromNames();
+}
+
+void UDynamicTimeTableSubsystem::MigrateSavedGroupsToTags()
+{
+    if (!IsServer() || !SaveDataActor.IsValid()) return;
+
+    const TArray<FDTTStationGroup> Legacy = SaveDataActor->GetGroups();
+    if (Legacy.Num() == 0)
+    {
+        SyncConfigurationToSaveActor();
+        return;
+    }
+
+    // If the world has not produced a single station yet, every lookup below would fail and the
+    // player's configuration would be thrown away with nothing written in its place. Wait instead.
+    if (!HasAnyStations() && MigrationAttempts < 4)
+    {
+        ++MigrationAttempts;
+        bWorldStationsReady = false;
+        UE_LOG(LogDynamicTimeTableSubsystem, Warning,
+            TEXT("Migration deferred: no stations registered yet. Attempt=%d"), MigrationAttempts);
+        return;
+    }
+
+    int32 Renamed = 0, AlreadyTagged = 0, Unresolved = 0;
+    for (const FDTTStationGroup& Group : Legacy)
+    {
+        const FString GroupName = SanitizeGroupName(Group.GroupName);
+        if (GroupName.IsEmpty()) continue;
+
+        for (const FDTTStationEntry& Entry : Group.Stations)
+        {
+            FString Current;
+            AFGTrainStationIdentifier* Station = nullptr;
+            AFGDockingStationIdentifier* Dock = nullptr;
+
+            if (Group.Kind == EDTTGroupKind::Truck)
+            {
+                Dock = Entry.DockingStationIdentifier.Get();
+                if (!IsValid(Dock)) Dock = FindDockByPathNode(Entry.DockingPathNodeGuid);
+                if (!IsValid(Dock)) Dock = FindDockByName(Entry.DisplayName);
+                if (IsValid(Dock)) Current = Dock->GetStationName().ToString();
+            }
+            else
+            {
+                Station = Entry.StationIdentifier.Get();
+                if (!IsValid(Station)) Station = FindVanillaStationByName(Entry.DisplayName);
+                if (IsValid(Station)) Current = Station->GetStationName().ToString();
+            }
+
+            if (!IsValid(Station) && !IsValid(Dock))
+            {
+                ++Unresolved;
+                UE_LOG(LogDynamicTimeTableSubsystem, Warning,
+                    TEXT("MIGRATION_SKIPPED Station='%s' Group='%s' Reason=building-gone"),
+                    *Entry.DisplayName, *GroupName);
+                continue;
+            }
+
+            FString Base, ExistingGroup; int32 ExistingSlots = 1;
+            if (ParseStationTag(Current, Base, ExistingGroup, ExistingSlots) &&
+                ExistingGroup.Equals(GroupName, ESearchCase::IgnoreCase))
+            {
+                ++AlreadyTagged;
+                continue;
+            }
+
+            const FString NewName = MakeTaggedName(Current, GroupName, Entry.TargetSlots);
+            const bool bOk = Group.Kind == EDTTGroupKind::Truck
+                ? RenameDockGuarded(Dock, NewName)
+                : RenameStationGuarded(Station, NewName);
+            if (bOk)
+            {
+                ++Renamed;
+                UE_LOG(LogDynamicTimeTableSubsystem, Display,
+                    TEXT("MIGRATED Group='%s' '%s' -> '%s'"), *GroupName, *Current, *NewName);
+            }
+            else
+            {
+                ++Unresolved;
+                UE_LOG(LogDynamicTimeTableSubsystem, Warning,
+                    TEXT("MIGRATION_FAILED Station='%s' Group='%s' Wanted='%s'"), *Current, *GroupName, *NewName);
+            }
+        }
+    }
+
+    UE_LOG(LogDynamicTimeTableSubsystem, Display,
+        TEXT("Migrated dTT configuration to name tags. Groups=%d Renamed=%d AlreadyTagged=%d Unresolved=%d"),
+        Legacy.Num(), Renamed, AlreadyTagged, Unresolved);
+    SyncConfigurationToSaveActor();
+}
+
+bool UDynamicTimeTableSubsystem::HasAnyStations() const
+{
+    if (AFGRailroadSubsystem* Railroad = AFGRailroadSubsystem::Get(GetWorld()))
+    {
+        TArray<AFGTrainStationIdentifier*> Identifiers;
+        Railroad->GetAllTrainStations(Identifiers);
+        for (AFGTrainStationIdentifier* Identifier : Identifiers) if (IsValid(Identifier)) return true;
+    }
+    if (AFGVehicleSubsystem* Vehicles = AFGVehicleSubsystem::Get(GetWorld()))
+    {
+        for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations()) if (IsValid(Identifier)) return true;
+    }
+    return false;
+}
+
 void UDynamicTimeTableSubsystem::HandleStationNameChanged(AFGTrainStationIdentifier* Id)
 {
-    UWorld* W=GetWorld();if(!IsValid(W)||W->GetNetMode()==NM_Client||!RefreshStationDisplayName(Id))return;
-    ++ConfigurationRevision;SyncConfigurationToSaveActor();OnGroupsChanged.Broadcast();OnGroupsChangedNative.Broadcast();
-    UE_LOG(LogDynamicTimeTableSubsystem,Display,TEXT("STATION_RENAMED Station='%s' ConfigurationRevision=%d"),*Id->GetStationName().ToString(),ConfigurationRevision);
+    if (!IsServer() || !IsValid(Id) || InternalNameChanges.Contains(Id)) return;
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("STATION_RENAMED Kind=Train Station='%s'"),
+        *Id->GetStationName().ToString());
+    if (!bWorldStationsReady) return;
+    RebuildGroupsFromNames();
 }
 void UDynamicTimeTableSubsystem::RefreshPriorityIndices(FDTTStationGroup& G){for(int32 i=0;i<G.Stations.Num();++i)G.Stations[i].PriorityIndex=i;}
-void UDynamicTimeTableSubsystem::ConfigurationChanged(bool Recalc){++ConfigurationRevision;ResolveStationReferences();SyncConfigurationToSaveActor();if(Recalc)RecalculateBookingsFromVanilla();else OnGroupsChanged.Broadcast(); OnGroupsChangedNative.Broadcast();}
+void UDynamicTimeTableSubsystem::ConfigurationChanged(bool Recalc){++ConfigurationRevision;if(Recalc)RecalculateBookingsFromVanilla();else OnGroupsChanged.Broadcast(); OnGroupsChangedNative.Broadcast();}
 void UDynamicTimeTableSubsystem::RemoveInvalidBookings(){for(auto It=ActiveBookings.CreateIterator();It;++It)if(!It.Key().IsValid()||!It.Value().IsValid())It.RemoveCurrent();}
 void UDynamicTimeTableSubsystem::RemoveInvalidTruckBookings(){for(auto It=TruckBookings.CreateIterator();It;++It)if(!It.Key().IsValid()||!It.Value().IsValid())It.RemoveCurrent();}
 
@@ -446,11 +857,11 @@ void UDynamicTimeTableSubsystem::HandleSelfDrivingChanged(AFGTrain* Train,bool b
 {
     UWorld* W=GetWorld();if(!IsValid(W)||W->GetNetMode()==NM_Client||!IsValid(Train))return;if(!bEnabled){ReleaseBooking(Train,TEXT("autopilot disabled"));return;}ReleaseBooking(Train,TEXT("autopilot enabled"));ProcessCurrentTarget(Train,TEXT("autopilot enabled"));
 }
-void UDynamicTimeTableSubsystem::ProcessCurrentTarget(AFGTrain*Train,const TCHAR*Trigger){if(!IsValid(Train)||!Train->IsSelfDrivingEnabled())return;if(!bPersistenceReady)InitializePersistence();RemoveInvalidBookings();ResolveStationReferences();AFGRailroadTimeTable*T=Train->GetTimeTable();const int32 I=IsValid(T)?T->GetCurrentStop():INDEX_NONE;if(!IsValid(T)||!T->IsValidStop(I))return;AFGTrainStationIdentifier*Ref=T->GetStop(I).Station.Get();FDTTStationGroup*G=FindGroupByStation(Ref);if(!G||ActiveBookings.Contains(Train))return;const int32 GroupStopCount=CountStopsInGroup(T,*G);if(GroupStopCount>1){ActiveBookings.Add(Train,Ref);const int32 C=GetAssignedCount(Ref);const FDTTStationEntry*E=G->Stations.FindByPredicate([Ref](const FDTTStationEntry&X){return X.StationIdentifier.Get()==Ref;});const int32 Slots=E?FMath::Max(1,E->TargetSlots):1;UE_LOG(LogDynamicTimeTableSubsystem,Verbose,TEXT("BOOKED_FIXED Train='%s' Target='%s' Group='%s' GroupStops=%d Load=%d/%d%s Trigger=%s"),*Train->GetTrainName().ToString(),*DTSStationName(Ref),*G->GroupName,GroupStopCount,C,Slots,C>Slots?TEXT(" OVERLOAD"):TEXT(""),Trigger);OnGroupsChanged.Broadcast();OnGroupsChangedNative.Broadcast();return;}FDTTStationEntry*Sel=SelectBestStation(*G);if(!Sel||!IsValid(Sel->StationIdentifier.Get()))return;AFGTrainStationIdentifier*Id=Sel->StationIdentifier.Get();const bool Ok=ReplaceCurrentStop(T,I,Id);const FString Verified=T->IsValidStop(I)?DTSStationName(T->GetStop(I).Station.Get()):TEXT("<invalid>");if(Ok&&Verified==Sel->DisplayName){ActiveBookings.Add(Train,Id);const int32 C=GetAssignedCount(Id);UE_LOG(LogDynamicTimeTableSubsystem,Verbose,TEXT("ASSIGNED Train='%s' Selected='%s' Load=%d/%d%s Trigger=%s"),*Train->GetTrainName().ToString(),*Sel->DisplayName,C,Sel->TargetSlots,C>Sel->TargetSlots?TEXT(" OVERLOAD"):TEXT(""),Trigger);}OnGroupsChanged.Broadcast();OnGroupsChangedNative.Broadcast();}
-void UDynamicTimeTableSubsystem::HandleTrainDocked(AFGTrain*Train,AFGBuildableRailroadStation*Station){if(!IsValid(Train)||!IsValid(Station))return;if(!bPersistenceReady)InitializePersistence();RemoveInvalidBookings();ResolveStationReferences();ReleaseBookingIfReached(Train,Station->GetStationIdentifier());ProcessCurrentTarget(Train,TEXT("train docked"));}
+void UDynamicTimeTableSubsystem::ProcessCurrentTarget(AFGTrain*Train,const TCHAR*Trigger){if(!IsValid(Train)||!Train->IsSelfDrivingEnabled())return;if(!bPersistenceReady)InitializePersistence();RemoveInvalidBookings();AFGRailroadTimeTable*T=Train->GetTimeTable();const int32 I=IsValid(T)?T->GetCurrentStop():INDEX_NONE;if(!IsValid(T)||!T->IsValidStop(I))return;AFGTrainStationIdentifier*Ref=T->GetStop(I).Station.Get();FDTTStationGroup*G=FindGroupByStation(Ref);if(!G||ActiveBookings.Contains(Train))return;const int32 GroupStopCount=CountStopsInGroup(T,*G);if(GroupStopCount>1){ActiveBookings.Add(Train,Ref);const int32 C=GetAssignedCount(Ref);const FDTTStationEntry*E=G->Stations.FindByPredicate([Ref](const FDTTStationEntry&X){return X.StationIdentifier.Get()==Ref;});const int32 Slots=E?FMath::Max(1,E->TargetSlots):1;UE_LOG(LogDynamicTimeTableSubsystem,Verbose,TEXT("BOOKED_FIXED Train='%s' Target='%s' Group='%s' GroupStops=%d Load=%d/%d%s Trigger=%s"),*Train->GetTrainName().ToString(),*DTSStationName(Ref),*G->GroupName,GroupStopCount,C,Slots,C>Slots?TEXT(" OVERLOAD"):TEXT(""),Trigger);OnGroupsChanged.Broadcast();OnGroupsChangedNative.Broadcast();return;}FDTTStationEntry*Sel=SelectBestStation(*G);if(!Sel||!IsValid(Sel->StationIdentifier.Get()))return;AFGTrainStationIdentifier*Id=Sel->StationIdentifier.Get();const bool Ok=ReplaceCurrentStop(T,I,Id);const FString Verified=T->IsValidStop(I)?DTSStationName(T->GetStop(I).Station.Get()):TEXT("<invalid>");if(Ok&&Verified==Sel->DisplayName){ActiveBookings.Add(Train,Id);const int32 C=GetAssignedCount(Id);UE_LOG(LogDynamicTimeTableSubsystem,Verbose,TEXT("ASSIGNED Train='%s' Selected='%s' Load=%d/%d%s Trigger=%s"),*Train->GetTrainName().ToString(),*Sel->DisplayName,C,Sel->TargetSlots,C>Sel->TargetSlots?TEXT(" OVERLOAD"):TEXT(""),Trigger);}OnGroupsChanged.Broadcast();OnGroupsChangedNative.Broadcast();}
+void UDynamicTimeTableSubsystem::HandleTrainDocked(AFGTrain*Train,AFGBuildableRailroadStation*Station){if(!IsValid(Train)||!IsValid(Station))return;if(!bPersistenceReady)InitializePersistence();RemoveInvalidBookings();ReleaseBookingIfReached(Train,Station->GetStationIdentifier());ProcessCurrentTarget(Train,TEXT("train docked"));}
 void UDynamicTimeTableSubsystem::RecalculateBookingsFromVanilla()
 {
-    ActiveBookings.Reset();TruckBookings.Reset();ResolveStationReferences();
+    ActiveBookings.Reset();TruckBookings.Reset();
     if(AFGRailroadSubsystem*R=AFGRailroadSubsystem::Get(GetWorld())){TArray<AFGTrain*>Trains;R->GetAllTrains(Trains);for(AFGTrain*Train:Trains){if(!IsValid(Train)||!Train->IsSelfDrivingEnabled())continue;auto*T=Train->GetTimeTable();const int32 I=IsValid(T)?T->GetCurrentStop():INDEX_NONE;if(IsValid(T)&&T->IsValidStop(I)){auto*Target=T->GetStop(I).Station.Get();if(FindGroupByStation(Target))ActiveBookings.Add(Train,Target);}}}
     if(AFGVehicleSubsystem*V=AFGVehicleSubsystem::Get(GetWorld())){for(AFGWheeledVehicleIdentifier*Vehicle:V->GetAllVehicles()){if(!IsValid(Vehicle)||!Vehicle->IsAutopilotEnabled())continue;const TArray<FGuid>&Route=Vehicle->GetVehicleRoute();const int32 I=Vehicle->GetCurrentTargetWaypointIndex();if(!Route.IsValidIndex(I))continue;AFGDockingStationIdentifier*Dock=FindDockByPathNode(Route[I]);if(FindGroupByDock(Dock))TruckBookings.Add(Vehicle,Dock);}}
     UE_LOG(LogDynamicTimeTableSubsystem,Display,TEXT("Recalculated %d train and %d truck booking(s) from Vanilla routes."),ActiveBookings.Num(),TruckBookings.Num());OnGroupsChanged.Broadcast(); OnGroupsChangedNative.Broadcast();
@@ -500,24 +911,12 @@ const FDTTStationGroup* UDynamicTimeTableSubsystem::FindGroupByDock(AFGDockingSt
     });
 }
 
-bool UDynamicTimeTableSubsystem::RefreshDockDisplayName(AFGDockingStationIdentifier* Id)
-{
-    if (!IsValid(Id)) return false;
-    bool bChanged = false;
-    const FString N = Id->GetStationName().ToString();
-    for (auto& G : StationGroups)
-        if (G.Kind == EDTTGroupKind::Truck)
-            for (auto& E : G.Stations)
-                if (E.DockingStationIdentifier.Get() == Id && E.DisplayName != N) { E.DisplayName = N; bChanged = true; }
-    return bChanged;
-}
-
 void UDynamicTimeTableSubsystem::HandleDockingStationNameChanged(AFGDockingStationIdentifier* Id)
 {
-    if (!IsServer() || !RefreshDockDisplayName(Id)) return;
-    ++ConfigurationRevision; SyncConfigurationToSaveActor();
-    OnGroupsChanged.Broadcast(); OnGroupsChangedNative.Broadcast();
-    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("DOCK_RENAMED Station='%s' ConfigurationRevision=%d"), *DTSDockName(Id), ConfigurationRevision);
+    if (!IsServer() || !IsValid(Id) || InternalNameChanges.Contains(Id)) return;
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("STATION_RENAMED Kind=Truck Station='%s'"), *DTSDockName(Id));
+    if (!bWorldStationsReady) return;
+    RebuildGroupsFromNames();
 }
 
 int32 UDynamicTimeTableSubsystem::GetGroupPathNetworkID(const FDTTStationGroup& G) const
@@ -605,7 +1004,6 @@ void UDynamicTimeTableSubsystem::ProcessCurrentTruckTarget(AFGWheeledVehicleIden
     if (!IsValid(Vehicle) || !Vehicle->IsAutopilotEnabled()) return;
     if (!bPersistenceReady) InitializePersistence();
     RemoveInvalidTruckBookings();
-    ResolveStationReferences();
 
     const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
     const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
@@ -673,6 +1071,10 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
     AFGVehicleSubsystem* V = AFGVehicleSubsystem::Get(GetWorld());
     if (!IsValid(V)) return;
 
+    // Building or demolishing a station fires no hook at all, and the train half has no timer of
+    // its own, so both kinds are checked here.
+    RebuildGroupsIfStationsChanged(TEXT("poll"));
+
     for (auto It = TruckPollStates.CreateIterator(); It; ++It)
         if (!It.Key().IsValid()) It.RemoveCurrent();
 
@@ -734,59 +1136,23 @@ void UDynamicTimeTableSubsystem::HandleAutopilotChanged(AFGWheeledVehicleIdentif
     SchedulePendingRouteReevaluation();
 }
 
-void UDynamicTimeTableSubsystem::SchedulePrunePermission()
+void UDynamicTimeTableSubsystem::ScheduleWorldStationsReady()
 {
     UWorld* W = GetWorld();
-    if (bPruneAllowed || !IsValid(W) || !IsServer()) return;
+    if (bWorldStationsReady || !IsValid(W) || !IsServer()) return;
     // Not a next-tick timer on purpose. At OnWorldBeginPlay the railroad and vehicle subsystems
-    // have not registered their identifiers yet, and a prune that runs before they do would delete
-    // the player's whole configuration - with no undo, since it is written straight to the save.
+    // have not registered their identifiers yet, and the migration below only gets one chance to
+    // read the player's old configuration before it is replaced by tags.
     TWeakObjectPtr<UDynamicTimeTableSubsystem> WeakThis(this);
     FTimerHandle Handle;
     W->GetTimerManager().SetTimer(Handle, FTimerDelegate::CreateLambda([WeakThis]()
     {
         if (!WeakThis.IsValid()) return;
-        WeakThis->bPruneAllowed = true;
-        WeakThis->ResolveStationReferences();
+        WeakThis->bWorldStationsReady = true;
+        WeakThis->MigrateSavedGroupsToTags();
+        // Migration clears the flag again when it wants another go at a world that is still empty.
+        if (!WeakThis->bWorldStationsReady) { WeakThis->ScheduleWorldStationsReady(); return; }
+        WeakThis->RebuildGroupsFromNames();
+        WeakThis->RecalculateBookingsFromVanilla();
     }), 15.0f, false);
-}
-
-bool UDynamicTimeTableSubsystem::PruneMissingStations()
-{
-    if (!bPruneAllowed || !IsServer()) return false;
-
-    int32 RemovedTotal = 0;
-    for (FDTTStationGroup& Group : StationGroups)
-    {
-        const bool bTruck = Group.Kind == EDTTGroupKind::Truck;
-        const FString GroupName = Group.GroupName;
-        const int32 Removed = Group.Stations.RemoveAll([&](const FDTTStationEntry& E)
-        {
-            // ResolveStationReferences has already had its go at the identifier, the path node GUID
-            // and the name. Nothing left to resolve means the building is gone for good.
-            const bool bMissing = bTruck ? !IsValid(E.DockingStationIdentifier.Get())
-                                         : !IsValid(E.StationIdentifier.Get());
-            if (bMissing)
-            {
-                UE_LOG(LogDynamicTimeTableSubsystem, Display,
-                    TEXT("STATION_PRUNED Station='%s' Group='%s' Kind=%s Reason=building-gone"),
-                    *E.DisplayName, *GroupName, bTruck ? TEXT("Truck") : TEXT("Train"));
-            }
-            return bMissing;
-        });
-
-        if (Removed > 0)
-        {
-            RefreshPriorityIndices(Group);
-            GroupRotationCursor.Remove(Group.GroupId);
-            RemovedTotal += Removed;
-        }
-    }
-
-    if (RemovedTotal == 0) return false;
-
-    ++ConfigurationRevision;
-    SyncConfigurationToSaveActor();
-    OnGroupsChanged.Broadcast(); OnGroupsChangedNative.Broadcast();
-    return true;
 }

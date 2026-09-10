@@ -1,7 +1,7 @@
 {
     "FileVersion": 3,
     "Version": 1,
-    "VersionName": "0.13.0-beta.1",
+    "VersionName": "0.14.0-beta.1",
     "FriendlyName": "DynamicTimeTable",
     "Description": "Dual singleplayer and multiplayer dynamic train and truck routing.",
     "Category": "Modding",
@@ -30,5 +30,6 @@
         }
     ],
     "SemVersion": "1.3.1",
+    "RequiredOnRemote": false,
     "GameVersion": ">=491125"
 }

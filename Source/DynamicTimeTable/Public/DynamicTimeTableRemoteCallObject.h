@@ -7,7 +7,7 @@ USTRUCT(BlueprintType)
 struct FDTTClientSnapshot
 {
     GENERATED_BODY()
-    UPROPERTY(BlueprintReadOnly) int32 ProtocolVersion = 3;
+    UPROPERTY(BlueprintReadOnly) int32 ProtocolVersion = 4;
     UPROPERTY(BlueprintReadOnly) int32 Revision = 0;
     UPROPERTY(BlueprintReadOnly) TArray<FDTTStationGroup> Groups;
     UPROPERTY(BlueprintReadOnly) TArray<FString> AvailableStations;
@@ -21,7 +21,8 @@ class DYNAMICTIMETABLE_API UDynamicTimeTableRemoteCallObject : public UFGRemoteC
 {
     GENERATED_BODY()
 public:
-    static constexpr int32 ProtocolVersion = 3;
+    // 4: groups come from tags in the station names, and every edit is a rename.
+    static constexpr int32 ProtocolVersion = 4;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     const FDTTClientSnapshot& GetSnapshot() const { return CachedSnapshot; }
     FDTTClientSnapshotChanged OnSnapshotChanged;

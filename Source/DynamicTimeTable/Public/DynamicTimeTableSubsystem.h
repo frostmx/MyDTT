@@ -53,6 +53,22 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Runtime") void RecalculateBookingsFromVanilla();
     int32 GetConfigurationRevision() const { return ConfigurationRevision; }
 
+    /**
+     * The group a station belongs to is written in the station's own name, as a trailing tag:
+     * "Ore Unload 1 [ore]" or "Ore Unload 1 [ore,3]" - group "ore", three slots. That makes the
+     * station name the single source of truth: the game already saves and replicates it, so the
+     * mod keeps no configuration of its own and cannot go out of sync with the world.
+     *
+     * Returns false when the name carries no usable tag; OutBaseName is then the name unchanged.
+     */
+    static bool ParseStationTag(const FString& FullName, FString& OutBaseName, FString& OutGroupName, int32& OutTargetSlots);
+    /** The name without its tag, for display. */
+    static FString StripStationTag(const FString& FullName);
+    /** The inverse of ParseStationTag. Slots are written only when above the default of one. */
+    static FString MakeTaggedName(const FString& BaseName, const FString& GroupName, int32 TargetSlots);
+    /** Strips the characters that would break the tag syntax out of a group name. */
+    static FString SanitizeGroupName(const FString& GroupName);
+
     UPROPERTY(BlueprintAssignable, Category = "Dynamic Time Table")
     FDTTGroupsChangedDelegate OnGroupsChanged;
 
@@ -70,11 +86,23 @@ private:
     TWeakObjectPtr<ADTTSaveDataActor> SaveDataActor;
     bool bPersistenceReady = false;
     /**
-     * Dead entries are only pruned once this is up. It is raised by a timer a few seconds after
-     * persistence is initialised, because at OnWorldBeginPlay the railroad and vehicle subsystems
-     * have not registered their identifiers yet and an eager prune would wipe the whole config.
+     * Groups a group name the player typed in the window before any station carries its tag.
+     * A group only really exists through the stations tagged with it, so an empty one has nowhere
+     * to live - this keeps it visible for the rest of the session and is deliberately not saved.
      */
-    bool bPruneAllowed = false;
+    TMap<FGuid, FDTTStationGroup> DraftGroups;
+    /** Order-independent hash over every station name, to notice a build or a demolish cheaply. */
+    uint32 LastStationFingerprint = 0;
+    bool bStationFingerprintValid = false;
+    /** Renames this mod makes itself, so the rename hook does not treat them as player edits. */
+    TSet<AActor*> InternalNameChanges;
+    int32 MigrationAttempts = 0;
+    /**
+     * Raised by a timer a few seconds after persistence is initialised. At OnWorldBeginPlay the
+     * railroad and vehicle subsystems have not registered their identifiers yet, so nothing that
+     * reads the world's stations may run before this.
+     */
+    bool bWorldStationsReady = false;
     /** Group -> PriorityIndex of the station picked last. Runtime only, deliberately not saved. */
     TMap<FGuid, int32> GroupRotationCursor;
     int32 ConfigurationRevision = 0;
@@ -95,9 +123,23 @@ private:
     FTimerHandle TruckPollTimerHandle;
 
     void InitializePersistence();
-    void SchedulePrunePermission();
-    bool PruneMissingStations();
+    void ScheduleWorldStationsReady();
     void RegisterDTTChatCommand();
+    /** Rebuilds every group from the station names currently in the world. */
+    void RebuildGroupsFromNames();
+    /** Rebuilds only when a station name, or the number of stations, actually changed. */
+    void RebuildGroupsIfStationsChanged(const TCHAR* Trigger);
+    uint32 ComputeStationFingerprint() const;
+    /** False until the railroad and vehicle subsystems have handed out their identifiers. */
+    bool HasAnyStations() const;
+    /** One-off: turns groups saved by an older version into tags on the station names. */
+    void MigrateSavedGroupsToTags();
+    bool RenameStationGuarded(AFGTrainStationIdentifier* Identifier, const FString& NewName);
+    bool RenameDockGuarded(AFGDockingStationIdentifier* Identifier, const FString& NewName);
+    /** Rewrites one station's tag, whichever kind it is. Empty GroupName strips the tag. */
+    bool RetagStation(const FDTTStationGroup& Group, const FDTTStationEntry& Entry, const FString& NewGroupName, int32 NewTargetSlots);
+    /** Group by id, looking among the drafts too. */
+    const FDTTStationGroup* FindGroupOrDraft(FGuid GroupId) const;
     void SyncConfigurationToSaveActor();
     bool IsRuntimeGameWorld() const;
     bool IsServer() const;
@@ -109,8 +151,6 @@ private:
     FDTTStationEntry* FindStationEntry(FDTTStationGroup& Group, const FString& StationName);
     const FDTTStationEntry* FindStationEntry(const FDTTStationGroup& Group, const FString& StationName) const;
     AFGTrainStationIdentifier* FindVanillaStationByName(const FString& StationName) const;
-    bool ResolveStationReferences();
-    bool RefreshStationDisplayName(AFGTrainStationIdentifier* Identifier);
     void RemoveInvalidBookings();
     void ReleaseBookingIfReached(AFGTrain* Train, AFGTrainStationIdentifier* DockedIdentifier);
     void ReleaseBooking(AFGTrain* Train, const TCHAR* Reason);
@@ -131,7 +171,6 @@ private:
     const FDTTStationGroup* FindGroupByDock(AFGDockingStationIdentifier* Identifier) const;
     AFGDockingStationIdentifier* FindDockByName(const FString& StationName) const;
     AFGDockingStationIdentifier* FindDockByPathNode(const FGuid& PathNodeGuid) const;
-    bool RefreshDockDisplayName(AFGDockingStationIdentifier* Identifier);
     void RemoveInvalidTruckBookings();
     void ReleaseTruckBooking(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason);
     void StartTruckPolling();

@@ -30,8 +30,11 @@ public:
     void SetDataVersion(int32 InVersion) { DataVersion = InVersion; }
 
 private:
+    // 4 and later store nothing: the configuration lives in the station names themselves. The
+    // actor stays because older saves reference the class, and an empty one is cheaper than the
+    // risk of pulling a class out from under a load.
     UPROPERTY(SaveGame)
-    int32 DataVersion = 3;
+    int32 DataVersion = 4;
 
     UPROPERTY(SaveGame)
     TArray<FDTTStationGroup> SavedGroups;

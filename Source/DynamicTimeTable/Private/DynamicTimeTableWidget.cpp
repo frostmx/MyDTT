@@ -385,7 +385,8 @@ void UDynamicTimeTableWidget::RebuildRuntimeDisplay()
 
         for (const FDTTStationEntry& Entry : Group.Stations)
         {
-            UTextBlock* StationText = MakeText(WidgetTree, Entry.DisplayName, 16, FLinearColor::White);
+            UTextBlock* StationText = MakeText(WidgetTree,
+                UDynamicTimeTableSubsystem::StripStationTag(Entry.DisplayName), 16, FLinearColor::White);
             Panel->AddChildToVerticalBox(StationText);
             RuntimeStationTexts.Add(StationText);
             RuntimeStationNames.Add(Entry.DisplayName);
@@ -461,7 +462,7 @@ void UDynamicTimeTableWidget::UpdateRuntimeDisplayInPlace()
             UTextBlock* StationText = RuntimeStationTexts[FlatStationIndex++];
             StationText->SetText(FText::FromString(FString::Printf(
                 TEXT("    %s     booked %d / target %d%s%s"),
-                *Entry.DisplayName,
+                *UDynamicTimeTableSubsystem::StripStationTag(Entry.DisplayName),
                 StationAssigned,
                 StationTarget,
                 bStationOverloaded ? TEXT("  OVERLOAD") : TEXT(""),

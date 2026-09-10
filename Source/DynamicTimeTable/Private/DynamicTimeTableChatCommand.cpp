@@ -18,7 +18,7 @@ ADynamicTimeTableChatCommand::ADynamicTimeTableChatCommand()
     Usage = NSLOCTEXT(
         "DynamicTimeTable",
         "ChatCommand.DTT.Usage",
-        "/dtt - Open DynamicTimeTable; /dtt recalc - rebuild active bookings (trains and trucks)");
+        "/dtt - Open DynamicTimeTable; /dtt groups - list the groups; /dtt recalc - rebuild active bookings");
     Aliases.Add(TEXT("dynamictimetable"));
 }
 
@@ -53,6 +53,38 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
     }
 
     if (Arguments.Num() >= 2 &&
+        Arguments[1].Equals(TEXT("groups"), ESearchCase::IgnoreCase))
+    {
+        const TArray<FDTTStationGroup>& Groups = Subsystem->GetStationGroups();
+        if (Groups.Num() == 0)
+        {
+            Sender->SendChatMessage(
+                TEXT("dTT: no groups. Add \"[name]\" to a station name to put it in a group, "
+                     "or \"[name,3]\" to give it three slots."),
+                FLinearColor(0.20f, 0.80f, 1.00f));
+            return EExecutionStatus::COMPLETED;
+        }
+
+        for (const FDTTStationGroup& Group : Groups)
+        {
+            TArray<FDTTStationRuntimeLoad> Loads;
+            Subsystem->GetGroupRuntimeLoad(Group.GroupId, Loads);
+            FString Line = FString::Printf(TEXT("%s [%s]:"), *Group.GroupName,
+                Group.Kind == EDTTGroupKind::Truck ? TEXT("Trucks") : TEXT("Trains"));
+            for (const FDTTStationRuntimeLoad& Load : Loads)
+            {
+                Line += FString::Printf(TEXT("  %s %d/%d%s"),
+                    *UDynamicTimeTableSubsystem::StripStationTag(Load.StationName),
+                    Load.AssignedTrains, Load.TargetSlots,
+                    Load.bOverloaded ? TEXT(" OVERLOAD") : TEXT(""));
+            }
+            if (Loads.Num() == 0) Line += TEXT("  (empty)");
+            Sender->SendChatMessage(Line, FLinearColor(0.20f, 0.80f, 1.00f));
+        }
+        return EExecutionStatus::COMPLETED;
+    }
+
+    if (Arguments.Num() >= 2 &&
         Arguments[1].Equals(TEXT("recalc"), ESearchCase::IgnoreCase))
     {
         Subsystem->RecalculateBookingsFromVanilla();
@@ -68,12 +100,13 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
             Player->GetRemoteCallObjectOfClass(UDynamicTimeTableRemoteCallObject::StaticClass()));
         if (!IsValid(RemoteCallObject))
         {
-            RemoteCallObject = Cast<UDynamicTimeTableRemoteCallObject>(
-                Player->RegisterRemoteCallObjectClass(UDynamicTimeTableRemoteCallObject::StaticClass()));
-        }
-        if (!IsValid(RemoteCallObject))
-        {
-            Sender->SendChatMessage(TEXT("dTT: Multiplayer UI channel is not ready."), FLinearColor::Red);
+            // The channel is only created for a player who has the mod. Creating one here for a
+            // player who does not would send them a subobject of a class they cannot resolve and
+            // drop their connection - so say so instead.
+            Sender->SendChatMessage(
+                TEXT("dTT: the window needs the mod installed on your client. "
+                     "The server balances without it; /dtt groups shows the state."),
+                FLinearColor::Red);
             return EExecutionStatus::UNCOMPLETED;
         }
         RemoteCallObject->Client_OpenWindow();
