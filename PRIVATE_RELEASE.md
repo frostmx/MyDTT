@@ -32,14 +32,15 @@ For personal storage it may be copied as `MyDTT-1.0.0.zip`.
 Verified release artifact:
 
 - File: `C:\Users\frost\SF_server\dist\MyDTT-1.0.0.zip`
-- Size: `43,825,395` bytes
-- SHA-256: `fa9912f4ca396ee3f298fb24131795addb6596b227c7d628ef19decc7f60522e`
+- Size: `43,824,912` bytes
+- SHA-256: `ea499692008673d30723c466b51c4de720419ace46f5027e2bd44ab25eb12194`
 - Targets: `Windows`, `WindowsServer`
 
 ## Release notes
 
-> MyDTT adds demand-based truck delivery to DynamicTimeTable. Name a truck `Resource` or `(Resource)`,
-> and mark every participating LOAD/UNLOAD station with `(Resource)`. An UNLOAD station requests a
+> MyDTT adds demand-based truck delivery to DynamicTimeTable. Put a tagged LOAD producer first in the
+> truck route and mark every participating LOAD/UNLOAD station with `(Resource)`. The truck's original
+> name is irrelevant; MyDTT renames it to `Resource → Current station`. An UNLOAD station requests a
 > delivery below 10 full stacks; `(Resource-N)` overrides that threshold. The dispatcher builds each
 > lap from the producer to the most starved open requester, prevents trucks from claiming the same
 > station, and can include an optional `(F)` fuel stop. A resource label may use the player's language

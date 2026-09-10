@@ -260,20 +260,6 @@ FString UDynamicTimeTableSubsystem::MakeDispatchTaggedName(const FString& BaseNa
     return Base.IsEmpty() ? Tag : FString::Printf(TEXT("%s %s"), *Base, *Tag);
 }
 
-FString UDynamicTimeTableSubsystem::NormalizeDispatchResourceId(const FString& VehicleName)
-{
-    const FString Trimmed = VehicleName.TrimStartAndEnd();
-    FString Base, ResourceId;
-    EDTTDispatchRole Role = EDTTDispatchRole::None;
-    int32 Threshold = 0;
-    if (ParseDispatchTag(Trimmed, Base, ResourceId, Role, Threshold) &&
-        Base.IsEmpty() && Role == EDTTDispatchRole::ByStationMode)
-    {
-        return ResourceId;
-    }
-    return Trimmed;
-}
-
 bool UDynamicTimeTableSubsystem::ParseFuelStopTag(const FString& FullName, FString& OutBaseName)
 {
     OutBaseName = FullName.TrimStartAndEnd();
@@ -1327,13 +1313,49 @@ bool UDynamicTimeTableSubsystem::DoesDispatchStationMatchMode(const FDTTDispatch
         : Station.Role == EDTTDispatchRole::Requester && !Dock->GetIsInLoadMode();
 }
 
-bool UDynamicTimeTableSubsystem::IsDispatchTruck(const FString& ResourceId) const
+FString UDynamicTimeTableSubsystem::ResolveDispatchResourceFromProducer(const FGuid& ProducerGuid) const
 {
-    const FString Resource = NormalizeDispatchResourceId(ResourceId);
-    return !Resource.IsEmpty() && DispatchStations.ContainsByPredicate([&](const FDTTDispatchStation& Station)
+    if (!ProducerGuid.IsValid()) return FString();
+    const FDTTDispatchStation* Producer = DispatchStations.FindByPredicate([&](const FDTTDispatchStation& Station)
     {
-        return Station.ResourceId.Equals(Resource, ESearchCase::IgnoreCase) && DoesDispatchStationMatchMode(Station);
+        return Station.DockingPathNodeGuid == ProducerGuid &&
+            GetEffectiveDispatchRole(Station) == EDTTDispatchRole::Producer &&
+            DoesDispatchStationMatchMode(Station);
     });
+    return Producer ? Producer->ResourceId : FString();
+}
+
+void UDynamicTimeTableSubsystem::UpdateDispatchVehicleName(
+    AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId,
+    const TArray<FGuid>& Route, int32 CurrentTargetIndex) const
+{
+    if (!IsValid(Vehicle) || ResourceId.IsEmpty()) return;
+
+    FString DestinationName;
+    if (Route.IsValidIndex(CurrentTargetIndex))
+    {
+        if (const AFGDockingStationIdentifier* Destination = FindDockByPathNode(Route[CurrentTargetIndex]))
+        {
+            const FString FullName = Destination->GetStationName().ToString();
+            DestinationName = StripDispatchTag(FullName);
+            FString WithoutFuelTag;
+            if (ParseFuelStopTag(DestinationName, WithoutFuelTag)) DestinationName = WithoutFuelTag;
+            DestinationName = StripStationTag(DestinationName).TrimStartAndEnd();
+            if (DestinationName.IsEmpty()) DestinationName = FullName.TrimStartAndEnd();
+        }
+    }
+
+    const FString WantedName = DestinationName.IsEmpty()
+        ? ResourceId
+        : FString::Printf(TEXT("%s → %s"), *ResourceId, *DestinationName);
+    const FString PreviousName = Vehicle->GetVehicleName().ToString();
+    if (PreviousName == WantedName) return;
+
+    Vehicle->SetVehicleName(FText::FromString(WantedName));
+    UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+        TEXT("DISPATCH_TRUCK_RENAMED Previous='%s' New='%s' Resource='%s' Destination='%s'"),
+        *PreviousName, *WantedName, *ResourceId,
+        DestinationName.IsEmpty() ? TEXT("<unresolved>") : *DestinationName);
 }
 
 bool UDynamicTimeTableSubsystem::UpdateRememberedAnchors(
@@ -1820,18 +1842,20 @@ void UDynamicTimeTableSubsystem::ProcessCurrentTruckTarget(AFGWheeledVehicleIden
     RemoveInvalidTruckBookings();
     PruneStaleRequesterClaims();
 
-    const FString ResourceId = NormalizeDispatchResourceId(Vehicle->GetVehicleName().ToString());
-    if (IsDispatchTruck(ResourceId))
+    const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+    const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
+    const FString ResourceId = Route.Num() > 0
+        ? ResolveDispatchResourceFromProducer(Route[0]) : FString();
+    if (!ResourceId.IsEmpty())
     {
-        // Dispatch and load-balancing are independent modes. A resource-named truck must not
-        // also have one of its freshly built waypoints substituted by the balancing algorithm.
+        // Dispatch and load-balancing are independent modes. Route[0], not the mutable display
+        // name, opts this truck in and supplies the resource for every subsequent waypoint.
+        UpdateDispatchVehicleName(Vehicle, ResourceId, Route, Index);
         ReleaseTruckBooking(Vehicle, TEXT("resource dispatch"));
         ProcessDispatchTruckTarget(Vehicle, ResourceId, Trigger);
         return;
     }
 
-    const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
-    const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
     // Covers both INDEX_NONE and an index left over from a route the player has since shortened.
     if (!Route.IsValidIndex(Index)) return;
 
@@ -1917,6 +1941,11 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
 
         const int32 TargetIndex = Vehicle->GetCurrentTargetWaypointIndex();
         const bool bDocking = Vehicle->IsCurrentlyDocking();
+        const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+        const FString ResourceId = Route.Num() > 0
+            ? ResolveDispatchResourceFromProducer(Route[0]) : FString();
+        if (!ResourceId.IsEmpty())
+            UpdateDispatchVehicleName(Vehicle, ResourceId, Route, TargetIndex);
         FDTTTruckPollState* Previous = TruckPollStates.Find(Vehicle);
 
         // First sighting only records. Acting here would redirect a vehicle that is already most

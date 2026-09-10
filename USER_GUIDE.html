@@ -40,16 +40,16 @@
         <div class="eyebrow">Руководство пользователя</div>
         <h1>Доставка по реальному спросу</h1>
         <p class="lead">MyDTT автоматически строит маршрут грузовика от производителя к одной самой нуждающейся станции, где запас выбранного ресурса опустился ниже заданного порога. Несколько грузовиков делят заявки между собой, а отдельную заправку можно сделать опциональной.</p>
-        <div class="callout"><strong>Главное правило:</strong> роль станции задаётся одновременно тегом в имени и её штатным переключателем. Производитель должен быть в режиме <span class="mode load">LOAD</span>, потребитель — <span class="mode unload">UNLOAD</span>.</div>
+        <div class="callout"><strong>Главное правило:</strong> роль станции задаётся одновременно тегом в имени и её штатным переключателем. Производитель должен быть в режиме <span class="mode load">LOAD</span>, потребитель — <span class="mode unload">UNLOAD</span>. Имя грузовика настраивать не нужно.</div>
       </header>
 
       <section id="quick-start">
         <h2>Быстрый старт</h2>
         <div class="grid">
-          <article class="card"><span class="step-number">1</span><h3>Назовите грузовик</h3><p>Имя должно совпадать с отображаемым именем предмета: <code>Packaged Fuel</code> или <code>(Packaged Fuel)</code>. Скобки вокруг полного имени необязательны.</p></article>
-          <article class="card"><span class="step-number">2</span><h3>Отметьте производителя</h3><p>Добавьте тег <code>(Ресурс)</code> к станции и включите <span class="mode load">LOAD</span>. Пример: <code>НПЗ (Packaged Fuel)</code>.</p></article>
-          <article class="card"><span class="step-number">3</span><h3>Отметьте потребителей</h3><p>Используйте тот же тег на станциях <span class="mode unload">UNLOAD</span>. Порог по умолчанию — 10 полных стаков; <code>(Ресурс-N)</code> переопределяет его.</p></article>
-          <article class="card"><span class="step-number">4</span><h3>Добавьте производителя в маршрут</h3><p>Первая станция, <code>Route[0]</code>, всегда производитель. Этого достаточно для старта: нужного потребителя MyDTT добавит сам. Заправка <code>(F)</code> необязательна.</p></article>
+          <article class="card"><span class="step-number">1</span><h3>Отметьте производителя</h3><p>Добавьте тег <code>(Ресурс)</code> к станции и включите <span class="mode load">LOAD</span>. Пример: <code>НПЗ (Packaged Fuel)</code>.</p></article>
+          <article class="card"><span class="step-number">2</span><h3>Отметьте потребителей</h3><p>Используйте тот же тег на станциях <span class="mode unload">UNLOAD</span>. Порог по умолчанию — 10 полных стаков; <code>(Ресурс-N)</code> переопределяет его.</p></article>
+          <article class="card"><span class="step-number">3</span><h3>Запишите производителя первым</h3><p>Первая станция, <code>Route[0]</code>, всегда производитель. Именно из её тега MyDTT узнаёт ресурс; исходное имя грузовика не имеет значения.</p></article>
+          <article class="card"><span class="step-number">4</span><h3>Включите автопилот</h3><p>MyDTT добавит нужного потребителя сам и назовёт машину по шаблону <code>Ресурс → Текущая станция</code>. Заправка <code>(F)</code> необязательна.</p></article>
         </div>
       </section>
 
@@ -72,7 +72,7 @@
 
       <section id="route">
         <h2>Как меняется маршрут</h2>
-        <p>Перестроение происходит только на границе нового круга, когда текущая цель грузовика имеет индекс <code>0</code>. Поэтому активный рейс не меняется посреди дороги. Открытые потребители сортируются по доле <code>запас / порог</code>, и на круг выбирается ровно один — самый голодный.</p>
+        <p>Перестроение происходит только на границе нового круга, когда текущая цель грузовика имеет индекс <code>0</code>. Поэтому активный рейс не меняется посреди дороги. Открытые потребители сортируются по доле <code>запас / порог</code>, и на круг выбирается ровно один — самый голодный. При каждой смене цели имя машины обновляется, например <code>Packaged Fuel → Склад A</code>.</p>
         <div class="route-demo" aria-label="Анимация маршрута грузовика от производителя через одного потребителя к заправке">
           <div class="demo-head"><h3>Один круг диспетчера</h3><button class="animation-toggle" id="animation-toggle" type="button" aria-pressed="false">Пауза</button></div>
           <div class="route-track">
@@ -105,10 +105,10 @@
       <section id="examples">
         <h2>Готовые примеры</h2>
         <div class="grid">
-          <article class="example"><h3>Простая доставка</h3><p>Грузовик: <code>(Iron Ore)</code></p><p><code>Шахта (Iron Ore)</code> <span class="mode load">LOAD</span><br><code>Литейная (Iron Ore)</code> <span class="mode unload">UNLOAD</span></p><p>Начальный маршрут: только <code>Шахта</code>.</p></article>
-          <article class="example"><h3>С отдельной заправкой</h3><p>Грузовик: <code>Packaged Fuel</code></p><p><code>НПЗ (Packaged Fuel)</code> <span class="mode load">LOAD</span><br><code>Удалённый склад (Packaged Fuel-12)</code> <span class="mode unload">UNLOAD</span><br><code>Дорожная АЗС (F)</code></p><p>База: <code>НПЗ → АЗС</code>; склад добавляется по спросу.</p></article>
+          <article class="example"><h3>Простая доставка</h3><p><code>Шахта (Iron Ore)</code> <span class="mode load">LOAD</span><br><code>Литейная (Iron Ore)</code> <span class="mode unload">UNLOAD</span></p><p>Начальный маршрут: только <code>Шахта</code>. Имя машины станет <code>Iron Ore → Шахта</code>, затем <code>Iron Ore → Литейная</code>.</p></article>
+          <article class="example"><h3>С отдельной заправкой</h3><p><code>НПЗ (Packaged Fuel)</code> <span class="mode load">LOAD</span><br><code>Удалённый склад (Packaged Fuel-12)</code> <span class="mode unload">UNLOAD</span><br><code>Дорожная АЗС (F)</code></p><p>База: <code>НПЗ → АЗС</code>; склад добавляется по спросу. Исходное имя грузовика может быть любым.</p></article>
           <article class="example"><h3>Несколько потребителей</h3><p><code>Склад A (Iron Ore-10)</code>: 2 стака<br><code>Склад B (Iron Ore-20)</code>: 8 стаков</p><p>Отношения: <code>2/10 = 0.2</code> и <code>8/20 = 0.4</code>. На этот круг выбирается склад A.</p></article>
-          <article class="example"><h3>Несколько грузовиков</h3><p>Оба грузовика названы <code>Iron Ore</code>. Первый закрепляет за собой одну лучшую заявку. Второй видит только ещё не закреплённых потребителей и может взять следующего.</p></article>
+          <article class="example"><h3>Несколько грузовиков</h3><p>У обоих грузовиков первым пунктом стоит LOAD-производитель <code>(Iron Ore)</code>. Первый закрепляет за собой одну лучшую заявку. Второй видит только ещё не закреплённых потребителей и может взять следующего.</p></article>
         </div>
       </section>
 
@@ -126,7 +126,7 @@ Fuel (F) | Дорожная АЗС | guid=…</pre></div>
       <section id="troubleshooting">
         <h2>Если грузовик не перестраивает маршрут</h2>
         <ol class="checklist">
-          <li>Проверьте точное совпадение имени грузовика и ресурса внутри тега; внешние скобки имени машины не учитываются.</li><li>Проверьте переключатель станции: Producer — <span class="mode load">LOAD</span>, Requester — <span class="mode unload">UNLOAD</span>.</li><li>Убедитесь, что Producer записан первым пунктом маршрута; остальные станции можно не добавлять вручную.</li><li>Дождитесь возвращения к цели с индексом <code>0</code>: посреди рейса маршрут специально не меняется.</li><li>Выполните <code>/dtt dispatch</code> и проверьте поля <code>active</code>, <code>stock</code>, <code>open</code> и <code>claim</code>.</li><li>Если используется локализованное или своё имя ресурса, убедитесь, что LOAD-производитель содержит один вид груза. Текущая версия рассчитана на предметы в стаках; жидкости без упаковки не поддерживаются.</li>
+          <li>Убедитесь, что Producer с тегом ресурса записан первым пунктом маршрута; исходное имя машины не используется.</li><li>Проверьте переключатель станции: Producer — <span class="mode load">LOAD</span>, Requester — <span class="mode unload">UNLOAD</span>.</li><li>Остальные станции можно не добавлять вручную: потребителя выберет диспетчер.</li><li>Дождитесь возвращения к цели с индексом <code>0</code>: посреди рейса маршрут специально не меняется.</li><li>Выполните <code>/dtt dispatch</code> и проверьте поля <code>active</code>, <code>stock</code>, <code>open</code> и <code>claim</code>.</li><li>Если используется локализованное или своё имя ресурса, убедитесь, что LOAD-производитель содержит один вид груза. Текущая версия рассчитана на предметы в стаках; жидкости без упаковки не поддерживаются.</li>
         </ol>
       </section>
 

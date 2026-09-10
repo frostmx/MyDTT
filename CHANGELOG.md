@@ -7,7 +7,8 @@ First private MyDTT release.
 - Changed the Mod Reference to `MyDTT`.
 - Added neutral `(Resource)` tags: LOAD stations become producers and UNLOAD stations become
   requesters with a default threshold of 10 full stacks.
-- Allowed a truck named either `Resource` or `(Resource)` to start with a producer-only route.
+- Derived a truck's resource from the tagged LOAD producer at `Route[0]`; the initial truck name is irrelevant.
+- Updated dispatch truck names automatically as `Resource → Current station`.
 - Retained `(Resource-N)` as a requester threshold override and legacy `(Resource+)` compatibility.
 - Added demand-based truck dispatch.
 - Inferred the cargo item from the matching LOAD producer when a resource label uses another

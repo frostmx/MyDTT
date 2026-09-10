@@ -82,8 +82,6 @@ public:
     static FString StripDispatchTag(const FString& FullName);
     /** The inverse of ParseDispatchTag. */
     static FString MakeDispatchTaggedName(const FString& BaseName, const FString& ResourceId, EDTTDispatchRole Role, int32 Threshold);
-    /** Accepts either "Resource" or a whole-name neutral wrapper "(Resource)" on a vehicle. */
-    static FString NormalizeDispatchResourceId(const FString& VehicleName);
     /** Exact, resource-independent marker for an optional dedicated refuelling waypoint. */
     static bool ParseFuelStopTag(const FString& FullName, FString& OutBaseName);
 
@@ -226,8 +224,11 @@ private:
     EDTTDispatchRole GetEffectiveDispatchRole(const FDTTDispatchStation& Station) const;
     /** LOAD is producer, UNLOAD is requester; a contradictory tag is never actionable. */
     bool DoesDispatchStationMatchMode(const FDTTDispatchStation& Station) const;
-    /** True when at least one live dispatch station uses this resource id. */
-    bool IsDispatchTruck(const FString& ResourceId) const;
+    /** Route[0] opts a truck into dispatch and supplies its resource when it is a live LOAD producer. */
+    FString ResolveDispatchResourceFromProducer(const FGuid& ProducerGuid) const;
+    /** Keeps the replicated vehicle name useful without using it as dispatch configuration. */
+    void UpdateDispatchVehicleName(AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId,
+        const TArray<FGuid>& Route, int32 CurrentTargetIndex) const;
     /**
      * Producer is structurally Route[0]. An optional dedicated Fuel stop is selected only by its
      * explicit (F) station tag and remembered with its route position while a lap omits it.
