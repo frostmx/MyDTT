@@ -60,13 +60,14 @@ struct FDTTStationGroup
     TArray<FDTTStationEntry> Stations;
 };
 
-/** What a docking station tagged with "(ResourceId+)" or "(ResourceId-N)" does for resource dispatch. */
+/** How a docking station's dispatch tag determines its role. */
 UENUM(BlueprintType)
 enum class EDTTDispatchRole : uint8
 {
     None = 0,
     Producer = 1 UMETA(DisplayName = "Producer"),
     Requester = 2 UMETA(DisplayName = "Requester"),
+    ByStationMode = 3 UMETA(DisplayName = "LOAD / UNLOAD"),
 };
 
 /**
@@ -88,6 +89,7 @@ struct FDTTDispatchStation
     EDTTDispatchRole Role = EDTTDispatchRole::None;
 
     // Requester only: open (a candidate for dispatch) while the dock's stock is below this many stacks.
+    // A neutral "(ResourceId)" tag receives the subsystem's default threshold.
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dynamic Time Table")
     int32 Threshold = 0;
 

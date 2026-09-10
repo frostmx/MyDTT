@@ -14,7 +14,7 @@ class UTextBlock;
 class UDynamicTimeTableRemoteCallObject;
 
 UCLASS(NotBlueprintable)
-class DYNAMICTIMETABLE_API UDynamicTimeTableWidget : public UFGInteractWidget
+class MYDTT_API UDynamicTimeTableWidget : public UFGInteractWidget
 {
     GENERATED_BODY()
 

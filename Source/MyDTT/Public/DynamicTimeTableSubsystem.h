@@ -17,7 +17,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FDTTGroupsChangedDelegate);
 DECLARE_MULTICAST_DELEGATE(FDTTGroupsChangedNativeDelegate);
 
 UCLASS(BlueprintType)
-class DYNAMICTIMETABLE_API UDynamicTimeTableSubsystem : public UWorldSubsystem
+class MYDTT_API UDynamicTimeTableSubsystem : public UWorldSubsystem
 {
     GENERATED_BODY()
 
@@ -72,17 +72,18 @@ public:
     static FString SanitizeGroupName(const FString& GroupName);
 
     /**
-     * A dispatch role is written in a *separate* tag, in parentheses, e.g. "Iron Mine (Iron+)" or
-     * "Foundry Input (Iron-10)" - open as a requester while stock is below 10 stacks. Deliberately
-     * a different bracket family from the "[group,N]" balancing tag above: ParseStationTag only
-     * ever looks at '[' / ']', this only ever looks at '(' / ')', so a station can carry both tags
-     * without either parser seeing the other's.
+     * A resource is written in a *separate* tag, e.g. "Iron Mine (Iron)". LOAD makes it a producer,
+     * UNLOAD a requester with the default threshold. "(Iron-10)" overrides that requester threshold;
+     * legacy explicit "(Iron+)" remains supported. Parentheses deliberately differ from the
+     * "[group,N]" balancing tag, so one station can carry both independently.
      */
     static bool ParseDispatchTag(const FString& FullName, FString& OutBaseName, FString& OutResourceId, EDTTDispatchRole& OutRole, int32& OutThreshold);
     /** The name without its dispatch tag, for display. */
     static FString StripDispatchTag(const FString& FullName);
     /** The inverse of ParseDispatchTag. */
     static FString MakeDispatchTaggedName(const FString& BaseName, const FString& ResourceId, EDTTDispatchRole Role, int32 Threshold);
+    /** Accepts either "Resource" or a whole-name neutral wrapper "(Resource)" on a vehicle. */
+    static FString NormalizeDispatchResourceId(const FString& VehicleName);
     /** Exact, resource-independent marker for an optional dedicated refuelling waypoint. */
     static bool ParseFuelStopTag(const FString& FullName, FString& OutBaseName);
 
@@ -220,6 +221,9 @@ private:
     int32 GetGroupPathNetworkID(const FDTTStationGroup& Group) const;
 
     // Resource dispatch.
+    static constexpr int32 DefaultDispatchRequesterThresholdStacks = 10;
+    /** Resolves a neutral tag against the station's live LOAD/UNLOAD switch. */
+    EDTTDispatchRole GetEffectiveDispatchRole(const FDTTDispatchStation& Station) const;
     /** LOAD is producer, UNLOAD is requester; a contradictory tag is never actionable. */
     bool DoesDispatchStationMatchMode(const FDTTDispatchStation& Station) const;
     /** True when at least one live dispatch station uses this resource id. */
@@ -238,7 +242,7 @@ private:
     float EstimateLoopFuelConsumptionMW(class AFGWheeledVehicle* Vehicle, const TArray<FGuid>& Loop) const;
     /** Omits Fuel only when the live fuel inventory contains strictly more than two loop costs. */
     bool ShouldSkipFuelStop(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& LoopWithoutFuel) const;
-    /** Selects and claims every open requester, most starved stock/threshold ratio first. */
+    /** Selects and claims at most one open requester: the most starved stock/threshold ratio. */
     TArray<FGuid> SelectRequestersForResource(const FString& ResourceId, AFGWheeledVehicleIdentifier* Vehicle);
     /** Rebuilds the route at the producer boundary, preserving the remembered (F) position. */
     void ProcessDispatchTruckTarget(AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId, const TCHAR* Trigger);
@@ -248,8 +252,10 @@ private:
     void PruneStaleRequesterClaims();
     /** Drops every claim owned by a vehicle that no longer follows its dispatched route. */
     void ReleaseRequesterClaimsForVehicle(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason);
-    /** Resolves a resource id (matched against the item's display name) to its item class. Cached after the first call. */
+    /** Resolves an exact localized display name to an item class. Cached after the first call. */
     TSubclassOf<class UFGItemDescriptor> ResolveItemClassByName(const FString& Name) const;
+    /** Also accepts an arbitrary/language-specific id by inferring the sole cargo class at its LOAD producer. */
+    TSubclassOf<class UFGItemDescriptor> ResolveItemClassForResource(const FString& ResourceId) const;
     /** Current stock at a dock's connected storage, in whole stacks (rounded down). */
     int32 ReadDockStockInStacks(AFGDockingStationIdentifier* Dock, TSubclassOf<class UFGItemDescriptor> ItemClass) const;
 };

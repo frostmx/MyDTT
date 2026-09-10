@@ -1,7 +1,8 @@
 # MyDTT
 
 Personal DynamicTimeTable fork with dynamic train balancing and demand-based truck dispatch.
-The internal mod reference remains `DynamicTimeTable` to preserve its Unreal paths and compatibility.
+Plugin, C++ module and Mod Reference: `MyDTT`. Redirects from the historical
+`DynamicTimeTable` paths are shipped for existing saves.
 
 Upstream mod page: https://ficsit.app/mod/3ArTdBPY7fSAYT
 

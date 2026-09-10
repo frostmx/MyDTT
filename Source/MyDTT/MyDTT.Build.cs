@@ -1,8 +1,8 @@
 using UnrealBuildTool;
 
-public class DynamicTimeTable : ModuleRules
+public class MyDTT : ModuleRules
 {
-    public DynamicTimeTable(ReadOnlyTargetRules Target) : base(Target)
+    public MyDTT(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 

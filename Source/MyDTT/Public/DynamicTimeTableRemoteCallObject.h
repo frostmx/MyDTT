@@ -17,7 +17,7 @@ struct FDTTClientSnapshot
 DECLARE_MULTICAST_DELEGATE(FDTTClientSnapshotChanged);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FDTTClientOperationResult, bool, const FString&);
 UCLASS()
-class DYNAMICTIMETABLE_API UDynamicTimeTableRemoteCallObject : public UFGRemoteCallObject
+class MYDTT_API UDynamicTimeTableRemoteCallObject : public UFGRemoteCallObject
 {
     GENERATED_BODY()
 public:

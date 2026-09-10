@@ -24,7 +24,7 @@
     ],
     "Modules": [
         {
-            "Name": "DynamicTimeTable",
+            "Name": "MyDTT",
             "Type": "Runtime",
             "LoadingPhase": "Default"
         }

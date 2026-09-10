@@ -4,17 +4,15 @@
 
 - Display name: `MyDTT`
 - Version: `1.0.0`
-- Internal Mod Reference: `DynamicTimeTable`
+- Mod Reference: `MyDTT`
 - SML dependency: `^3.12.0`
 - Supported package targets: Windows client and Windows dedicated server
 - Client installation: optional (`RequiredOnRemote: false`); the server-side dispatcher still runs
 
-The internal reference is deliberately unchanged. Renaming it would change the plugin content mount,
-Unreal object paths and the client-mod check used before registering the RCO. For a private replacement
-build, keeping the reference is safer and avoids a save/content migration.
-
-Do not install this package alongside the upstream `DynamicTimeTable` package: both use the same Mod
-Reference and this build is its replacement.
+The plugin, content mount and C++ module use the new `MyDTT` reference. `DefaultMyDTT.ini` redirects
+historical `/DynamicTimeTable` and `/Script/DynamicTimeTable` paths for existing saves. Do not install
+this package alongside the upstream plugin: both would register the same `/dtt` command and operate on
+the same station routes.
 
 ## Build
 
@@ -22,36 +20,38 @@ From PowerShell:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File C:\Users\frost\SF_server\alpakit-dev.ps1 `
-  -ModName DynamicTimeTable -NoDeploy
+  -ModName MyDTT -NoDeploy
 ```
 
 The merged upload/install archive is produced at:
 
-`C:\SFMod\SatisfactoryModLoader\Saved\ArchivedPlugins\DynamicTimeTable\DynamicTimeTable.zip`
+`C:\SFMod\SatisfactoryModLoader\Saved\ArchivedPlugins\MyDTT\MyDTT.zip`
 
-For personal storage it may be copied as `MyDTT-1.0.0.zip`; the archive contents and internal Mod
-Reference must remain unchanged.
+For personal storage it may be copied as `MyDTT-1.0.0.zip`.
 
 Verified release artifact:
 
 - File: `C:\Users\frost\SF_server\dist\MyDTT-1.0.0.zip`
-- Size: `43,721,969` bytes
-- SHA-256: `bd46699b94ab88c3143baf15d6fe537d04b58bc6300992e86ec8e643156fff52`
+- Size: `43,825,395` bytes
+- SHA-256: `fa9912f4ca396ee3f298fb24131795addb6596b227c7d628ef19decc7f60522e`
 - Targets: `Windows`, `WindowsServer`
 
 ## Release notes
 
-> MyDTT adds demand-based truck delivery to DynamicTimeTable. Name a truck after the item it carries,
-> mark a LOAD station with `(Resource+)`, and mark UNLOAD stations with `(Resource-N)`, where N is the
-> restock threshold in full stacks. The dispatcher builds each lap from the producer to every open
-> requester, prevents trucks from claiming the same station, and can include an optional `(F)` fuel stop.
+> MyDTT adds demand-based truck delivery to DynamicTimeTable. Name a truck `Resource` or `(Resource)`,
+> and mark every participating LOAD/UNLOAD station with `(Resource)`. An UNLOAD station requests a
+> delivery below 10 full stacks; `(Resource-N)` overrides that threshold. The dispatcher builds each
+> lap from the producer to the most starved open requester, prevents trucks from claiming the same
+> station, and can include an optional `(F)` fuel stop. A resource label may use the player's language
+> or a custom alias when the matching LOAD producer contains one unambiguous cargo item class.
 > Parenthesized tags on a group are inherited by every station in that group. Use `/dtt dispatch` to see
 > live stock, station modes, open requests, claims and fuel stops.
 
 ## Before using the archive
 
 1. Keep a backup of the save.
-2. Remove or disable the upstream `DynamicTimeTable` package first.
+2. Remove or disable the upstream `DynamicTimeTable` package first to avoid two dispatchers and two
+   `/dtt` commands acting on the same world.
 3. Install the matching target from the archive on the server and, if the `/dtt` window is needed, on
    the client as well.
 4. Verify the loaded-mods screen reports `MyDTT 1.0.0`.

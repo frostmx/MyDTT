@@ -5,7 +5,7 @@
 #include "DynamicTimeTableChatCommand.generated.h"
 
 UCLASS(NotBlueprintable)
-class DYNAMICTIMETABLE_API ADynamicTimeTableChatCommand : public AChatCommandInstance
+class MYDTT_API ADynamicTimeTableChatCommand : public AChatCommandInstance
 {
     GENERATED_BODY()
 

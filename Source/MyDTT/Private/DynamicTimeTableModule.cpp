@@ -64,7 +64,7 @@ void FDynamicTimeTableModule::TryRegisterRemoteCallObject(AFGPlayerController* P
             PC->GetWorld()->GetTimerManager().SetTimerForNextTick(FTimerDelegate::CreateLambda([WeakPC,Next](){TryRegisterRemoteCallObject(WeakPC.Get(),Next);}));
             return;
         }
-        bClientHasMod=SMLRCO->IsClientModInstalled(TEXT("DynamicTimeTable"));
+        bClientHasMod=SMLRCO->IsClientModInstalled(TEXT("MyDTT"));
     }
 
     if(!bClientHasMod){UE_LOG(LogDynamicTimeTableModule,Log,TEXT("dTT RCO not registered: client does not have the mod. The server keeps balancing without it."));return;}
@@ -79,4 +79,4 @@ void FDynamicTimeTableModule::ShutdownModule(){
 if(GameModePostLoginHandle.IsValid()){FGameModeEvents::GameModePostLoginEvent.Remove(GameModePostLoginHandle);GameModePostLoginHandle.Reset();}
 #endif
 UE_LOG(LogDynamicTimeTableModule,Log,TEXT("DynamicTimeTable module shut down."));}
-IMPLEMENT_MODULE(FDynamicTimeTableModule,DynamicTimeTable)
+IMPLEMENT_MODULE(FDynamicTimeTableModule,MyDTT)

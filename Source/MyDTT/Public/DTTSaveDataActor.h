@@ -7,7 +7,7 @@
 #include "DTTSaveDataActor.generated.h"
 
 UCLASS(NotBlueprintable, NotPlaceable)
-class DYNAMICTIMETABLE_API ADTTSaveDataActor : public AActor, public IFGSaveInterface
+class MYDTT_API ADTTSaveDataActor : public AActor, public IFGSaveInterface
 {
     GENERATED_BODY()
 

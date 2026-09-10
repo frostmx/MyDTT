@@ -18,13 +18,13 @@
     table{width:100%;border-collapse:collapse;overflow:hidden;border-radius:.8rem;background:var(--panel)}th,td{padding:.85rem 1rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}th{color:var(--orange2);background:#242a31}tr:last-child td{border-bottom:0}
     .mode{display:inline-flex;gap:.35rem;padding:.15rem .5rem;border-radius:999px;color:#101418;font-size:.79rem;font-weight:900}.load{background:var(--orange)}.unload{background:var(--blue)}
     .terminal{padding:1rem 1.1rem;overflow-x:auto;color:#d9f7e6;background:#0b0e11}.terminal pre{margin:0;font:.88rem/1.6 Consolas,"Cascadia Mono",monospace;white-space:pre-wrap}.terminal .prompt{color:var(--orange)}
-    .route-demo{position:relative;margin:1.5rem 0;padding:1.2rem;overflow:hidden}.demo-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.2rem}.demo-head h3{margin:0}.animation-toggle{padding:.48rem .8rem;border:1px solid var(--orange);border-radius:.55rem;color:#18120b;background:var(--orange);font:700 .86rem/1 "Segoe UI",Arial,sans-serif;cursor:pointer}.animation-toggle:hover,.animation-toggle:focus{background:var(--orange2);outline:2px solid #ffffff38;outline-offset:2px}.route-track{position:relative;display:grid;grid-template-columns:repeat(4,1fr);min-height:9rem;align-items:center;gap:.5rem}.route-track:before{content:"";position:absolute;left:8%;right:8%;top:50%;height:.28rem;border-radius:99px;background:linear-gradient(90deg,var(--orange),var(--blue),var(--blue),var(--green));opacity:.62}
+    .route-demo{position:relative;margin:1.5rem 0;padding:1.2rem;overflow:hidden}.demo-head{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.2rem}.demo-head h3{margin:0}.animation-toggle{padding:.48rem .8rem;border:1px solid var(--orange);border-radius:.55rem;color:#18120b;background:var(--orange);font:700 .86rem/1 "Segoe UI",Arial,sans-serif;cursor:pointer}.animation-toggle:hover,.animation-toggle:focus{background:var(--orange2);outline:2px solid #ffffff38;outline-offset:2px}.route-track{position:relative;display:grid;grid-template-columns:repeat(3,1fr);min-height:9rem;align-items:center;gap:.5rem}.route-track:before{content:"";position:absolute;left:10%;right:10%;top:50%;height:.28rem;border-radius:99px;background:linear-gradient(90deg,var(--orange),var(--blue),var(--green));opacity:.62}
     .station{position:relative;z-index:2;justify-self:center;width:5.6rem;padding:.55rem .25rem;border:2px solid var(--line);border-radius:.7rem;text-align:center;background:#14181d;font-size:.8rem}.station b{display:block;color:white}.station.producer{border-color:var(--orange)}.station.requester{border-color:var(--blue);animation:demand 8s ease-in-out infinite}.station.fuel{border-color:var(--green)}
-    .truck{position:absolute;z-index:4;top:calc(50% - 1.65rem);left:7%;display:grid;width:3.3rem;height:2.15rem;place-items:center;border:2px solid #fff0d7;border-radius:.45rem;color:#16100a;background:var(--orange);box-shadow:0 0 22px #ff9f328c;font-weight:900;animation:drive 8s cubic-bezier(.45,0,.2,1) infinite}.truck:after{content:"";position:absolute;inset:auto .35rem -.35rem;height:.42rem;border-radius:99px;background:#080a0c}.legend{display:flex;flex-wrap:wrap;gap:.55rem 1rem;color:var(--muted);font-size:.86rem}.dot{display:inline-block;width:.65rem;height:.65rem;margin-right:.3rem;border-radius:50%;background:currentColor}
-    @keyframes drive{0%,8%{left:7%;transform:translateX(-50%)}27%,36%{left:32%;transform:translateX(-50%)}52%,61%{left:68%;transform:translateX(-50%)}77%,86%{left:93%;transform:translateX(-50%)}94%{left:93%;transform:translateX(-50%);opacity:1}95%{left:7%;transform:translateX(-50%);opacity:0}100%{left:7%;transform:translateX(-50%);opacity:1}}
+    .truck{position:absolute;z-index:4;top:calc(50% - 1.65rem);left:10%;display:grid;width:3.3rem;height:2.15rem;place-items:center;border:2px solid #fff0d7;border-radius:.45rem;color:#16100a;background:var(--orange);box-shadow:0 0 22px #ff9f328c;font-weight:900;animation:drive 8s cubic-bezier(.45,0,.2,1) infinite}.truck:after{content:"";position:absolute;inset:auto .35rem -.35rem;height:.42rem;border-radius:99px;background:#080a0c}.legend{display:flex;flex-wrap:wrap;gap:.55rem 1rem;color:var(--muted);font-size:.86rem}.dot{display:inline-block;width:.65rem;height:.65rem;margin-right:.3rem;border-radius:50%;background:currentColor}
+    @keyframes drive{0%,10%{left:10%;transform:translateX(-50%)}40%,55%{left:50%;transform:translateX(-50%)}78%,90%{left:90%;transform:translateX(-50%)}94%{left:90%;transform:translateX(-50%);opacity:1}95%{left:10%;transform:translateX(-50%);opacity:0}100%{left:10%;transform:translateX(-50%);opacity:1}}
     @keyframes demand{0%,22%,100%{box-shadow:none}30%,55%{box-shadow:0 0 25px #6ab9ff8c}65%{box-shadow:none}}.route-demo.is-paused .truck,.route-demo.is-paused .station.requester{animation-play-state:paused}
     .checklist{padding-left:1.3rem}.checklist li{margin:.55rem 0}.warning{color:#ffd3d3;border-left-color:var(--red)}.small{color:var(--muted);font-size:.9rem}.media{display:block;width:100%;margin-top:1rem;border:1px solid var(--line);border-radius:.8rem;background:#0d1014}footer{margin-top:5rem;padding-top:1.5rem;border-top:1px solid var(--line);color:var(--muted)}
-    @media(max-width:850px){.layout{display:block}nav{position:relative;width:100%;height:auto;border-right:0;border-bottom:1px solid var(--line)}nav .links{display:flex;flex-wrap:wrap}nav a{padding:.35rem .55rem}main{padding-top:2.5rem}}@media(max-width:620px){.grid{grid-template-columns:1fr}.route-track{min-width:34rem}.route-demo{overflow-x:auto}table{display:block;overflow-x:auto}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+    @media(max-width:850px){.layout{display:block}nav{position:relative;width:100%;height:auto;border-right:0;border-bottom:1px solid var(--line)}nav .links{display:flex;flex-wrap:wrap}nav a{padding:.35rem .55rem}main{padding-top:2.5rem}}@media(max-width:620px){.grid{grid-template-columns:1fr}.route-track{min-width:28rem}.route-demo{overflow-x:auto}table{display:block;overflow-x:auto}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
   </style>
 </head>
 <body>
@@ -39,17 +39,17 @@
       <header>
         <div class="eyebrow">Руководство пользователя</div>
         <h1>Доставка по реальному спросу</h1>
-        <p class="lead">MyDTT автоматически строит маршрут грузовика от производителя ко всем станциям, где запас выбранного ресурса опустился ниже заданного порога. Несколько грузовиков делят заявки между собой, а отдельную заправку можно сделать опциональной.</p>
+        <p class="lead">MyDTT автоматически строит маршрут грузовика от производителя к одной самой нуждающейся станции, где запас выбранного ресурса опустился ниже заданного порога. Несколько грузовиков делят заявки между собой, а отдельную заправку можно сделать опциональной.</p>
         <div class="callout"><strong>Главное правило:</strong> роль станции задаётся одновременно тегом в имени и её штатным переключателем. Производитель должен быть в режиме <span class="mode load">LOAD</span>, потребитель — <span class="mode unload">UNLOAD</span>.</div>
       </header>
 
       <section id="quick-start">
         <h2>Быстрый старт</h2>
         <div class="grid">
-          <article class="card"><span class="step-number">1</span><h3>Назовите грузовик</h3><p>Имя грузовика должно совпадать с отображаемым именем предмета: например, <code>Packaged Fuel</code>, <code>Iron Ore</code> или <code>Железная руда</code> — в зависимости от языка игры.</p></article>
-          <article class="card"><span class="step-number">2</span><h3>Отметьте производителя</h3><p>Добавьте к имени загрузочной станции тег <code>(Ресурс+)</code>. Пример: <code>НПЗ (Packaged Fuel+)</code>.</p></article>
-          <article class="card"><span class="step-number">3</span><h3>Отметьте потребителей</h3><p>Добавьте к именам разгрузочных станций тег <code>(Ресурс-N)</code>, где <code>N</code> — порог в полных стаках. Пример: <code>Склад А (Packaged Fuel-10)</code>.</p></article>
-          <article class="card"><span class="step-number">4</span><h3>Запишите базовый маршрут</h3><p>Первая станция маршрута, <code>Route[0]</code>, всегда производитель. Добавьте хотя бы одного потребителя, а при необходимости — станцию <code>(F)</code>.</p></article>
+          <article class="card"><span class="step-number">1</span><h3>Назовите грузовик</h3><p>Имя должно совпадать с отображаемым именем предмета: <code>Packaged Fuel</code> или <code>(Packaged Fuel)</code>. Скобки вокруг полного имени необязательны.</p></article>
+          <article class="card"><span class="step-number">2</span><h3>Отметьте производителя</h3><p>Добавьте тег <code>(Ресурс)</code> к станции и включите <span class="mode load">LOAD</span>. Пример: <code>НПЗ (Packaged Fuel)</code>.</p></article>
+          <article class="card"><span class="step-number">3</span><h3>Отметьте потребителей</h3><p>Используйте тот же тег на станциях <span class="mode unload">UNLOAD</span>. Порог по умолчанию — 10 полных стаков; <code>(Ресурс-N)</code> переопределяет его.</p></article>
+          <article class="card"><span class="step-number">4</span><h3>Добавьте производителя в маршрут</h3><p>Первая станция, <code>Route[0]</code>, всегда производитель. Этого достаточно для старта: нужного потребителя MyDTT добавит сам. Заправка <code>(F)</code> необязательна.</p></article>
         </div>
       </section>
 
@@ -58,26 +58,29 @@
         <table>
           <thead><tr><th>Имя</th><th>Режим</th><th>Назначение</th></tr></thead>
           <tbody>
-            <tr><td><code>НПЗ (Packaged Fuel+)</code></td><td><span class="mode load">LOAD</span></td><td>Производитель ресурса. Он должен быть первым пунктом базового маршрута.</td></tr>
-            <tr><td><code>Склад А (Packaged Fuel-10)</code></td><td><span class="mode unload">UNLOAD</span></td><td>Потребитель открыт для доставки, пока в станции меньше 10 полных стаков.</td></tr>
+            <tr><td><code>НПЗ (Packaged Fuel)</code></td><td><span class="mode load">LOAD</span></td><td>Производитель ресурса. Он должен быть первым пунктом базового маршрута.</td></tr>
+            <tr><td><code>Склад А (Packaged Fuel)</code></td><td><span class="mode unload">UNLOAD</span></td><td>Потребитель открыт для доставки, пока в станции меньше 10 полных стаков.</td></tr>
+            <tr><td><code>Склад B (Packaged Fuel-25)</code></td><td><span class="mode unload">UNLOAD</span></td><td>Потребитель с явным порогом: доставка нужна ниже 25 полных стаков.</td></tr>
             <tr><td><code>АЗС (F)</code></td><td>любой</td><td>Необязательная выделенная заправка. Тег ровно <code>(F)</code>, без имени ресурса.</td></tr>
           </tbody>
         </table>
-        <div class="callout warning"><strong>Тег не переключает станцию.</strong> Если <code>(Ресурс+)</code> стоит на станции в режиме UNLOAD или <code>(Ресурс-N)</code> — на станции в режиме LOAD, MyDTT покажет несовпадение режима и не будет использовать такую станцию.</div>
+        <div class="callout"><strong>Один тег — две роли.</strong> Для нейтрального <code>(Ресурс)</code> штатный переключатель определяет роль: LOAD — производитель, UNLOAD — потребитель. Переключение применяется без переименования.</div>
+        <div class="callout"><strong>Можно использовать своё имя ресурса.</strong> Если оно не совпадает с языком dedicated server, MyDTT определяет предмет по содержимому LOAD-производителя. На таком производителе должен находиться ровно один вид груза.</div>
+        <div class="callout warning"><strong>Старый синтаксис поддерживается.</strong> Явный <code>(Ресурс+)</code> работает только с LOAD, а <code>(Ресурс-N)</code> — только с UNLOAD. При противоречии станция игнорируется.</div>
         <p>Количество предметов считается в <strong>полных стаках</strong>: неполный остаток округляется вниз. Порог относится к складу станции, а не к инвентарю грузовика.</p>
       </section>
 
       <section id="route">
         <h2>Как меняется маршрут</h2>
-        <p>Перестроение происходит только на границе нового круга, когда текущая цель грузовика имеет индекс <code>0</code>. Поэтому активный рейс не меняется посреди дороги. Открытые потребители сортируются по доле <code>запас / порог</code>: первым едет самый голодный.</p>
-        <div class="route-demo" aria-label="Анимация маршрута грузовика от производителя через двух потребителей к заправке">
+        <p>Перестроение происходит только на границе нового круга, когда текущая цель грузовика имеет индекс <code>0</code>. Поэтому активный рейс не меняется посреди дороги. Открытые потребители сортируются по доле <code>запас / порог</code>, и на круг выбирается ровно один — самый голодный.</p>
+        <div class="route-demo" aria-label="Анимация маршрута грузовика от производителя через одного потребителя к заправке">
           <div class="demo-head"><h3>Один круг диспетчера</h3><button class="animation-toggle" id="animation-toggle" type="button" aria-pressed="false">Пауза</button></div>
           <div class="route-track">
-            <div class="station producer"><b>Producer</b><span>LOAD</span></div><div class="station requester"><b>Requester A</b><span>2 / 10</span></div><div class="station requester"><b>Requester B</b><span>7 / 10</span></div><div class="station fuel"><b>Fuel</b><span>(F)</span></div><div class="truck" aria-hidden="true">TRK</div>
+            <div class="station producer"><b>Producer</b><span>LOAD</span></div><div class="station requester"><b>Requester A</b><span>2 / 10</span></div><div class="station fuel"><b>Fuel</b><span>(F)</span></div><div class="truck" aria-hidden="true">TRK</div>
           </div>
           <div class="legend"><span style="color:var(--orange)"><i class="dot"></i>загрузка</span><span style="color:var(--blue)"><i class="dot"></i>разгрузка по спросу</span><span style="color:var(--green)"><i class="dot"></i>заправка при необходимости</span></div>
         </div>
-        <p>Каждый выбранный потребитель временно закрепляется за одним грузовиком. Другой грузовик не возьмёт ту же заявку. Закрепление снимается после прибытия, при ручном изменении маршрута или автопилота, а зависшие заявки автоматически очищаются через 10 минут.</p>
+        <p>Выбранный потребитель временно закрепляется за одним грузовиком. Другой грузовик не возьмёт ту же заявку. Закрепление снимается после прибытия, при ручном изменении маршрута или автопилота, а зависшие заявки автоматически очищаются через 10 минут.</p>
       </section>
 
       <section id="fuel">
@@ -87,14 +90,14 @@
           <li>Если топлива <strong>больше, чем на два рассчитанных круга</strong>, остановка <code>(F)</code> временно исключается из маршрута.</li>
           <li>Когда запас падает, заправка возвращается на запомненную позицию.</li>
           <li>Если отдельной <code>(F)</code> нет, считается, что грузовик получает топливо на обычных станциях.</li>
-          <li>Если нет ни заявок, ни <code>(F)</code>, последний рабочий маршрут сохраняется: маршрут из одного Producer не создаётся.</li>
+          <li>Если нет ни заявок, ни <code>(F)</code>, маршрут с одним Producer сохраняется до появления спроса.</li>
         </ul>
         <div class="callout"><strong>Совет:</strong> используйте одну <code>(F)</code> на сеть путей грузовика. Если на одной сети несколько таких станций, включите нужную в записанный базовый маршрут — тогда выбор однозначен.</div>
       </section>
 
       <section id="groups">
         <h2>Наследование тегов от группы</h2>
-        <p>Все круглые теги из имени группы автоматически добавляются к станциям этой группы. Это удобно для общей заправки или будущих групповых признаков.</p>
+        <p>Все круглые теги из имени группы автоматически добавляются к станциям этой группы. Например, группа <code>Железо (Iron Ore)</code> пометит одним ресурсом и LOAD-, и UNLOAD-станции, а их роли определят собственные переключатели.</p>
         <div class="example"><h3>Пример: группа АЗС</h3><p>Группа: <code>АЗС 1 (F)</code></p><p>Станция после канонизации: <code>АЗС 1.1 [АЗС 1 (F),2] (F)</code></p><p class="small">Если переименовать группу обратно в <code>АЗС 1</code>, унаследованный суффикс <code>(F)</code> будет удалён. Собственные теги станции перед <code>[группой]</code> сохраняются.</p></div>
         <p>Обычная группировка продолжает работать как раньше: <code>[Имя группы]</code> объединяет станции, а <code>[Имя группы,N]</code> задаёт число одновременно обслуживаемых поездов или грузовиков.</p>
       </section>
@@ -102,16 +105,16 @@
       <section id="examples">
         <h2>Готовые примеры</h2>
         <div class="grid">
-          <article class="example"><h3>Простая доставка</h3><p>Грузовик: <code>Iron Ore</code></p><p><code>Шахта (Iron Ore+)</code> <span class="mode load">LOAD</span><br><code>Литейная (Iron Ore-8)</code> <span class="mode unload">UNLOAD</span></p><p>База: <code>Шахта → Литейная</code>.</p></article>
-          <article class="example"><h3>С отдельной заправкой</h3><p>Грузовик: <code>Packaged Fuel</code></p><p><code>НПЗ (Packaged Fuel+)</code><br><code>Удалённый склад (Packaged Fuel-12)</code><br><code>Дорожная АЗС (F)</code></p><p>База: <code>НПЗ → АЗС → Склад</code>.</p></article>
-          <article class="example"><h3>Несколько потребителей</h3><p><code>Склад A (Iron Ore-10)</code>: 2 стака<br><code>Склад B (Iron Ore-20)</code>: 8 стаков</p><p>Отношения: <code>2/10 = 0.2</code> и <code>8/20 = 0.4</code>. Склад A получает более высокий приоритет.</p></article>
-          <article class="example"><h3>Несколько грузовиков</h3><p>Оба грузовика названы <code>Iron Ore</code>. Первый забирает доступные заявки и закрепляет станции за собой. Второй видит только ещё не закреплённые потребители.</p></article>
+          <article class="example"><h3>Простая доставка</h3><p>Грузовик: <code>(Iron Ore)</code></p><p><code>Шахта (Iron Ore)</code> <span class="mode load">LOAD</span><br><code>Литейная (Iron Ore)</code> <span class="mode unload">UNLOAD</span></p><p>Начальный маршрут: только <code>Шахта</code>.</p></article>
+          <article class="example"><h3>С отдельной заправкой</h3><p>Грузовик: <code>Packaged Fuel</code></p><p><code>НПЗ (Packaged Fuel)</code> <span class="mode load">LOAD</span><br><code>Удалённый склад (Packaged Fuel-12)</code> <span class="mode unload">UNLOAD</span><br><code>Дорожная АЗС (F)</code></p><p>База: <code>НПЗ → АЗС</code>; склад добавляется по спросу.</p></article>
+          <article class="example"><h3>Несколько потребителей</h3><p><code>Склад A (Iron Ore-10)</code>: 2 стака<br><code>Склад B (Iron Ore-20)</code>: 8 стаков</p><p>Отношения: <code>2/10 = 0.2</code> и <code>8/20 = 0.4</code>. На этот круг выбирается склад A.</p></article>
+          <article class="example"><h3>Несколько грузовиков</h3><p>Оба грузовика названы <code>Iron Ore</code>. Первый закрепляет за собой одну лучшую заявку. Второй видит только ещё не закреплённых потребителей и может взять следующего.</p></article>
         </div>
       </section>
 
       <section id="diagnostics">
         <h2>Команды и диагностика</h2>
-        <table><thead><tr><th>Команда чата</th><th>Что делает</th></tr></thead><tbody><tr><td><code>/dtt</code></td><td>Открывает интерфейс DynamicTimeTable.</td></tr><tr><td><code>/dtt groups</code></td><td>Показывает распознанные группы станций.</td></tr><tr><td><code>/dtt dispatch</code></td><td>Показывает станции диспетчера, режим, запас, порог, открытые заявки и закрепивший грузовик.</td></tr><tr><td><code>/dtt recalc</code></td><td>Пересчитывает активные бронирования групп.</td></tr></tbody></table>
+        <table><thead><tr><th>Команда чата</th><th>Что делает</th></tr></thead><tbody><tr><td><code>/dtt</code></td><td>Открывает интерфейс MyDTT.</td></tr><tr><td><code>/dtt groups</code></td><td>Показывает распознанные группы станций.</td></tr><tr><td><code>/dtt dispatch</code></td><td>Показывает станции диспетчера, режим, запас, порог, открытые заявки и закрепивший грузовик.</td></tr><tr><td><code>/dtt recalc</code></td><td>Пересчитывает активные бронирования групп.</td></tr></tbody></table>
         <div class="terminal" role="region" aria-label="Пример вывода команды dtt dispatch"><pre><span class="prompt">/dtt dispatch</span>
 dTT dispatch: stations=3 fuel-stops=1 active-claims=1
 Packaged Fuel | Producer  | НПЗ     | mode=LOAD   active=yes | stock=42 stacks
@@ -123,7 +126,7 @@ Fuel (F) | Дорожная АЗС | guid=…</pre></div>
       <section id="troubleshooting">
         <h2>Если грузовик не перестраивает маршрут</h2>
         <ol class="checklist">
-          <li>Проверьте точное совпадение имени грузовика и ресурса внутри тега.</li><li>Проверьте переключатель станции: Producer — <span class="mode load">LOAD</span>, Requester — <span class="mode unload">UNLOAD</span>.</li><li>Убедитесь, что Producer записан первым пунктом маршрута.</li><li>Дождитесь возвращения к цели с индексом <code>0</code>: посреди рейса маршрут специально не меняется.</li><li>Выполните <code>/dtt dispatch</code> и проверьте поля <code>active</code>, <code>stock</code>, <code>open</code> и <code>claim</code>.</li><li>Убедитесь, что предмет существует и его отображаемое имя распознаётся игрой. Текущая версия рассчитана на предметы в стаках; жидкости без упаковки не поддерживаются.</li>
+          <li>Проверьте точное совпадение имени грузовика и ресурса внутри тега; внешние скобки имени машины не учитываются.</li><li>Проверьте переключатель станции: Producer — <span class="mode load">LOAD</span>, Requester — <span class="mode unload">UNLOAD</span>.</li><li>Убедитесь, что Producer записан первым пунктом маршрута; остальные станции можно не добавлять вручную.</li><li>Дождитесь возвращения к цели с индексом <code>0</code>: посреди рейса маршрут специально не меняется.</li><li>Выполните <code>/dtt dispatch</code> и проверьте поля <code>active</code>, <code>stock</code>, <code>open</code> и <code>claim</code>.</li><li>Если используется локализованное или своё имя ресурса, убедитесь, что LOAD-производитель содержит один вид груза. Текущая версия рассчитана на предметы в стаках; жидкости без упаковки не поддерживаются.</li>
         </ol>
       </section>
 
