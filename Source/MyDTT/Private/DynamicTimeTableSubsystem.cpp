@@ -1653,11 +1653,11 @@ bool UDynamicTimeTableSubsystem::ShouldSkipFuelStop(
     float CurrentFuelItems, PerLapItems;
     if (!TryEstimateFuelMargin(Vehicle, LoopWithoutFuel, CurrentFuelItems, PerLapItems)) return false;
 
-    const float RequiredForTwoLaps = 2.0f * PerLapItems;
-    const bool bSkip = CurrentFuelItems > RequiredForTwoLaps;
+    const float RequiredToSkip = FuelSkipMarginLaps * PerLapItems;
+    const bool bSkip = CurrentFuelItems > RequiredToSkip;
     UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
-        TEXT("DISPATCH_FUEL_EVALUATED Truck='%s' LoopStops=%d PerLapItems=%.3f CurrentFuelItems=%.0f RequiredForTwoLaps=%.3f Skip=%s"),
-        *DTSVehicleName(Vehicle), LoopWithoutFuel.Num(), PerLapItems, CurrentFuelItems, RequiredForTwoLaps,
+        TEXT("DISPATCH_FUEL_EVALUATED Truck='%s' LoopStops=%d PerLapItems=%.3f CurrentFuelItems=%.0f RequiredToSkip=%.3f Skip=%s"),
+        *DTSVehicleName(Vehicle), LoopWithoutFuel.Num(), PerLapItems, CurrentFuelItems, RequiredToSkip,
         bSkip ? TEXT("true") : TEXT("false"));
     return bSkip;
 }
@@ -1838,7 +1838,14 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
         // already in the route as a requester stop, it is never a bypass candidate - a requester
         // delivery must not be skipped just because that dock also carries the (F) tag.
         const bool bFuelAlreadyPresent = NewRoute.Contains(Anchors->FuelGuid);
-        Anchors->bSkipFuelThisLap = !bFuelAlreadyPresent && ShouldSkipFuelStop(Vehicle, NewRoute);
+        // NewRoute is still just [Producer] here when there is no current requester (fuel hasn't
+        // been inserted yet) - ShouldSkipFuelStop can't estimate a one-stop loop at all and
+        // defaults to "don't skip," forcing an unconditional fuel-stop visit every lap even with a
+        // full tank. No demand right now isn't the same as "no meaningful loop to estimate": fall
+        // back to the truck's actual physical route (still carrying its last real consumer, if it
+        // had one) so the skip decision reflects real fuel state instead of always visiting.
+        Anchors->bSkipFuelThisLap = !bFuelAlreadyPresent && ShouldSkipFuelStop(
+            Vehicle, NewRoute.Num() >= 2 ? NewRoute : Route);
         if (!bFuelAlreadyPresent)
         {
             NewRoute.Insert(Anchors->FuelGuid, FMath::Clamp(Anchors->FuelInsertIndex, 1, NewRoute.Num()));
@@ -1849,7 +1856,6 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
         // No (F) of this producer's own. Normally that is a deliberate choice (docs: assumed to
         // refuel at regular stations) and nothing more happens here - but if the tank is genuinely
         // at risk this lap, borrow the nearest reachable (F) instead of letting the truck strand.
-        const bool bWasBorrowing = Anchors->bFuelIsBorrowed;
         // NewRoute collapses to just [Producer] when there is no current requester -
         // EstimateLoopFuelConsumptionMW can't estimate a one-stop loop at all, so the check would
         // silently no-op while the truck keeps driving its last-applied physical route and burning
@@ -1898,10 +1904,13 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
                 TEXT("DISPATCH_FUEL_NO_STOP_FOUND Truck='%s' Resource='%s' Trigger=%s"),
                 *DTSVehicleName(Vehicle), *ResourceId, Trigger);
         }
-        else if (!bWasBorrowing && Requesters.Num() == 0)
+        else if (Requesters.Num() == 0)
         {
-            // With no demand and no (F) at all, preserve the route exactly as it is. This also
-            // keeps a valid producer-only initial route parked until the first requester opens.
+            // Nothing to deliver and no (F) needed to borrow this lap - leave the truck's current
+            // physical route exactly as it is, rather than attempting a shorter-than-2-stop write
+            // ReplaceRoute would reject anyway. The truck keeps looping producer + last consumer
+            // until either a new requester appears or fuel drops below FuelCriticalMarginLaps and
+            // a borrowed (F) gets added next lap.
             UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
                 TEXT("DISPATCH_ROUTE_KEPT Truck='%s' Resource='%s' Reason=no-requester-and-no-fuel-anchor Trigger=%s"),
                 *DTSVehicleName(Vehicle), *ResourceId, Trigger);

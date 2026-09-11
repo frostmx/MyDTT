@@ -225,8 +225,13 @@ private:
     // IsFuelCriticallyLow triggers this many estimated lap-costs early, not at exactly 1x: the
     // engine's per-segment fuel estimate is unverified against actual consumption, and a borrowed
     // stop lengthens the lap it is added to beyond what was checked - a bare 1x margin let a truck
-    // reach exactly zero fuel mid-lap with no stop ever borrowed (see CHANGELOG 1.0.2).
-    static constexpr float FuelCriticalMarginLaps = 1.5f;
+    // reach exactly zero fuel mid-lap with no stop ever borrowed (see CHANGELOG 1.0.2). Raised from
+    // 1.5 to 2.0 for the same reason, with more margin against that same estimate error.
+    static constexpr float FuelCriticalMarginLaps = 2.0f;
+    // ShouldSkipFuelStop only bypasses a dedicated (F) once the tank clears this many estimated
+    // lap-costs - kept above FuelCriticalMarginLaps so there is a dead zone between "borrow/warn"
+    // and "safe to skip" instead of the two thresholds meeting at the same value.
+    static constexpr float FuelSkipMarginLaps = 2.5f;
     /** Resolves a neutral tag against the station's live LOAD/UNLOAD switch. */
     EDTTDispatchRole GetEffectiveDispatchRole(const FDTTDispatchStation& Station) const;
     /** LOAD is producer, UNLOAD is requester; a contradictory tag is never actionable. */

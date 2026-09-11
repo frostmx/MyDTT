@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.6
+
+- Fixed a truck with its own dedicated `(F)` unconditionally visiting it every lap while its
+  resource currently has no active requester, even with a full tank: the check that decides
+  whether to skip the stop couldn't estimate a one-stop loop and defaulted to "always visit." It
+  now falls back to the truck's actual route (still carrying its last real consumer) so the skip
+  decision reflects real fuel state instead of always detouring.
+- Raised the critical-fuel margin from 1.5 to 2.0 lap-costs and the skip-fuel-stop margin from 2.0
+  to 2.5, keeping the same buffer between "borrow or warn" and "safe to skip" but with more room
+  against the engine's fuel-estimate error.
+
 ## 1.0.5
 
 - Added an optional resource argument to `/dtt dispatch`, e.g. `/dtt dispatch Iron`: it lists only
