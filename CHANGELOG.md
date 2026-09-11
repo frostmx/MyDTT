@@ -20,6 +20,7 @@ First private MyDTT release.
 - Added optional `(F)` fuel stops and route-based fuel consumption estimates.
 - Added inheritance of parenthesized tags from station groups.
 - Added `/dtt dispatch` diagnostics.
+- Fixed newly created or renamed empty groups not appearing in the group list until a station changed.
 - Fixed argument handling for `/dtt groups`, `/dtt dispatch`, and `/dtt recalc`.
 - Retained the original dynamic train and truck group balancing behavior.
 

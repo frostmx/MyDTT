@@ -471,7 +471,9 @@ FGuid UDynamicTimeTableSubsystem::CreateGroup(const FString& GroupName, EDTTGrou
         Draft.GroupName = Name;
         Draft.Kind = Kind;
         DraftGroups.Add(GroupId, Draft);
-        ConfigurationChanged(false);
+        // Snapshots expose StationGroups, not DraftGroups directly. Rebuild merges the new draft
+        // into that public array before the RCO sends its immediate post-create snapshot.
+        RebuildGroupsFromNames();
     }
 
     UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("Created group '%s' Kind=%s GUID=%s"), *Name,
@@ -511,7 +513,8 @@ bool UDynamicTimeTableSubsystem::RenameGroup(FGuid GroupId, const FString& NewNa
         Renamed.GroupId = DTSMakeGroupId(Renamed.Kind, Name);
         DraftGroups.Remove(GroupId);
         DraftGroups.Add(Renamed.GroupId, Renamed);
-        ConfigurationChanged(false);
+        // Keep StationGroups in sync for the immediate post-rename snapshot, just as on create.
+        RebuildGroupsFromNames();
         return true;
     }
 
