@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.0.3
+
+- Fixed the critical-fuel check silently never running for a truck with no dedicated `(F)` while
+  its resource currently has no active requester: the freshly-built route used for the estimate
+  collapsed to a single stop in that case, which the fuel-cost estimator can't evaluate at all, so
+  the check quietly returned "fine" regardless of the tank - even though the truck kept driving its
+  last-assigned physical loop and burning fuel on it. The check now falls back to that physical
+  route whenever the fresh one is too short to estimate.
+
+## 1.0.2
+
+- Fixed trucks occasionally running completely out of fuel on routes with no dedicated `(F)`:
+  the auto-borrow threshold from 1.0.1 had no safety margin (it only kicked in below exactly one
+  lap's estimated cost), so estimate error against actual consumption could empty the tank before
+  a stop was ever borrowed. Borrowing now triggers with a 1.5-lap margin instead.
+- Added a log line when a truck is flagged low on fuel but no reachable `(F)` exists to borrow,
+  and raised the "fuel stop borrowed" line to the default log level — both were previously
+  Verbose-only and left no trail when a truck ran dry.
+
+## 1.0.1
+
+- Fixed a dedicated `(F)` fuel stop not coming back after a save/load if the tank had been full
+  enough to bypass it: the stop now stays in the route and is bypassed in place instead of being
+  removed from it.
+- Added automatic borrowing of the nearest reachable `(F)` fuel stop when a truck's own route has
+  none and its tank is running critically low. If several such stops share a `[tag,N]` balancing
+  group, demand spreads across them instead of piling onto a single station.
+
 ## 1.0.0
 
 First MyDTT release.

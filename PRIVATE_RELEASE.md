@@ -1,9 +1,9 @@
-# MyDTT 1.0.0 — private release
+# MyDTT 1.0.3 — private release
 
 ## Identity
 
 - Display name: `MyDTT`
-- Version: `1.0.0`
+- Version: `1.0.3`
 - Mod Reference: `MyDTT`
 - SML dependency: `^3.12.0`
 - Supported package targets: Windows client and Windows dedicated server
@@ -27,13 +27,13 @@ The merged upload/install archive is produced at:
 
 `C:\SFMod\SatisfactoryModLoader\Saved\ArchivedPlugins\MyDTT\MyDTT.zip`
 
-For personal storage it may be copied as `MyDTT-1.0.0.zip`.
+For personal storage it may be copied as `MyDTT-1.0.3.zip`.
 
 Verified release artifact:
 
-- File: `C:\Users\frost\SF_server\dist\MyDTT-1.0.0.zip`
-- Size: `43,841,459` bytes
-- SHA-256: `1b586d4184d6f7b55ed3a1108d05011902a0655e9643702e71e584a171aab901`
+- File: `C:\Users\frost\SF_server\dist\MyDTT-1.0.3.zip`
+- Size: `43,850,475` bytes
+- SHA-256: `35b53fa610016070a181f047f7d6127f7f2b92534ab55ae732d35ba8580dd26a`
 - Targets: `Windows`, `WindowsServer`
 
 ## Release notes
@@ -47,6 +47,13 @@ Verified release artifact:
 > or a custom alias when the matching LOAD producer contains one unambiguous cargo item class.
 > Parenthesized tags on a group are inherited by every station in that group. Use `/dtt dispatch` to see
 > live stock, station modes, open requests, claims and fuel stops.
+>
+> Since 1.0.0: a truck's own `(F)` fuel stop now survives save/load correctly instead of occasionally
+> disappearing from its route. Trucks with no `(F)` of their own automatically borrow the nearest
+> reachable one when running low, spreading demand across a `[tag,N]` group instead of piling onto a
+> single station. Two related running-dry cases are fixed: the low-fuel check now keeps a real safety
+> margin instead of triggering right at the edge, and it keeps working even for a truck whose resource
+> currently has no open delivery request.
 
 ## Before using the archive
 
@@ -55,5 +62,5 @@ Verified release artifact:
    `/dtt` commands acting on the same world.
 3. Install the matching target from the archive on the server and, if the `/dtt` window is needed, on
    the client as well.
-4. Verify the loaded-mods screen reports `MyDTT 1.0.0`.
+4. Verify the loaded-mods screen reports `MyDTT 1.0.3`.
 5. Run `/dtt dispatch` and confirm station modes and stock before enabling vehicle autopilot.
