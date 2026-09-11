@@ -100,34 +100,53 @@ struct FDTTDispatchStation
     FGuid DockingPathNodeGuid;
 };
 
-/** Remembered producer/optional explicit fuel anchors for one dispatch truck. */
+/**
+ * Remembered producer/optional explicit fuel anchors for one dispatch truck. SaveGame because a lap
+ * that does not need the truck's own (F) leaves it out of mVehicleRoute, so the route alone cannot
+ * bring it back after a load.
+ */
 USTRUCT()
 struct FDTTDispatchTruckAnchors
 {
     GENERATED_BODY()
 
-    UPROPERTY()
+    UPROPERTY(SaveGame)
     FGuid ProducerGuid;
 
-    UPROPERTY()
+    // The truck's own (F): the one the player put in its route. Sticky until the station loses
+    // the tag or Route[0] changes; included in a lap only when the tank needs it.
+    UPROPERTY(SaveGame)
     FGuid FuelGuid;
 
     // Position of the explicitly tagged (F) stop in the route where it was discovered.
     // Clamped to the rebuilt route size when the number of requesters changes.
-    UPROPERTY()
+    UPROPERTY(SaveGame)
     int32 FuelInsertIndex = INDEX_NONE;
 
-    // True when FuelGuid should stay in mVehicleRoute this lap but the truck should bypass it
-    // without stopping (SetCurrentTargetWaypoint past it) - decided once per lap, at the producer
-    // boundary. Only meaningful for a player-tagged (own-route) fuel stop.
-    UPROPERTY()
-    bool bSkipFuelThisLap = false;
+    // (F) borrowed for the current lap because the truck has no own stop and the tank was running
+    // critically low. Decided afresh every lap and never adopted as FuelGuid: kept apart so that a
+    // borrowed stop still sitting in the route is not mistaken for one the player tagged.
+    UPROPERTY(SaveGame)
+    FGuid BorrowedFuelGuid;
 
-    // True when FuelGuid was not tagged in this producer's own route but borrowed from the nearest
-    // reachable (F) because the tank was running critically low. Unlike a player's own tag, a
-    // borrowed stop is not sticky: it is dropped from the route again once no longer needed.
+    // Set when the player saved this truck's route by hand: the next producer boundary re-reads the
+    // own (F) and its position from the route. Otherwise the anchors are authoritative and the route
+    // is just what this mod wrote last lap. Runtime only.
     UPROPERTY()
-    bool bFuelIsBorrowed = false;
+    bool bRouteEditedByPlayer = false;
+};
+
+/** One dispatch truck's anchors as stored by ADTTSaveDataActor. */
+USTRUCT()
+struct FDTTSavedTruckAnchors
+{
+    GENERATED_BODY()
+
+    UPROPERTY(SaveGame)
+    TObjectPtr<class AFGWheeledVehicleIdentifier> Vehicle = nullptr;
+
+    UPROPERTY(SaveGame)
+    FDTTDispatchTruckAnchors Anchors;
 };
 
 USTRUCT(BlueprintType)

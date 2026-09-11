@@ -422,6 +422,20 @@ void UDynamicTimeTableSubsystem::InitializePersistence()
         // what the actor holds is only a legacy configuration waiting to be migrated into tags.
         UE_LOG(LogDynamicTimeTableSubsystem, Display,
             TEXT("Found dTT save actor. LegacyGroups=%d DataVersion=%d"), Found->GetGroups().Num(), Found->GetDataVersion());
+
+        // Restored as-is and validated lazily: UpdateRememberedAnchors drops an anchor whose producer
+        // no longer matches Route[0], and RebuildGroupsFromNames one whose (F) lost its tag. That
+        // rebuild only runs once the world's stations are readable, so an empty fuel-stop set at
+        // this early point cannot wipe what was just loaded.
+        int32 Restored = 0;
+        for (const FDTTSavedTruckAnchors& Saved : Found->GetTruckAnchors())
+        {
+            if (!IsValid(Saved.Vehicle.Get()) || !Saved.Anchors.ProducerGuid.IsValid()) continue;
+            DispatchTruckAnchors.Add(Saved.Vehicle.Get(), Saved.Anchors);
+            ++Restored;
+        }
+        UE_LOG(LogDynamicTimeTableSubsystem, Display,
+            TEXT("DISPATCH_ANCHORS_RESTORED Count=%d Saved=%d"), Restored, Found->GetTruckAnchors().Num());
     }
     else if (GetWorld()->GetNetMode() != NM_Client)
     {
@@ -447,13 +461,25 @@ void UDynamicTimeTableSubsystem::InitializePersistence()
 
 void UDynamicTimeTableSubsystem::SyncConfigurationToSaveActor()
 {
-    // The save actor no longer stores anything: the configuration lives in the station names,
-    // which the game saves itself. It is kept, empty, because the class is referenced by existing
-    // saves and pulling a class out from under a load is worse than an idle actor.
+    // The save actor stores no groups: the configuration lives in the station names, which the
+    // game saves itself. It is kept because the class is referenced by existing saves, and since
+    // version 5 it also carries the dispatch fuel anchors (see ExportTruckAnchors).
     if (SaveDataActor.IsValid() && IsServer())
     {
         SaveDataActor->SetGroups(TArray<FDTTStationGroup>());
-        SaveDataActor->SetDataVersion(4);
+        SaveDataActor->SetDataVersion(5);
+    }
+}
+
+void UDynamicTimeTableSubsystem::ExportTruckAnchors(TArray<FDTTSavedTruckAnchors>& OutAnchors) const
+{
+    OutAnchors.Reset();
+    for (const auto& Pair : DispatchTruckAnchors)
+    {
+        if (!Pair.Key.IsValid() || !Pair.Value.ProducerGuid.IsValid()) continue;
+        FDTTSavedTruckAnchors& Saved = OutAnchors.AddDefaulted_GetRef();
+        Saved.Vehicle = Pair.Key.Get();
+        Saved.Anchors = Pair.Value;
     }
 }
 
@@ -984,6 +1010,12 @@ void UDynamicTimeTableSubsystem::RebuildGroupsFromNames()
             (It.Value().FuelGuid.IsValid() && !DispatchFuelStopGuids.Contains(It.Value().FuelGuid)))
         {
             It.RemoveCurrent();
+            continue;
+        }
+        // A borrowed stop is re-decided every lap anyway; just stop treating an untagged one as fuel.
+        if (It.Value().BorrowedFuelGuid.IsValid() && !DispatchFuelStopGuids.Contains(It.Value().BorrowedFuelGuid))
+        {
+            It.Value().BorrowedFuelGuid.Invalidate();
         }
     }
     for (auto It = RequesterClaims.CreateIterator(); It; ++It)
@@ -1184,10 +1216,17 @@ int32 UDynamicTimeTableSubsystem::GetDockAssignedCount(AFGDockingStationIdentifi
     for(const auto&P:TruckBookings)if(P.Key.IsValid()&&P.Value.Get()==Id)++C;
     // Dispatch trucks never use TruckBookings (they clear it every tick - "resource dispatch" in
     // ProcessCurrentTruckTarget), so a borrowed or dedicated (F) they currently hold has to be
-    // counted here too, or SelectBestStation would be blind to their claims on a fuel group.
+    // counted here too, or SelectBestStation would be blind to their claims on a fuel group. An own
+    // (F) counts only on laps that actually include it: the anchor outlives laps that leave it out.
     const FGuid PathNodeGuid=Id->GetPathNodeGUID();
     if(PathNodeGuid.IsValid())
-        for(const auto&P:DispatchTruckAnchors)if(P.Key.IsValid()&&P.Value.FuelGuid==PathNodeGuid)++C;
+        for(const auto&P:DispatchTruckAnchors)
+        {
+            const AFGWheeledVehicleIdentifier* Vehicle=P.Key.Get();
+            if(!IsValid(Vehicle))continue;
+            if(P.Value.BorrowedFuelGuid==PathNodeGuid||
+               (P.Value.FuelGuid==PathNodeGuid&&Vehicle->GetVehicleRoute().Contains(PathNodeGuid)))++C;
+        }
     return C;
 }
 int32 UDynamicTimeTableSubsystem::GetEntryAssignedCount(const FDTTStationGroup& G,const FDTTStationEntry& E) const{return G.Kind==EDTTGroupKind::Truck?GetDockAssignedCount(E.DockingStationIdentifier.Get()):GetAssignedCount(E.StationIdentifier.Get());}
@@ -1466,7 +1505,7 @@ bool UDynamicTimeTableSubsystem::UpdateRememberedAnchors(
         return false;
     }
 
-    const FDTTDispatchTruckAnchors* Existing = DispatchTruckAnchors.Find(Vehicle);
+    FDTTDispatchTruckAnchors* Existing = DispatchTruckAnchors.Find(Vehicle);
     if (Existing && Existing->ProducerGuid != Route[0])
     {
         // Route[0] changing is a manual base-route edit. The old fuel anchor belongs to that old
@@ -1475,13 +1514,15 @@ bool UDynamicTimeTableSubsystem::UpdateRememberedAnchors(
         Existing = nullptr;
     }
 
+    // The stop this mod borrowed last lap may still sit in the route; it is never the player's own.
+    const FGuid Borrowed = Existing ? Existing->BorrowedFuelGuid : FGuid();
     FGuid FuelGuid;
     int32 FuelInsertIndex = INDEX_NONE;
     int32 FuelTagsInRoute = 0;
     for (int32 Index = 1; Index < Route.Num(); ++Index)
     {
         const FGuid& Candidate = Route[Index];
-        if (!Candidate.IsValid() || !DispatchFuelStopGuids.Contains(Candidate)) continue;
+        if (!Candidate.IsValid() || Candidate == Borrowed || !DispatchFuelStopGuids.Contains(Candidate)) continue;
         ++FuelTagsInRoute;
         if (!FuelGuid.IsValid())
         {
@@ -1497,25 +1538,39 @@ bool UDynamicTimeTableSubsystem::UpdateRememberedAnchors(
             *DTSVehicleName(Vehicle), *ResourceId, FuelTagsInRoute);
     }
 
-    // A dedicated (F) now always stays physically in mVehicleRoute (see ProcessDispatchTruckTarget -
-    // a lap that does not need it bypasses it via SetCurrentTargetWaypoint instead of omitting it),
-    // so the scan above is unconditional and deterministic: no save/load guesswork, and no ambiguity
-    // even when several (F) stops share a path network.
-    FDTTDispatchTruckAnchors Anchors;
-    // A borrowed (F) sits physically in the route too (see ProcessDispatchTruckTarget), so the scan
-    // above cannot tell it apart from a player's own tag by guid alone - carry the flag forward
-    // while it is still the same dock, so the borrow logic keeps re-evaluating it lap to lap
-    // instead of it turning sticky the moment it lands in mVehicleRoute.
-    if (Existing && Existing->bFuelIsBorrowed && Existing->FuelGuid.IsValid() && Existing->FuelGuid == FuelGuid)
+    if (Existing)
     {
-        Anchors.bFuelIsBorrowed = true;
+        // Known anchors are authoritative. The route is what this mod wrote last lap, and an own (F)
+        // that lap did not need is simply absent from it - absence means nothing. Only two things
+        // change the anchors: an (F) they do not know about (the player just added it), and a hand
+        // edit of the route, after which the (F) position is read again. A hand edit that drops the
+        // (F) keeps it: the player may have edited during a lap that had left it out. To get rid of
+        // an own (F), untag the station or change the first stop.
+        const bool bNewFuel = FuelGuid.IsValid() && FuelGuid != Existing->FuelGuid;
+        const bool bReread = FuelGuid.IsValid() && Existing->bRouteEditedByPlayer;
+        Existing->bRouteEditedByPlayer = false;
+        if (bNewFuel || bReread)
+        {
+            Existing->FuelGuid = FuelGuid;
+            Existing->FuelInsertIndex = FuelInsertIndex;
+            UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+                TEXT("DISPATCH_ANCHORS_REMEMBERED Truck='%s' Resource='%s' Producer=%s Fuel=%s FuelInsertIndex=%d DedicatedFuel=true Reason=%s"),
+                *DTSVehicleName(Vehicle), *ResourceId, *Existing->ProducerGuid.ToString(),
+                *Existing->FuelGuid.ToString(), Existing->FuelInsertIndex,
+                bNewFuel ? TEXT("fuel-added-to-route") : TEXT("route-edited"));
+        }
+        return true;
     }
+
+    // First sighting (or a save from before 1.0.7, which stored no anchors): the route is all there
+    // is, and the first (F) in it is the truck's own.
+    FDTTDispatchTruckAnchors Anchors;
     Anchors.ProducerGuid = Route[0];
     Anchors.FuelGuid = FuelGuid;
     Anchors.FuelInsertIndex = FuelGuid.IsValid() ? FuelInsertIndex : INDEX_NONE;
     DispatchTruckAnchors.Add(Vehicle, Anchors);
     UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
-        TEXT("DISPATCH_ANCHORS_REMEMBERED Truck='%s' Resource='%s' Producer=%s Fuel=%s FuelInsertIndex=%d DedicatedFuel=%s"),
+        TEXT("DISPATCH_ANCHORS_REMEMBERED Truck='%s' Resource='%s' Producer=%s Fuel=%s FuelInsertIndex=%d DedicatedFuel=%s Reason=first-sighting"),
         *DTSVehicleName(Vehicle), *ResourceId, *Anchors.ProducerGuid.ToString(),
         *Anchors.FuelGuid.ToString(), Anchors.FuelInsertIndex,
         Anchors.FuelGuid.IsValid() ? TEXT("true") : TEXT("false"));
@@ -1668,8 +1723,8 @@ bool UDynamicTimeTableSubsystem::IsFuelCriticallyLow(
     float CurrentFuelItems, PerLapItems;
     if (!TryEstimateFuelMargin(Vehicle, LoopWithoutFuel, CurrentFuelItems, PerLapItems)) return false;
 
-    // Deliberately smaller than ShouldSkipFuelStop's 2-lap comfort margin: a route with no (F) of
-    // its own is an intentional choice (docs: "assumed to refuel at regular stations"), so borrowing
+    // Deliberately below ShouldSkipFuelStop's FuelSkipMarginLaps comfort margin: a route with no (F)
+    // of its own is an intentional choice (docs: "assumed to refuel at regular stations"), so borrowing
     // shouldn't kick in as early as that buffer - but it still needs real margin (not exactly 1x),
     // because the engine's per-segment fuel estimate is unverified against actual consumption, and a
     // borrowed stop lengthens the lap beyond what PerLapItems checked (computed before insertion).
@@ -1791,27 +1846,13 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
     if (!IsValid(Vehicle) || !Vehicle->IsAutopilotEnabled()) return;
     const TArray<FGuid> Route = Vehicle->GetVehicleRoute();
     const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
-    if (Route.Num() < 1 || !Route.IsValidIndex(Index)) return;
-
-    if (Index != 0)
-    {
-        // Mid-lap: the only thing this branch does is bypass a dedicated (F) this lap decided it
-        // does not need, by moving the current target past it without touching mVehicleRoute at
-        // all. mCurrentTargetWaypointIndex is SaveGame'd on its own (FGWheeledVehicleIdentifier.h),
-        // so this survives a reload with no bookkeeping of ours needed.
-        if (const FDTTDispatchTruckAnchors* Anchors = DispatchTruckAnchors.Find(Vehicle))
-        {
-            if (Anchors->bSkipFuelThisLap && Anchors->FuelGuid.IsValid() && Route[Index] == Anchors->FuelGuid)
-            {
-                const int32 NextIndex = (Index + 1) % Route.Num();
-                Vehicle->SetCurrentTargetWaypoint(NextIndex);
-                UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
-                    TEXT("DISPATCH_FUEL_BYPASSED Truck='%s' Resource='%s' FuelIndex=%d NextIndex=%d Trigger=%s"),
-                    *DTSVehicleName(Vehicle), *ResourceId, Index, NextIndex, Trigger);
-            }
-        }
-        return;
-    }
+    // The whole lap is decided here, at the producer boundary, and written with one SetVehicleRoute.
+    // Nothing happens mid-lap. 1.0.1-1.0.6 skipped an unneeded (F) in place by calling
+    // SetCurrentTargetWaypoint, but that is the autopilot's own status setter, not a command: it
+    // moved the reported index without bumping the route changelist, and PollTruckStates then
+    // recorded the moved index, so the wrap to 0 was never seen and no boundary ran again - the
+    // truck stopped refuelling for good and circled whatever the route last held.
+    if (Index != 0 || Route.Num() < 1) return;
 
     if (!UpdateRememberedAnchors(Vehicle, ResourceId, Route)) return;
 
@@ -1822,48 +1863,68 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
     // this also closes the gap if that transition was missed while the actor was not observable.
     ReleaseRequesterClaimsForVehicle(Vehicle, TEXT("producer boundary"));
     const TArray<FGuid> Requesters = SelectRequestersForResource(ResourceId, Vehicle);
-    TArray<FGuid> NewRoute;
-    NewRoute.Reserve(2 + Requesters.Num());
-    NewRoute.Add(Anchors->ProducerGuid);
-    NewRoute.Append(Requesters);
 
-    const bool bHasDedicatedFuel = Anchors->FuelGuid.IsValid() && !Anchors->bFuelIsBorrowed;
-    Anchors->bSkipFuelThisLap = false;
+    // The loop this lap delivers on. It never contains a fuel stop, so the fuel estimate is always
+    // taken on it directly. With no demand the truck keeps its last delivery loop - Producer and the
+    // last consumer - minus whichever (F) last lap added.
+    TArray<FGuid> BaseLoop;
+    BaseLoop.Add(Anchors->ProducerGuid);
+    if (Requesters.Num() > 0)
+    {
+        BaseLoop.Append(Requesters);
+    }
+    else
+    {
+        for (int32 RouteIndex = 1; RouteIndex < Route.Num(); ++RouteIndex)
+        {
+            const FGuid& Node = Route[RouteIndex];
+            if (Node == Anchors->FuelGuid || Node == Anchors->BorrowedFuelGuid) continue;
+            BaseLoop.Add(Node);
+        }
+    }
+    const TCHAR* BaseSource = Requesters.Num() > 0 ? TEXT("requester") : TEXT("kept-last-loop");
+
+    if (BaseLoop.Num() < 2)
+    {
+        // [Producer] alone, or [Producer, (F)]: no delivery leg to estimate fuel on, and a one-stop
+        // route cannot be written. Leave the route exactly as it is. A one-stop route never changes
+        // its target index, so PollTruckStates re-checks it on a timer until the first request opens.
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+            TEXT("DISPATCH_ROUTE_KEPT Truck='%s' Resource='%s' Reason=no-delivery-loop RouteStops=%d Trigger=%s"),
+            *DTSVehicleName(Vehicle), *ResourceId, Route.Num(), Trigger);
+        return;
+    }
+
+    TArray<FGuid> NewRoute = BaseLoop;
+    const bool bHasDedicatedFuel = Anchors->FuelGuid.IsValid();
+    const FGuid PreviousBorrowed = Anchors->BorrowedFuelGuid;
+    // Cleared before any selection so this truck's own stale borrow does not count against the
+    // fuel group it is about to choose from (GetDockAssignedCount).
+    Anchors->BorrowedFuelGuid.Invalidate();
+    bool bFuelIncluded = false;
 
     if (bHasDedicatedFuel)
     {
-        // A player's own (F): sticky from here on. It is always kept in the route, never omitted -
-        // ShouldSkipFuelStop now only decides whether this lap bypasses it in place (see the
-        // Index != 0 branch above), not whether mVehicleRoute contains it. If the same dock is
-        // already in the route as a requester stop, it is never a bypass candidate - a requester
-        // delivery must not be skipped just because that dock also carries the (F) tag.
-        const bool bFuelAlreadyPresent = NewRoute.Contains(Anchors->FuelGuid);
-        // NewRoute is still just [Producer] here when there is no current requester (fuel hasn't
-        // been inserted yet) - ShouldSkipFuelStop can't estimate a one-stop loop at all and
-        // defaults to "don't skip," forcing an unconditional fuel-stop visit every lap even with a
-        // full tank. No demand right now isn't the same as "no meaningful loop to estimate": fall
-        // back to the truck's actual physical route (still carrying its last real consumer, if it
-        // had one) so the skip decision reflects real fuel state instead of always visiting.
-        Anchors->bSkipFuelThisLap = !bFuelAlreadyPresent && ShouldSkipFuelStop(
-            Vehicle, NewRoute.Num() >= 2 ? NewRoute : Route);
-        if (!bFuelAlreadyPresent)
+        // A player's own (F). In the lap only when the tank needs it; the anchor keeps it, and its
+        // position, for the laps that leave it out. If the same dock is this lap's requester it is
+        // visited anyway - a delivery is never dropped just because the dock also carries (F).
+        if (BaseLoop.Contains(Anchors->FuelGuid))
+        {
+            bFuelIncluded = true;
+        }
+        else if (!ShouldSkipFuelStop(Vehicle, BaseLoop))
         {
             NewRoute.Insert(Anchors->FuelGuid, FMath::Clamp(Anchors->FuelInsertIndex, 1, NewRoute.Num()));
+            bFuelIncluded = true;
         }
     }
     else
     {
-        // No (F) of this producer's own. Normally that is a deliberate choice (docs: assumed to
-        // refuel at regular stations) and nothing more happens here - but if the tank is genuinely
-        // at risk this lap, borrow the nearest reachable (F) instead of letting the truck strand.
-        // NewRoute collapses to just [Producer] when there is no current requester -
-        // EstimateLoopFuelConsumptionMW can't estimate a one-stop loop at all, so the check would
-        // silently no-op while the truck keeps driving its last-applied physical route and burning
-        // fuel on it. No demand right now isn't the same as no consumption right now - fall back to
-        // that physical route (Route) whenever the fresh one is too short to estimate.
-        const bool bIsCriticallyLow = NewRoute.Num() >= 2
-            ? IsFuelCriticallyLow(Vehicle, NewRoute)
-            : IsFuelCriticallyLow(Vehicle, Route);
+        // No (F) of this truck's own. Normally that is a deliberate choice (docs: assumed to refuel
+        // at regular stations) - but if the tank is genuinely at risk this lap, borrow the nearest
+        // reachable (F) instead of letting the truck strand. Decided afresh every lap: a borrowed
+        // stop is dropped again as soon as the tank no longer needs it.
+        const bool bIsCriticallyLow = IsFuelCriticallyLow(Vehicle, BaseLoop);
         FGuid ChosenGuid;
         if (bIsCriticallyLow)
         {
@@ -1883,19 +1944,16 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
             }
         }
 
-        // Unlike a player's own tag, a borrowed stop is not sticky: it is added only while needed
-        // and dropped again once the tank clears, rather than becoming a permanent detour.
-        Anchors->FuelGuid = ChosenGuid;
-        Anchors->FuelInsertIndex = ChosenGuid.IsValid() ? NewRoute.Num() : INDEX_NONE;
-        Anchors->bFuelIsBorrowed = ChosenGuid.IsValid();
-        if (ChosenGuid.IsValid() && !NewRoute.Contains(ChosenGuid))
+        if (ChosenGuid.IsValid())
         {
-            NewRoute.Add(ChosenGuid);
+            Anchors->BorrowedFuelGuid = ChosenGuid;
+            if (!NewRoute.Contains(ChosenGuid)) NewRoute.Add(ChosenGuid);
+            bFuelIncluded = true;
             UE_LOG(LogDynamicTimeTableSubsystem, Display,
                 TEXT("DISPATCH_FUEL_BORROWED Truck='%s' Resource='%s' Fuel=%s Trigger=%s"),
                 *DTSVehicleName(Vehicle), *ResourceId, *ChosenGuid.ToString(), Trigger);
         }
-        else if (bIsCriticallyLow && !ChosenGuid.IsValid())
+        else if (bIsCriticallyLow)
         {
             // Flagged low, but nothing to borrow at all - no (F) is tagged, or none is reachable on
             // this path network. MyDTT cannot fix this automatically; at minimum make it visible
@@ -1903,18 +1961,6 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
             UE_LOG(LogDynamicTimeTableSubsystem, Warning,
                 TEXT("DISPATCH_FUEL_NO_STOP_FOUND Truck='%s' Resource='%s' Trigger=%s"),
                 *DTSVehicleName(Vehicle), *ResourceId, Trigger);
-        }
-        else if (Requesters.Num() == 0)
-        {
-            // Nothing to deliver and no (F) needed to borrow this lap - leave the truck's current
-            // physical route exactly as it is, rather than attempting a shorter-than-2-stop write
-            // ReplaceRoute would reject anyway. The truck keeps looping producer + last consumer
-            // until either a new requester appears or fuel drops below FuelCriticalMarginLaps and
-            // a borrowed (F) gets added next lap.
-            UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
-                TEXT("DISPATCH_ROUTE_KEPT Truck='%s' Resource='%s' Reason=no-requester-and-no-fuel-anchor Trigger=%s"),
-                *DTSVehicleName(Vehicle), *ResourceId, Trigger);
-            return;
         }
     }
 
@@ -1932,6 +1978,9 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
                 RequesterClaimedAtWorldSeconds.Remove(Requester);
             }
         }
+        // The old route still holds the old borrowed stop; forgetting it would let the next
+        // boundary mistake it for an (F) the player put there.
+        Anchors->BorrowedFuelGuid = PreviousBorrowed;
         UE_LOG(LogDynamicTimeTableSubsystem, Warning,
             TEXT("DISPATCH_ROUTE_FAILED Truck='%s' Resource='%s' Trigger=%s"),
             *DTSVehicleName(Vehicle), *ResourceId, Trigger);
@@ -1939,10 +1988,11 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
     }
 
     UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
-        TEXT("DISPATCH_ROUTE_REPLACED Truck='%s' Resource='%s' Requesters=%d DedicatedFuel=%s FuelBorrowed=%s FuelSkipped=%s FuelInsertIndex=%d Trigger=%s"),
-        *DTSVehicleName(Vehicle), *ResourceId, Requesters.Num(),
-        bHasDedicatedFuel ? TEXT("true") : TEXT("false"), Anchors->bFuelIsBorrowed ? TEXT("true") : TEXT("false"),
-        Anchors->bSkipFuelThisLap ? TEXT("true") : TEXT("false"), Anchors->FuelInsertIndex, Trigger);
+        TEXT("DISPATCH_ROUTE_REPLACED Truck='%s' Resource='%s' Requesters=%d Base=%s DedicatedFuel=%s FuelBorrowed=%s FuelIncluded=%s FuelInsertIndex=%d Stops=%d Trigger=%s"),
+        *DTSVehicleName(Vehicle), *ResourceId, Requesters.Num(), BaseSource,
+        bHasDedicatedFuel ? TEXT("true") : TEXT("false"),
+        Anchors->BorrowedFuelGuid.IsValid() ? TEXT("true") : TEXT("false"),
+        bFuelIncluded ? TEXT("true") : TEXT("false"), Anchors->FuelInsertIndex, NewRoute.Num(), Trigger);
 }
 
 void UDynamicTimeTableSubsystem::ReleaseRequesterClaimIfDocked(AFGWheeledVehicleIdentifier* Vehicle)
@@ -2146,8 +2196,9 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         if (!IsValid(Vehicle)) continue;
         if (!Vehicle->IsAutopilotEnabled())
         {
+            // Claims go, anchors stay: an own (F) that the current lap left out of the route exists
+            // only in the anchors, and switching the autopilot off and on must not forget it.
             ReleaseRequesterClaimsForVehicle(Vehicle, TEXT("autopilot disabled"));
-            DispatchTruckAnchors.Remove(Vehicle);
             TruckPollStates.Remove(Vehicle);
             continue;
         }
@@ -2182,11 +2233,23 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         {
             ProcessCurrentTruckTarget(Vehicle, TEXT("waypoint changed"));
         }
+        else if (!ResourceId.IsEmpty() && Route.Num() < 2)
+        {
+            // A dispatch truck parked on a one-stop [Producer] route: its target index never
+            // changes, so the branch above would never fire and the first request to open would go
+            // unnoticed for good. Re-evaluate it on a slow timer instead.
+            const UWorld* World = GetWorld();
+            const double Now = IsValid(World) ? World->GetTimeSeconds() : 0.0;
+            if (Now - Previous->LastIdleRecheckSeconds >= IdleDispatchRecheckSeconds)
+            {
+                Previous->LastIdleRecheckSeconds = Now;
+                ProcessCurrentTruckTarget(Vehicle, TEXT("idle recheck"));
+            }
+        }
 
-        // Re-read rather than reuse TargetIndex: a dedicated-fuel bypass inside the call above may
-        // have already moved the target again (SetCurrentTargetWaypoint), and recording the stale
-        // pre-call value here would just cost one harmless extra call on the next tick.
-        Previous->TargetIndex = Vehicle->GetCurrentTargetWaypointIndex();
+        // The index observed before the call, on purpose: a boundary is recognised only by seeing
+        // the index change, so recording anything else here can hide the next one.
+        Previous->TargetIndex = TargetIndex;
         Previous->bDocking = bDocking;
     }
 }
@@ -2196,7 +2259,13 @@ void UDynamicTimeTableSubsystem::HandleVehicleRouteChanged(AFGWheeledVehicleIden
     if (!IsServer() || !IsValid(Vehicle) || InternalRouteChanges.Contains(Vehicle)) return;
     ReleaseTruckBooking(Vehicle, TEXT("route saved"));
     ReleaseRequesterClaimsForVehicle(Vehicle, TEXT("route saved"));
-    DispatchTruckAnchors.Remove(Vehicle);
+    // Not removed: the player may have edited during a lap that left the own (F) out, and the route
+    // they saved then does not show it. The next boundary re-reads the (F) from the route if there
+    // is one, and drops everything if the first stop changed (UpdateRememberedAnchors).
+    if (FDTTDispatchTruckAnchors* Anchors = DispatchTruckAnchors.Find(Vehicle))
+    {
+        Anchors->bRouteEditedByPlayer = true;
+    }
     PendingRouteReevaluations.Add(Vehicle);
     SchedulePendingRouteReevaluation();
     UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("ROUTE_CHANGED Truck='%s' Waypoints=%d AutoPilot=%s BookingCleared=true Reevaluation=next-tick"),
@@ -2208,7 +2277,7 @@ void UDynamicTimeTableSubsystem::HandleAutopilotChanged(AFGWheeledVehicleIdentif
     if (!IsServer() || !IsValid(Vehicle)) return;
     ReleaseTruckBooking(Vehicle, bEnabled ? TEXT("autopilot enabled") : TEXT("autopilot disabled"));
     ReleaseRequesterClaimsForVehicle(Vehicle, bEnabled ? TEXT("autopilot enabled") : TEXT("autopilot disabled"));
-    DispatchTruckAnchors.Remove(Vehicle);
+    // Anchors survive the toggle for the same reason as in PollTruckStates.
     if (!bEnabled) return;
     PendingRouteReevaluations.Add(Vehicle);
     SchedulePendingRouteReevaluation();

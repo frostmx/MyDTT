@@ -28,14 +28,20 @@ public:
     const TArray<FDTTStationGroup>& GetGroups() const { return SavedGroups; }
     int32 GetDataVersion() const { return DataVersion; }
     void SetDataVersion(int32 InVersion) { DataVersion = InVersion; }
+    const TArray<FDTTSavedTruckAnchors>& GetTruckAnchors() const { return SavedTruckAnchors; }
 
 private:
-    // 4 and later store nothing: the configuration lives in the station names themselves. The
+    // 4 and later store no groups: the configuration lives in the station names themselves. The
     // actor stays because older saves reference the class, and an empty one is cheaper than the
-    // risk of pulling a class out from under a load.
+    // risk of pulling a class out from under a load. 5 adds dispatch trucks' fuel anchors.
     UPROPERTY(SaveGame)
-    int32 DataVersion = 4;
+    int32 DataVersion = 5;
 
     UPROPERTY(SaveGame)
     TArray<FDTTStationGroup> SavedGroups;
+
+    // Refreshed from the subsystem right before every save. A lap that does not need a truck's own
+    // (F) leaves it out of the route, so this is the only place that remembers it across a load.
+    UPROPERTY(SaveGame)
+    TArray<FDTTSavedTruckAnchors> SavedTruckAnchors;
 };

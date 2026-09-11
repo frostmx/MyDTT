@@ -1,6 +1,8 @@
 #include "DTTSaveDataActor.h"
+#include "DynamicTimeTableSubsystem.h"
 #include "FGTrainStationIdentifier.h"
 #include "WheeledVehicles/FGDockingStationIdentifier.h"
+#include "WheeledVehicles/FGWheeledVehicleIdentifier.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDynamicTimeTableSaveData, Log, All);
 
@@ -17,8 +19,8 @@ void ADTTSaveDataActor::BeginPlay()
 {
     Super::BeginPlay();
     UE_LOG(LogDynamicTimeTableSaveData, Display,
-        TEXT("dTT save-data actor active. Version=%d Groups=%d"),
-        DataVersion, SavedGroups.Num());
+        TEXT("dTT save-data actor active. Version=%d Groups=%d TruckAnchors=%d"),
+        DataVersion, SavedGroups.Num(), SavedTruckAnchors.Num());
 }
 
 void ADTTSaveDataActor::SetGroups(const TArray<FDTTStationGroup>& InGroups)
@@ -28,9 +30,18 @@ void ADTTSaveDataActor::SetGroups(const TArray<FDTTStationGroup>& InGroups)
 
 void ADTTSaveDataActor::PreSaveGame_Implementation(int32 saveVersion, int32 gameVersion)
 {
+    // Pulled here rather than pushed on every change: anchors move every lap, and only the state at
+    // the moment of saving matters.
+    if (UWorld* World = GetWorld())
+    {
+        if (const UDynamicTimeTableSubsystem* Subsystem = World->GetSubsystem<UDynamicTimeTableSubsystem>())
+        {
+            Subsystem->ExportTruckAnchors(SavedTruckAnchors);
+        }
+    }
     UE_LOG(LogDynamicTimeTableSaveData, Display,
-        TEXT("Saving dTT configuration. Groups=%d DataVersion=%d"),
-        SavedGroups.Num(), DataVersion);
+        TEXT("Saving dTT configuration. Groups=%d TruckAnchors=%d DataVersion=%d"),
+        SavedGroups.Num(), SavedTruckAnchors.Num(), DataVersion);
 }
 
 void ADTTSaveDataActor::PostSaveGame_Implementation(int32 saveVersion, int32 gameVersion)
@@ -44,8 +55,8 @@ void ADTTSaveDataActor::PreLoadGame_Implementation(int32 saveVersion, int32 game
 void ADTTSaveDataActor::PostLoadGame_Implementation(int32 saveVersion, int32 gameVersion)
 {
     UE_LOG(LogDynamicTimeTableSaveData, Display,
-        TEXT("Loaded dTT configuration. Groups=%d DataVersion=%d"),
-        SavedGroups.Num(), DataVersion);
+        TEXT("Loaded dTT configuration. Groups=%d TruckAnchors=%d DataVersion=%d"),
+        SavedGroups.Num(), SavedTruckAnchors.Num(), DataVersion);
 }
 
 void ADTTSaveDataActor::GatherDependencies_Implementation(TArray<UObject*>& out_dependentObjects)
@@ -64,5 +75,11 @@ void ADTTSaveDataActor::GatherDependencies_Implementation(TArray<UObject*>& out_
             }
         }
     }
+    for (const FDTTSavedTruckAnchors& Saved : SavedTruckAnchors)
+    {
+        if (IsValid(Saved.Vehicle.Get()))
+        {
+            out_dependentObjects.AddUnique(Saved.Vehicle.Get());
+        }
+    }
 }
-

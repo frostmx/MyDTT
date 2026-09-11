@@ -56,6 +56,8 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") void GetGroupRuntimeLoad(FGuid GroupId, TArray<FDTTStationRuntimeLoad>& OutLoads) const;
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Runtime") void RecalculateBookingsFromVanilla();
     int32 GetConfigurationRevision() const { return ConfigurationRevision; }
+    /** Dispatch trucks' fuel anchors for ADTTSaveDataActor to write into the save. */
+    void ExportTruckAnchors(TArray<FDTTSavedTruckAnchors>& OutAnchors) const;
 
     /**
      * The group a station belongs to is written in the station's own name, as a trailing tag:
@@ -136,6 +138,9 @@ private:
     {
         int32 TargetIndex = INDEX_NONE;
         bool bDocking = false;
+        // A one-stop route never changes its target index, so neither of the two signals above
+        // ever fires for it; this paces the timed re-check that stands in for them.
+        double LastIdleRecheckSeconds = 0.0;
     };
     TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTTruckPollState> TruckPollStates;
     FTimerHandle TruckPollTimerHandle;
@@ -155,7 +160,9 @@ private:
     // Built once from UFGBlueprintFunctionLibrary::GetAllDescriptorsSorted, not per poll tick.
     mutable TMap<FString, TSubclassOf<class UFGItemDescriptor>> ItemClassByNameCache;
     // Producer is always Route[0]. A dedicated fuel anchor is optional and comes only from an
-    // explicit (F) tag; it is remembered because a skipped lap removes it from the live route.
+    // explicit (F) tag; it is remembered because a lap that does not need it leaves it out of the
+    // live route. The one exception to "nothing here is SaveGame": ADTTSaveDataActor stores these,
+    // since the route alone cannot bring an omitted (F) back after a load.
     TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTDispatchTruckAnchors> DispatchTruckAnchors;
 
     void InitializePersistence();
@@ -228,10 +235,13 @@ private:
     // reach exactly zero fuel mid-lap with no stop ever borrowed (see CHANGELOG 1.0.2). Raised from
     // 1.5 to 2.0 for the same reason, with more margin against that same estimate error.
     static constexpr float FuelCriticalMarginLaps = 2.0f;
-    // ShouldSkipFuelStop only bypasses a dedicated (F) once the tank clears this many estimated
-    // lap-costs - kept above FuelCriticalMarginLaps so there is a dead zone between "borrow/warn"
-    // and "safe to skip" instead of the two thresholds meeting at the same value.
+    // ShouldSkipFuelStop only leaves a dedicated (F) out of a lap once the tank clears this many
+    // estimated lap-costs - kept above FuelCriticalMarginLaps so there is a dead zone between
+    // "borrow/warn" and "safe to skip" instead of the two thresholds meeting at the same value.
     static constexpr float FuelSkipMarginLaps = 2.5f;
+    // How often a dispatch truck parked on a one-stop [Producer] route is re-evaluated: its target
+    // index never changes, so without this it would never notice the first request opening.
+    static constexpr double IdleDispatchRecheckSeconds = 10.0;
     /** Resolves a neutral tag against the station's live LOAD/UNLOAD switch. */
     EDTTDispatchRole GetEffectiveDispatchRole(const FDTTDispatchStation& Station) const;
     /** LOAD is producer, UNLOAD is requester; a contradictory tag is never actionable. */
@@ -259,15 +269,18 @@ private:
     /** Current fuel stock and this loop's per-lap need, in fuel items. False if either is not estimable. */
     bool TryEstimateFuelMargin(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& LoopWithoutFuel,
         float& OutCurrentFuelItems, float& OutPerLapItems) const;
-    /** Omits Fuel only when the live fuel inventory contains strictly more than two loop costs. */
+    /** Omits Fuel only when the live fuel inventory holds strictly more than FuelSkipMarginLaps loop costs. */
     bool ShouldSkipFuelStop(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& LoopWithoutFuel) const;
-    /** Stricter than ShouldSkipFuelStop's 2-lap comfort margin: true when this lap's own fuel would not finish it. */
+    /** Borrow trigger for a truck without its own (F): below FuelCriticalMarginLaps loop costs. */
     bool IsFuelCriticallyLow(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& LoopWithoutFuel) const;
     /** Nearest (F)-tagged dock reachable from FromGuid on the same path network, or invalid if none. */
     FGuid FindNearestFuelStop(class AFGWheeledVehicle* Vehicle, const FGuid& FromGuid) const;
     /** Selects and claims at most one open requester: the most starved stock/threshold ratio. */
     TArray<FGuid> SelectRequestersForResource(const FString& ResourceId, AFGWheeledVehicleIdentifier* Vehicle);
-    /** Rebuilds the route at the producer boundary, preserving the remembered (F) position. */
+    /**
+     * Rebuilds the whole lap at the producer boundary: Producer, the claimed requester (or, with no
+     * demand, the last loop), and an (F) only when this lap's fuel needs it. Nothing mid-lap.
+     */
     void ProcessDispatchTruckTarget(AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId, const TCHAR* Trigger);
     /** Releases this truck's claim when the waypoint it just docked at is the claimed requester. */
     void ReleaseRequesterClaimIfDocked(AFGWheeledVehicleIdentifier* Vehicle);
