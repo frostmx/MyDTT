@@ -2,7 +2,7 @@
 
 ## 1.0.0
 
-First private MyDTT release.
+First MyDTT release.
 
 - Changed the Mod Reference to `MyDTT`.
 - Added neutral `(Resource)` tags: LOAD stations become producers and UNLOAD stations become
@@ -25,4 +25,5 @@ First private MyDTT release.
 - Fixed argument handling for `/dtt groups`, `/dtt dispatch`, and `/dtt recalc`.
 - Retained the original dynamic train and truck group balancing behavior.
 
-This package is intended for private use and is not a public redistribution of the upstream mod.
+The source is published as an unofficial fork for inspection and personal builds. It is not
+published on Ficsit.app.
