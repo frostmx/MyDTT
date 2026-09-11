@@ -68,6 +68,44 @@ namespace
         return Tags;
     }
 
+    void DTSAddUniqueTag(TArray<FString>& Tags, const FString& Candidate)
+    {
+        if (!Tags.ContainsByPredicate([&](const FString& Existing)
+            { return Existing.Equals(Candidate, ESearchCase::IgnoreCase); }))
+        {
+            Tags.Add(Candidate);
+        }
+    }
+
+    FString DTSNormalizeSpaces(FString Text)
+    {
+        Text.ReplaceInline(TEXT("\t"), TEXT(" "));
+        while (Text.ReplaceInline(TEXT("  "), TEXT(" ")) > 0) {}
+        return Text.TrimStartAndEnd();
+    }
+
+    FString DTSRemoveTags(FString Text, const TArray<FString>& Tags)
+    {
+        for (const FString& Tag : Tags)
+            Text.ReplaceInline(*Tag, TEXT(" "), ESearchCase::IgnoreCase);
+        return DTSNormalizeSpaces(MoveTemp(Text));
+    }
+
+    TArray<FString> DTSTakeLeadingParenthesizedTags(FString& Text)
+    {
+        TArray<FString> Tags;
+        Text = Text.TrimStartAndEnd();
+        while (Text.StartsWith(TEXT("(")))
+        {
+            const int32 Close = Text.Find(TEXT(")"), ESearchCase::CaseSensitive,
+                ESearchDir::FromStart, 1);
+            if (Close == INDEX_NONE || Text.Mid(1, Close - 1).TrimStartAndEnd().IsEmpty()) break;
+            DTSAddUniqueTag(Tags, Text.Left(Close + 1));
+            Text = Text.Mid(Close + 1).TrimStartAndEnd();
+        }
+        return Tags;
+    }
+
     /**
      * A group has no stored identity any more - it is just a name on a station - so its id has to
      * be derived from that name. It has to stay the same across rebuilds, or the rotation cursor
@@ -120,17 +158,27 @@ bool UDynamicTimeTableSubsystem::ParseStationTag(const FString& FullName, FStrin
     }
 
     if (Inner.IsEmpty()) return false;
-    OutGroupName = Inner;
 
-    // Tags inherited from a group are written immediately after its [group] marker. Remove only
-    // that canonical suffix from the base; identical station-owned tags before [group] survive.
+    // New canonical form stores only the base group identity inside square brackets and writes
+    // inherited round tags immediately after it: "Dock [Depot] (Iron)". Read the old
+    // "[Depot (Iron)] (Iron)" form too, then expose the full display name to the UI either way.
+    TArray<FString> InheritedTags;
+    for (const FString& Tag : DTSExtractParenthesizedTags(Inner))
+        DTSAddUniqueTag(InheritedTags, Tag);
+    FString GroupBase = DTSRemoveTags(Inner, InheritedTags);
+    if (GroupBase.IsEmpty()) GroupBase = Inner;
+
     FString After = FullName.Mid(Close + 1).TrimStartAndEnd();
-    for (const FString& InheritedTag : DTSExtractParenthesizedTags(OutGroupName))
-    {
-        if (!After.StartsWith(InheritedTag, ESearchCase::IgnoreCase)) break;
-        After = After.Mid(InheritedTag.Len()).TrimStartAndEnd();
-    }
-    OutBaseName = FullName.Left(Open).TrimStartAndEnd();
+    for (const FString& Tag : DTSTakeLeadingParenthesizedTags(After))
+        DTSAddUniqueTag(InheritedTags, Tag);
+
+    OutGroupName = GroupBase;
+    if (InheritedTags.Num() > 0)
+        OutGroupName += FString::Printf(TEXT(" %s"), *FString::Join(InheritedTags, TEXT(" ")));
+
+    // Once a group owns a tag, an identical station-owned copy is redundant. Canonicalization
+    // deliberately folds it into the inherited suffix so the visible station name has one copy.
+    OutBaseName = DTSRemoveTags(FullName.Left(Open), InheritedTags);
     if (!After.IsEmpty())
     {
         OutBaseName = OutBaseName.IsEmpty() ? After
@@ -157,13 +205,21 @@ FString UDynamicTimeTableSubsystem::SanitizeGroupName(const FString& GroupName)
 
 FString UDynamicTimeTableSubsystem::MakeTaggedName(const FString& BaseName, const FString& GroupName, int32 TargetSlots)
 {
-    const FString Base = StripStationTag(BaseName);
     const FString Group = SanitizeGroupName(GroupName);
+    FString Base = StripStationTag(BaseName);
     if (Group.IsEmpty()) return Base;
+
+    TArray<FString> InheritedTagArray;
+    for (const FString& InheritedTag : DTSExtractParenthesizedTags(Group))
+        DTSAddUniqueTag(InheritedTagArray, InheritedTag);
+    FString GroupBase = DTSRemoveTags(Group, InheritedTagArray);
+    if (GroupBase.IsEmpty()) GroupBase = Group;
+    Base = DTSRemoveTags(MoveTemp(Base), InheritedTagArray);
+
     const int32 Slots = FMath::Max(1, TargetSlots);
-    const FString Tag = Slots > 1 ? FString::Printf(TEXT("[%s,%d]"), *Group, Slots)
-                                  : FString::Printf(TEXT("[%s]"), *Group);
-    const FString InheritedTags = FString::Join(DTSExtractParenthesizedTags(Group), TEXT(" "));
+    const FString Tag = Slots > 1 ? FString::Printf(TEXT("[%s,%d]"), *GroupBase, Slots)
+                                  : FString::Printf(TEXT("[%s]"), *GroupBase);
+    const FString InheritedTags = FString::Join(InheritedTagArray, TEXT(" "));
     FString Result = Base.IsEmpty() ? Tag : FString::Printf(TEXT("%s %s"), *Base, *Tag);
     if (!InheritedTags.IsEmpty()) Result += FString::Printf(TEXT(" %s"), *InheritedTags);
     return Result;

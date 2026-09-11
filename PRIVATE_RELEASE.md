@@ -32,8 +32,8 @@ For personal storage it may be copied as `MyDTT-1.0.0.zip`.
 Verified release artifact:
 
 - File: `C:\Users\frost\SF_server\dist\MyDTT-1.0.0.zip`
-- Size: `43,810,288` bytes
-- SHA-256: `773add10578be0a9d37cb6e4d745db7a8aa28bd885bca944d5a86a66a30fc741`
+- Size: `43,841,459` bytes
+- SHA-256: `1b586d4184d6f7b55ed3a1108d05011902a0655e9643702e71e584a171aab901`
 - Targets: `Windows`, `WindowsServer`
 
 ## Release notes

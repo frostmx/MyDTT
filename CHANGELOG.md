@@ -19,6 +19,7 @@ First private MyDTT release.
 - Prevented multiple trucks from claiming the same requester.
 - Added optional `(F)` fuel stops and route-based fuel consumption estimates.
 - Added inheritance of parenthesized tags from station groups.
+- Canonicalized inherited group tags as `[Group,N] (Tag)` without repeating the tag inside the square marker or on the station.
 - Added `/dtt dispatch` diagnostics.
 - Fixed newly created or renamed empty groups not appearing in the group list until a station changed.
 - Fixed argument handling for `/dtt groups`, `/dtt dispatch`, and `/dtt recalc`.
