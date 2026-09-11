@@ -49,8 +49,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") void GetAllVanillaStationNames(TArray<FString>& OutStationNames) const;
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") void GetAllDockingStationNames(TArray<FString>& OutStationNames) const;
     UFUNCTION(BlueprintPure, Category = "Dynamic Time Table|Groups") const TArray<FDTTStationGroup>& GetStationGroups() const;
-    /** Human-readable server-authoritative resource-dispatch diagnostics for /dtt dispatch. */
-    void GetDispatchStatusLines(TArray<FString>& OutLines) const;
+    /** Human-readable server-authoritative resource-dispatch diagnostics for /dtt dispatch.
+     * ResourceFilter, when non-empty, limits the listing to stations tagged with that resource
+     * (case-insensitive) and drops the fuel-stop section, since chat has no scrollback. */
+    void GetDispatchStatusLines(TArray<FString>& OutLines, const FString& ResourceFilter = FString()) const;
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") void GetGroupRuntimeLoad(FGuid GroupId, TArray<FDTTStationRuntimeLoad>& OutLoads) const;
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Runtime") void RecalculateBookingsFromVanilla();
     int32 GetConfigurationRevision() const { return ConfigurationRevision; }

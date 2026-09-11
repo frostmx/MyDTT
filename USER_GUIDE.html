@@ -114,7 +114,7 @@
 
       <section id="diagnostics">
         <h2>Команды и диагностика</h2>
-        <table><thead><tr><th>Команда чата</th><th>Что делает</th></tr></thead><tbody><tr><td><code>/dtt</code></td><td>Открывает интерфейс MyDTT.</td></tr><tr><td><code>/dtt groups</code></td><td>Показывает распознанные группы станций.</td></tr><tr><td><code>/dtt dispatch</code></td><td>Показывает станции диспетчера, режим, запас, порог, открытые заявки и закрепивший грузовик.</td></tr><tr><td><code>/dtt recalc</code></td><td>Пересчитывает активные бронирования групп.</td></tr></tbody></table>
+        <table><thead><tr><th>Команда чата</th><th>Что делает</th></tr></thead><tbody><tr><td><code>/dtt</code></td><td>Открывает интерфейс MyDTT.</td></tr><tr><td><code>/dtt groups</code></td><td>Показывает распознанные группы станций.</td></tr><tr><td><code>/dtt dispatch [ресурс]</code></td><td>Показывает станции диспетчера, режим, запас, порог, открытые заявки и закрепивший грузовик. С аргументом — только строки этого ресурса, без секции заправок.</td></tr><tr><td><code>/dtt recalc</code></td><td>Пересчитывает активные бронирования групп.</td></tr></tbody></table>
         <div class="terminal" role="region" aria-label="Пример вывода команды dtt dispatch"><pre><span class="prompt">/dtt dispatch</span>
 dTT dispatch: stations=3 fuel-stops=1 active-claims=1
 Packaged Fuel | Producer  | НПЗ     | mode=LOAD   active=yes | stock=42 stacks
@@ -133,7 +133,7 @@ Fuel (F) | Дорожная АЗС | guid=…</pre></div>
       <section>
         <h2>Существующий интерфейс расписаний</h2><p>Диспетчер ресурсов дополняет прежнюю систему групп и динамических расписаний. Короткая демонстрация основного интерфейса:</p><img class="media" src="media/screenshots/DTT_Main.gif" alt="Анимация основного интерфейса MyDTT">
       </section>
-      <footer>MyDTT 1.0.3 · персональная сборка · работает локально без подключения к интернету.</footer>
+      <footer>MyDTT 1.0.5 · персональная сборка · работает локально без подключения к интернету.</footer>
     </main>
   </div>
   <script>

@@ -664,14 +664,22 @@ void UDynamicTimeTableSubsystem::GetAllDockingStationNames(TArray<FString>& Out)
 
 const TArray<FDTTStationGroup>& UDynamicTimeTableSubsystem::GetStationGroups() const { return StationGroups; }
 
-void UDynamicTimeTableSubsystem::GetDispatchStatusLines(TArray<FString>& OutLines) const
+void UDynamicTimeTableSubsystem::GetDispatchStatusLines(TArray<FString>& OutLines, const FString& ResourceFilter) const
 {
     OutLines.Reset();
-    OutLines.Add(FString::Printf(
-        TEXT("dTT dispatch: stations=%d fuel-stops=%d active-claims=%d"),
-        DispatchStations.Num(), DispatchFuelStopGuids.Num(), RequesterClaims.Num()));
+    OutLines.Add(ResourceFilter.IsEmpty()
+        ? FString::Printf(TEXT("dTT dispatch: stations=%d fuel-stops=%d active-claims=%d"),
+            DispatchStations.Num(), DispatchFuelStopGuids.Num(), RequesterClaims.Num())
+        : FString::Printf(TEXT("dTT dispatch: resource='%s'"), *ResourceFilter));
 
     TArray<FDTTDispatchStation> Stations = DispatchStations;
+    if (!ResourceFilter.IsEmpty())
+    {
+        Stations.RemoveAll([&](const FDTTDispatchStation& Station)
+        {
+            return !Station.ResourceId.Equals(ResourceFilter, ESearchCase::IgnoreCase);
+        });
+    }
     Stations.Sort([](const FDTTDispatchStation& A, const FDTTDispatchStation& B)
     {
         const int32 ResourceCompare = A.ResourceId.Compare(B.ResourceId, ESearchCase::IgnoreCase);
@@ -716,18 +724,29 @@ void UDynamicTimeTableSubsystem::GetDispatchStatusLines(TArray<FString>& OutLine
             bOpen ? TEXT("yes") : TEXT("no"), *Claim));
     }
 
-    TArray<FGuid> FuelStops = DispatchFuelStopGuids.Array();
-    FuelStops.Sort([](const FGuid& A, const FGuid& B){ return A.ToString() < B.ToString(); });
-    for (const FGuid& FuelGuid : FuelStops)
+    // Fuel stops aren't tied to one resource - every dispatch truck can borrow any of them - so a
+    // per-resource filter drops this section too, since it is the same regardless of which
+    // resource was asked about and chat has no scrollback to spare on it.
+    if (ResourceFilter.IsEmpty())
     {
-        const AFGDockingStationIdentifier* FuelDock = FindDockByPathNode(FuelGuid);
-        const FString Name = IsValid(FuelDock)
-            ? FuelDock->GetStationName().ToString() : TEXT("<missing dock>");
-        OutLines.Add(FString::Printf(TEXT("Fuel (F) | %s | guid=%s"),
-            *Name, *FuelGuid.ToString()));
+        TArray<FGuid> FuelStops = DispatchFuelStopGuids.Array();
+        FuelStops.Sort([](const FGuid& A, const FGuid& B){ return A.ToString() < B.ToString(); });
+        for (const FGuid& FuelGuid : FuelStops)
+        {
+            const AFGDockingStationIdentifier* FuelDock = FindDockByPathNode(FuelGuid);
+            const FString Name = IsValid(FuelDock)
+                ? FuelDock->GetStationName().ToString() : TEXT("<missing dock>");
+            OutLines.Add(FString::Printf(TEXT("Fuel (F) | %s | guid=%s"),
+                *Name, *FuelGuid.ToString()));
+        }
     }
 
-    if (DispatchStations.Num() == 0 && DispatchFuelStopGuids.Num() == 0)
+    if (!ResourceFilter.IsEmpty() && Stations.Num() == 0)
+    {
+        OutLines.Add(FString::Printf(
+            TEXT("No dispatch stations tagged with resource '%s'."), *ResourceFilter));
+    }
+    else if (DispatchStations.Num() == 0 && DispatchFuelStopGuids.Num() == 0)
     {
         OutLines.Add(TEXT("No dispatch tags. Use (Resource) on LOAD/UNLOAD stations, optional "
             "(Resource-N) to override a requester threshold, and optional (F) on a fuel stop."));

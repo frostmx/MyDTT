@@ -18,7 +18,7 @@ ADynamicTimeTableChatCommand::ADynamicTimeTableChatCommand()
     Usage = NSLOCTEXT(
         "DynamicTimeTable",
         "ChatCommand.DTT.Usage",
-        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch - list resource dispatch; /dtt recalc - rebuild active bookings");
+        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt recalc - rebuild active bookings");
     Aliases.Add(TEXT("dynamictimetable"));
 }
 
@@ -87,8 +87,9 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
     if (Arguments.Num() >= 1 &&
         Arguments[0].Equals(TEXT("dispatch"), ESearchCase::IgnoreCase))
     {
+        const FString ResourceFilter = Arguments.Num() >= 2 ? Arguments[1] : FString();
         TArray<FString> Lines;
-        Subsystem->GetDispatchStatusLines(Lines);
+        Subsystem->GetDispatchStatusLines(Lines, ResourceFilter);
         for (const FString& Line : Lines)
         {
             Sender->SendChatMessage(Line, FLinearColor(0.20f, 0.80f, 1.00f));

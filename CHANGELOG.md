@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.5
+
+- Added an optional resource argument to `/dtt dispatch`, e.g. `/dtt dispatch Iron`: it lists only
+  stations tagged with that resource and drops the fuel-stop section, since chat has no scrollback
+  and the unfiltered listing gets unreadable with more than a couple of tagged resources.
+
 ## 1.0.3
 
 - Fixed the critical-fuel check silently never running for a truck with no dedicated `(F)` while
