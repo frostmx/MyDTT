@@ -220,6 +220,11 @@ private:
 
     // Resource dispatch.
     static constexpr int32 DefaultDispatchRequesterThresholdStacks = 10;
+    // IsFuelCriticallyLow triggers this many estimated lap-costs early, not at exactly 1x: the
+    // engine's per-segment fuel estimate is unverified against actual consumption, and a borrowed
+    // stop lengthens the lap it is added to beyond what was checked - a bare 1x margin let a truck
+    // reach exactly zero fuel mid-lap with no stop ever borrowed (see CHANGELOG 1.0.2).
+    static constexpr float FuelCriticalMarginLaps = 1.5f;
     /** Resolves a neutral tag against the station's live LOAD/UNLOAD switch. */
     EDTTDispatchRole GetEffectiveDispatchRole(const FDTTDispatchStation& Station) const;
     /** LOAD is producer, UNLOAD is requester; a contradictory tag is never actionable. */
@@ -239,10 +244,20 @@ private:
     /** Fuel cost for one directed edge in the vehicle path network, or a negative value on failure. */
     float SumSegmentFuelConsumption(class AFGVehicleSubsystem* VehicleSubsystem, const FGuid& FromNodeGuid,
         const FGuid& ToNodeGuid, TSubclassOf<class AFGWheeledVehicle> VehicleType) const;
+    /** Fuel cost of the actual path between two arbitrary nodes on the same network, or negative on failure. */
+    float EstimatePathFuelConsumptionMW(class AFGVehicleSubsystem* VehicleSubsystem, const class UFGVehiclePathPreset* Preset,
+        TSubclassOf<class AFGWheeledVehicle> VehicleType, const FGuid& From, const FGuid& To) const;
     /** Cost of the closed Producer/requester loop in the same units as the vanilla route-cost UI. */
     float EstimateLoopFuelConsumptionMW(class AFGWheeledVehicle* Vehicle, const TArray<FGuid>& Loop) const;
+    /** Current fuel stock and this loop's per-lap need, in fuel items. False if either is not estimable. */
+    bool TryEstimateFuelMargin(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& LoopWithoutFuel,
+        float& OutCurrentFuelItems, float& OutPerLapItems) const;
     /** Omits Fuel only when the live fuel inventory contains strictly more than two loop costs. */
     bool ShouldSkipFuelStop(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& LoopWithoutFuel) const;
+    /** Stricter than ShouldSkipFuelStop's 2-lap comfort margin: true when this lap's own fuel would not finish it. */
+    bool IsFuelCriticallyLow(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& LoopWithoutFuel) const;
+    /** Nearest (F)-tagged dock reachable from FromGuid on the same path network, or invalid if none. */
+    FGuid FindNearestFuelStop(class AFGWheeledVehicle* Vehicle, const FGuid& FromGuid) const;
     /** Selects and claims at most one open requester: the most starved stock/threshold ratio. */
     TArray<FGuid> SelectRequestersForResource(const FString& ResourceId, AFGWheeledVehicleIdentifier* Vehicle);
     /** Rebuilds the route at the producer boundary, preserving the remembered (F) position. */

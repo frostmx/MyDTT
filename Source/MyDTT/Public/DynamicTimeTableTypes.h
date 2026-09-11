@@ -116,6 +116,18 @@ struct FDTTDispatchTruckAnchors
     // Clamped to the rebuilt route size when the number of requesters changes.
     UPROPERTY()
     int32 FuelInsertIndex = INDEX_NONE;
+
+    // True when FuelGuid should stay in mVehicleRoute this lap but the truck should bypass it
+    // without stopping (SetCurrentTargetWaypoint past it) - decided once per lap, at the producer
+    // boundary. Only meaningful for a player-tagged (own-route) fuel stop.
+    UPROPERTY()
+    bool bSkipFuelThisLap = false;
+
+    // True when FuelGuid was not tagged in this producer's own route but borrowed from the nearest
+    // reachable (F) because the tank was running critically low. Unlike a player's own tag, a
+    // borrowed stop is not sticky: it is dropped from the route again once no longer needed.
+    UPROPERTY()
+    bool bFuelIsBorrowed = false;
 };
 
 USTRUCT(BlueprintType)
