@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.7
+
+- Fixed trucks with their own `(F)` stopping refuelling for good, and trucks with no open request
+  getting stuck circling their producer. Both came from 1.0.1's "bypass the fuel stop in place"
+  approach, which stopped the dispatcher from noticing that a new lap had begun. It has been
+  removed: each lap is now rebuilt at the producer, and a truck's own `(F)` is simply left out of
+  laps that don't need it.
+- A truck's own `(F)` and its position in the route are now stored in the save, so a lap that
+  left it out no longer loses it across save/load. Toggling the autopilot or editing the route by
+  hand no longer loses it either; to drop it, untag the station or change the first stop.
+- Fixed a borrowed `(F)` occasionally becoming a permanent part of the route after a lap with no
+  open request.
+- With no open request, a truck keeps driving its last delivery loop, and fuel stops are added only
+  when the tank needs them. A truck whose route is only its producer now picks up the first request
+  within about ten seconds; before, it could wait forever.
+
 ## 1.0.6
 
 - Fixed a truck with its own dedicated `(F)` unconditionally visiting it every lap while its
