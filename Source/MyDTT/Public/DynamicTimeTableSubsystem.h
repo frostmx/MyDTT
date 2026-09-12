@@ -341,11 +341,37 @@ private:
      */
     bool EstimateTruckCargoStacks(AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<class UFGItemDescriptor> ItemClass,
         int32& OutCapacityStacks, int32& OutOnBoardStacks) const;
+    /** One requester below its threshold, as CollectOpenRequesters reports it. */
+    struct FDTTOpenRequester
+    {
+        const FDTTDispatchStation* Station = nullptr;
+        int32 StockStacks = 0;
+        int32 Threshold = 0;
+        double FillRatio = 0.0;
+    };
+    /**
+     * Every UNLOAD requester of the resource below its threshold that is not claimed by another
+     * truck (ForVehicle's own claims count as free; null means any claim excludes), most starved
+     * first. Pure: claims nothing.
+     */
+    void CollectOpenRequesters(const FString& ResourceId, TSubclassOf<class UFGItemDescriptor> ItemClass,
+        AFGWheeledVehicleIdentifier* ForVehicle, TArray<FDTTOpenRequester>& Out) const;
     /**
      * Selects and claims the open requesters for one lap, most starved first, until their summed
      * deficit (threshold minus stock) covers what the truck can deliver, at most MaxRequestersPerLap.
+     * The producer whose stock bounds the lap is Route[0] unless ProducerGuid says otherwise (a pool
+     * truck sits at a depot, not at its producer); the planned items go to OutPlannedItems, or to
+     * the legacy anchors when that is null.
      */
-    TArray<FGuid> SelectRequestersForResource(const FString& ResourceId, AFGWheeledVehicleIdentifier* Vehicle);
+    TArray<FGuid> SelectRequestersForResource(const FString& ResourceId, AFGWheeledVehicleIdentifier* Vehicle,
+        const FGuid& ProducerGuid = FGuid(), TMap<FGuid, int32>* OutPlannedItems = nullptr);
+    /**
+     * The LOAD producer of the resource a pool truck should load at: the one with the most stock,
+     * ties by path cost from FromGuid. Pure; the group rule (ChooseProducerFromGroup) is applied
+     * by the caller once the truck is known.
+     */
+    FGuid ChooseProducerForResource(AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId,
+        TSubclassOf<class UFGItemDescriptor> ItemClass, const FGuid& FromGuid, int32& OutStockStacks) const;
     /**
      * The producer for the coming lap. With Route[0] in a [group], the group rule applied to the
      * producer side of a dispatch lap: the LOAD producer of the same resource in that group with
@@ -364,7 +390,7 @@ private:
      * dropped so the truck returns to the producer. Returns true when the route was rewritten.
      */
     bool CutLapIfCargoEmpty(AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId,
-        const TArray<FGuid>& Route, int32 Index, const TCHAR* Trigger);
+        const TArray<FGuid>& Route, int32 Index, const TCHAR* Trigger, const FGuid& KeepTail = FGuid());
     /**
      * Rebuilds the whole lap at the producer boundary: Producer, the claimed requesters (or, with no
      * demand, the last consumer), and an (F) only when this lap's fuel needs it. The one mid-lap
@@ -421,6 +447,9 @@ private:
     void ProcessPoolTruckTarget(AFGWheeledVehicleIdentifier* Vehicle, FDTTPoolTruckState& State, const TCHAR* Trigger);
     /** Matches open requests to parked trucks. */
     void RunPoolDispatch(const TCHAR* Trigger);
+    /** Writes the lap [Producer, Requesters..., (F)?, Depot] for one parked truck and lets it go. */
+    bool AssignPoolTruck(AFGWheeledVehicleIdentifier* Vehicle, FDTTPoolTruckState& State, const FString& ResourceId,
+        TSubclassOf<class UFGItemDescriptor> ItemClass, const FGuid& ProducerGuid, const TCHAR* Trigger);
     /** After a load: re-holds the trucks saved as parked, or sends stale ones back to a depot. */
     void RestoreParkedTrucks();
     void UpdatePoolVehicleName(AFGWheeledVehicleIdentifier* Vehicle, const FDTTPoolTruckState& State) const;
