@@ -228,7 +228,19 @@ private:
     int32 GetGroupPathNetworkID(const FDTTStationGroup& Group) const;
 
     // Resource dispatch.
+    // A neutral "(Resource)" requester tag carries no threshold of its own (FDTTDispatchStation::
+    // Threshold == INDEX_NONE); the default is picked once the item class is known, because the
+    // unit differs by form. For solids one stack is the item's stack size; for a fluid it is
+    // EStackSize::SS_FLUID = 50 000 L = 50 m3, so a fluid truck station (one 3 200 000 L slot)
+    // holds 64 stacks and a "half full" default wants 32 of them, not 10.
     static constexpr int32 DefaultDispatchRequesterThresholdStacks = 10;
+    static constexpr int32 DefaultDispatchFluidThresholdStacks = 32;
+    // Upper bound on requesters planned into one lap. The cargo-deficit estimate is the real
+    // limit; this only caps the route length when many requesters are all nearly empty.
+    static constexpr int32 MaxRequestersPerLap = 4;
+    // ChooseFuelInsertIndex accepts a position only if the tank can reach the (F) there using
+    // at most this fraction of its current energy - the per-segment estimate is unverified.
+    static constexpr float FuelReachFraction = 0.8f;
     // IsFuelCriticallyLow triggers this many estimated lap-costs early, not at exactly 1x: the
     // engine's per-segment fuel estimate is unverified against actual consumption, and a borrowed
     // stop lengthens the lap it is added to beyond what was checked - a bare 1x margin let a truck
@@ -275,11 +287,35 @@ private:
     bool IsFuelCriticallyLow(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& LoopWithoutFuel) const;
     /** Nearest (F)-tagged dock reachable from FromGuid on the same path network, or invalid if none. */
     FGuid FindNearestFuelStop(class AFGWheeledVehicle* Vehicle, const FGuid& FromGuid) const;
-    /** Selects and claims at most one open requester: the most starved stock/threshold ratio. */
+    /** Explicit threshold from the tag, else the per-form default (solid vs fluid). */
+    int32 GetEffectiveThreshold(const FDTTDispatchStation& Station, TSubclassOf<class UFGItemDescriptor> ItemClass) const;
+    /**
+     * Truck cargo in the same "stacks" unit as ReadDockStockInStacks: capacity from the inventory's
+     * slot size (a fluid truck's single slot is 64 stacks), on-board from what is loaded now.
+     */
+    bool EstimateTruckCargoStacks(AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<class UFGItemDescriptor> ItemClass,
+        int32& OutCapacityStacks, int32& OutOnBoardStacks) const;
+    /**
+     * Selects and claims the open requesters for one lap, most starved first, until their summed
+     * deficit (threshold minus stock) covers what the truck can deliver, at most MaxRequestersPerLap.
+     */
     TArray<FGuid> SelectRequestersForResource(const FString& ResourceId, AFGWheeledVehicleIdentifier* Vehicle);
     /**
-     * Rebuilds the whole lap at the producer boundary: Producer, the claimed requester (or, with no
-     * demand, the last loop), and an (F) only when this lap's fuel needs it. Nothing mid-lap.
+     * Position in BaseLoop for a fuel stop: the insertion with the smallest detour among those the
+     * tank can reach. FallbackIndex when no leg cost is estimable or no position is reachable.
+     */
+    int32 ChooseFuelInsertIndex(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& BaseLoop,
+        const FGuid& FuelGuid, int32 FallbackIndex) const;
+    /**
+     * Mid-lap: heading for another requester with nothing left on board, the rest of the lap is
+     * dropped so the truck returns to the producer. Returns true when the route was rewritten.
+     */
+    bool CutLapIfCargoEmpty(AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId,
+        const TArray<FGuid>& Route, int32 Index, const TCHAR* Trigger);
+    /**
+     * Rebuilds the whole lap at the producer boundary: Producer, the claimed requesters (or, with no
+     * demand, the last consumer), and an (F) only when this lap's fuel needs it. The one mid-lap
+     * action is CutLapIfCargoEmpty.
      */
     void ProcessDispatchTruckTarget(AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId, const TCHAR* Trigger);
     /** Releases this truck's claim when the waypoint it just docked at is the claimed requester. */

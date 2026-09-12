@@ -89,9 +89,10 @@ struct FDTTDispatchStation
     EDTTDispatchRole Role = EDTTDispatchRole::None;
 
     // Requester only: open (a candidate for dispatch) while the dock's stock is below this many stacks.
-    // A neutral "(ResourceId)" tag receives the subsystem's default threshold.
+    // INDEX_NONE for a neutral "(ResourceId)" tag: the default depends on the item's form (solid or
+    // fluid), which is only known once the resource resolves - see GetEffectiveThreshold.
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dynamic Time Table")
-    int32 Threshold = 0;
+    int32 Threshold = INDEX_NONE;
 
     UPROPERTY()
     TObjectPtr<AFGDockingStationIdentifier> DockingStationIdentifier = nullptr;

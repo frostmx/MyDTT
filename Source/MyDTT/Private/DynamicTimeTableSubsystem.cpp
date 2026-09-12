@@ -275,7 +275,8 @@ bool UDynamicTimeTableSubsystem::ParseDispatchTag(const FString& FullName, FStri
                 if (!Resource.IsEmpty())
                 {
                     Role = EDTTDispatchRole::ByStationMode;
-                    Threshold = DefaultDispatchRequesterThresholdStacks;
+                    // Resolved later per item form; see GetEffectiveThreshold.
+                    Threshold = INDEX_NONE;
                 }
             }
         }
@@ -724,6 +725,7 @@ void UDynamicTimeTableSubsystem::GetDispatchStatusLines(TArray<FString>& OutLine
         const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(Station.ResourceId);
         const int32 StockStacks = ItemClass
             ? ReadDockStockInStacks(Station.DockingStationIdentifier.Get(), ItemClass) : INDEX_NONE;
+        const int32 Threshold = GetEffectiveThreshold(Station, ItemClass);
         const FString BaseName = StripDispatchTag(Station.DisplayName);
 
         const EDTTDispatchRole EffectiveRole = GetEffectiveDispatchRole(Station);
@@ -742,12 +744,45 @@ void UDynamicTimeTableSubsystem::GetDispatchStatusLines(TArray<FString>& OutLine
         {
             Claim = Owner->IsValid() ? DTSVehicleName(Owner->Get()) : TEXT("<invalid vehicle>");
         }
-        const bool bOpen = bModeMatches && StockStacks >= 0 && StockStacks < Station.Threshold;
+        const bool bOpen = bModeMatches && StockStacks >= 0 && StockStacks < Threshold;
         OutLines.Add(FString::Printf(
             TEXT("%s | Requester | %s | mode=%s active=%s | stock=%s/%d open=%s | claim=%s"),
             *Station.ResourceId, *BaseName, ActualMode, bModeMatches ? TEXT("yes") : TEXT("no"),
-            StockStacks >= 0 ? *FString::FromInt(StockStacks) : TEXT("unknown"), Station.Threshold,
+            StockStacks >= 0 ? *FString::FromInt(StockStacks) : TEXT("unknown"), Threshold,
             bOpen ? TEXT("yes") : TEXT("no"), *Claim));
+    }
+
+    // One line per dispatch truck: its lap as written, where it is heading, and what is on board -
+    // the route is the only place a multi-stop lap or a cut lap can be seen from chat.
+    auto ShortDockName = [&](const FGuid& Guid) -> FString
+    {
+        const AFGDockingStationIdentifier* Dock = FindDockByPathNode(Guid);
+        if (!IsValid(Dock)) return Guid.ToString().Left(8);
+        FString Name = StripDispatchTag(Dock->GetStationName().ToString());
+        FString WithoutFuelTag;
+        if (ParseFuelStopTag(Name, WithoutFuelTag)) Name = WithoutFuelTag;
+        Name = StripStationTag(Name).TrimStartAndEnd();
+        return Name.IsEmpty() ? Guid.ToString().Left(8) : Name;
+    };
+    for (const auto& Pair : DispatchTruckAnchors)
+    {
+        AFGWheeledVehicleIdentifier* Vehicle = Pair.Key.Get();
+        if (!IsValid(Vehicle)) continue;
+        const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+        const FString ResourceId = Route.Num() > 0 ? ResolveDispatchResourceFromProducer(Route[0]) : FString();
+        if (ResourceId.IsEmpty()) continue;
+        if (!ResourceFilter.IsEmpty() && !ResourceId.Equals(ResourceFilter, ESearchCase::IgnoreCase)) continue;
+
+        TArray<FString> Stops;
+        for (const FGuid& Node : Route) Stops.Add(ShortDockName(Node));
+        int32 CapacityStacks = 0, OnBoardStacks = 0;
+        const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(ResourceId);
+        const bool bCargoKnown = EstimateTruckCargoStacks(Vehicle, ItemClass, CapacityStacks, OnBoardStacks);
+        OutLines.Add(FString::Printf(
+            TEXT("%s | Truck | %s | route=[%s] target=%d%s | cargo=%s"),
+            *ResourceId, *DTSVehicleName(Vehicle), *FString::Join(Stops, TEXT(" > ")),
+            Vehicle->GetCurrentTargetWaypointIndex(), Vehicle->IsAutopilotEnabled() ? TEXT("") : TEXT(" autopilot=off"),
+            bCargoKnown ? *FString::Printf(TEXT("%d/%d stacks"), OnBoardStacks, CapacityStacks) : TEXT("unknown")));
     }
 
     // Fuel stops aren't tied to one resource - every dispatch truck can borrow any of them - so a
@@ -927,12 +962,13 @@ void UDynamicTimeTableSubsystem::RebuildGroupsFromNames()
                 const EDTTDispatchRole EffectiveRole = GetEffectiveDispatchRole(Dispatch);
                 const bool bModeMatches = DoesDispatchStationMatchMode(Dispatch);
                 UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
-                    TEXT("DISPATCH_TAG_FOUND Name=\"%s\" Resource=\"%s\" Role=%s TagRole=%s Threshold=%d GetIsInLoadMode=%s ModeMatches=%s"),
+                    TEXT("DISPATCH_TAG_FOUND Name=\"%s\" Resource=\"%s\" Role=%s TagRole=%s Threshold=%s GetIsInLoadMode=%s ModeMatches=%s"),
                     *FullName, *ResourceId,
                     EffectiveRole == EDTTDispatchRole::Producer ? TEXT("Producer") : TEXT("Requester"),
                     Role == EDTTDispatchRole::ByStationMode ? TEXT("ByStationMode")
                         : (Role == EDTTDispatchRole::Producer ? TEXT("ExplicitProducer") : TEXT("ExplicitRequester")),
-                    Threshold, bIsLoadMode ? TEXT("true") : TEXT("false"), bModeMatches ? TEXT("true") : TEXT("false"));
+                    Threshold == INDEX_NONE ? TEXT("default") : *FString::FromInt(Threshold),
+                    bIsLoadMode ? TEXT("true") : TEXT("false"), bModeMatches ? TEXT("true") : TEXT("false"));
                 if (!bModeMatches)
                 {
                     UE_LOG(LogDynamicTimeTableSubsystem, Warning,
@@ -1758,6 +1794,41 @@ FGuid UDynamicTimeTableSubsystem::FindNearestFuelStop(AFGWheeledVehicle* Vehicle
     return Nearest;
 }
 
+int32 UDynamicTimeTableSubsystem::GetEffectiveThreshold(
+    const FDTTDispatchStation& Station, TSubclassOf<UFGItemDescriptor> ItemClass) const
+{
+    if (Station.Threshold != INDEX_NONE) return Station.Threshold;
+    if (ItemClass)
+    {
+        const EResourceForm Form = UFGItemDescriptor::GetForm(ItemClass);
+        if (Form == EResourceForm::RF_LIQUID || Form == EResourceForm::RF_GAS)
+        {
+            return DefaultDispatchFluidThresholdStacks;
+        }
+    }
+    return DefaultDispatchRequesterThresholdStacks;
+}
+
+bool UDynamicTimeTableSubsystem::EstimateTruckCargoStacks(
+    AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<UFGItemDescriptor> ItemClass,
+    int32& OutCapacityStacks, int32& OutOnBoardStacks) const
+{
+    OutCapacityStacks = 0;
+    OutOnBoardStacks = 0;
+    if (!IsValid(Vehicle) || !ItemClass) return false;
+    AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
+    UFGInventoryComponent* Storage = IsValid(WheeledVehicle) ? WheeledVehicle->GetStorageInventory() : nullptr;
+    if (!IsValid(Storage) || Storage->GetSizeLinear() < 1) return false;
+
+    // Slot size rather than stack size: a fluid truck has a single slot with an arbitrary size of
+    // 3 200 000 L, which is 64 fluid stacks of 50 000 L - the unit ReadDockStockInStacks counts in.
+    const int64 StackSize = FMath::Max(1, UFGItemDescriptor::GetStackSize(ItemClass));
+    const int64 SlotSize = FMath::Max<int64>(1, Storage->GetSlotSize(0, ItemClass));
+    OutCapacityStacks = static_cast<int32>(FMath::Max<int64>(1, (Storage->GetSizeLinear() * SlotSize) / StackSize));
+    OutOnBoardStacks = static_cast<int32>(Storage->GetNumItems(ItemClass) / StackSize);
+    return true;
+}
+
 TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
     const FString& ResourceId, AFGWheeledVehicleIdentifier* Vehicle)
 {
@@ -1777,6 +1848,7 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
     {
         const FDTTDispatchStation* Station = nullptr;
         int32 StockStacks = 0;
+        int32 Threshold = 0;
         double FillRatio = 0.0;
     };
     TArray<FDispatchCandidate> Candidates;
@@ -1798,17 +1870,19 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
         }
 
         const int32 StockStacks = ReadDockStockInStacks(Station.DockingStationIdentifier.Get(), ItemClass);
+        const int32 Threshold = GetEffectiveThreshold(Station, ItemClass);
         UE_LOG(LogDynamicTimeTableSubsystem, VeryVerbose,
             TEXT("DISPATCH_CANDIDATE Truck='%s' Resource='%s' Station='%s' StockStacks=%d Threshold=%d Open=%s"),
-            *DTSVehicleName(Vehicle), *ResourceId, *Station.DisplayName, StockStacks, Station.Threshold,
-            StockStacks < Station.Threshold ? TEXT("true") : TEXT("false"));
-        if (StockStacks < Station.Threshold)
+            *DTSVehicleName(Vehicle), *ResourceId, *Station.DisplayName, StockStacks, Threshold,
+            StockStacks < Threshold ? TEXT("true") : TEXT("false"));
+        if (StockStacks < Threshold)
         {
             FDispatchCandidate Candidate;
             Candidate.Station = &Station;
             Candidate.StockStacks = StockStacks;
-            Candidate.FillRatio = Station.Threshold > 0
-                ? static_cast<double>(StockStacks) / static_cast<double>(Station.Threshold)
+            Candidate.Threshold = Threshold;
+            Candidate.FillRatio = Threshold > 0
+                ? static_cast<double>(StockStacks) / static_cast<double>(Threshold)
                 : 1.0;
             Candidates.Add(Candidate);
         }
@@ -1825,19 +1899,182 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
         return A.Station->DockingPathNodeGuid.ToString() < B.Station->DockingPathNodeGuid.ToString();
     });
 
+    // What this lap can deliver, in stacks: the truck's capacity, but no more than what is already
+    // on board plus what the producer holds right now. Unknown (no vehicle actor, no inventory)
+    // degrades to a single requester, which is what every lap got before 1.0.9.
+    int32 CapacityStacks = 0, OnBoardStacks = 0, AvailableStacks = 1;
+    if (EstimateTruckCargoStacks(Vehicle, ItemClass, CapacityStacks, OnBoardStacks))
+    {
+        const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+        const int32 ProducerStacks = Route.Num() > 0
+            ? ReadDockStockInStacks(FindDockByPathNode(Route[0]), ItemClass) : 0;
+        AvailableStacks = FMath::Max(1, FMath::Min(CapacityStacks, OnBoardStacks + ProducerStacks));
+    }
+
     const UWorld* World = GetWorld();
     const double ClaimedAt = IsValid(World) ? World->GetTimeSeconds() : 0.0;
-    const FDispatchCandidate& Candidate = Candidates[0];
-    const FDTTDispatchStation* Selected = Candidate.Station;
-    RequesterClaims.Add(Selected->DockingPathNodeGuid, Vehicle);
-    RequesterClaimedAtWorldSeconds.Add(Selected->DockingPathNodeGuid, ClaimedAt);
-    Result.Add(Selected->DockingPathNodeGuid);
+    // Most starved first, and as many as the cargo covers: each requester's deficit is what it
+    // takes to bring it back up to its threshold. The first is always taken; a later one only
+    // while the ones before it leave something on board. A truck that empties early anyway cuts
+    // the rest of the lap (CutLapIfCargoEmpty), so overshooting here costs one detour at most.
+    int32 CoveredDeficit = 0;
+    for (int32 Priority = 0; Priority < Candidates.Num() && Result.Num() < MaxRequestersPerLap; ++Priority)
+    {
+        if (Priority > 0 && CoveredDeficit >= AvailableStacks) break;
+        const FDispatchCandidate& Candidate = Candidates[Priority];
+        const FDTTDispatchStation* Selected = Candidate.Station;
+        RequesterClaims.Add(Selected->DockingPathNodeGuid, Vehicle);
+        RequesterClaimedAtWorldSeconds.Add(Selected->DockingPathNodeGuid, ClaimedAt);
+        Result.Add(Selected->DockingPathNodeGuid);
+        CoveredDeficit += FMath::Max(1, Candidate.Threshold - Candidate.StockStacks);
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+            TEXT("DISPATCH_CLAIMED Truck='%s' Resource='%s' Requester='%s' Guid=%s Priority=%d StockStacks=%d Threshold=%d FillRatio=%.6f"),
+            *DTSVehicleName(Vehicle), *ResourceId, *Selected->DisplayName,
+            *Selected->DockingPathNodeGuid.ToString(), Priority, Candidate.StockStacks,
+            Candidate.Threshold, Candidate.FillRatio);
+    }
     UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
-        TEXT("DISPATCH_CLAIMED Truck='%s' Resource='%s' Requester='%s' Guid=%s Priority=0 StockStacks=%d Threshold=%d FillRatio=%.6f"),
-        *DTSVehicleName(Vehicle), *ResourceId, *Selected->DisplayName,
-        *Selected->DockingPathNodeGuid.ToString(), Candidate.StockStacks,
-        Selected->Threshold, Candidate.FillRatio);
+        TEXT("DISPATCH_LAP_PLANNED Truck='%s' Resource='%s' Open=%d Requesters=%d Deficit=%d Cargo=%d OnBoard=%d Capacity=%d"),
+        *DTSVehicleName(Vehicle), *ResourceId, Candidates.Num(), Result.Num(), CoveredDeficit,
+        AvailableStacks, OnBoardStacks, CapacityStacks);
     return Result;
+}
+
+int32 UDynamicTimeTableSubsystem::ChooseFuelInsertIndex(
+    AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& BaseLoop,
+    const FGuid& FuelGuid, int32 FallbackIndex) const
+{
+    const int32 Num = BaseLoop.Num();
+    const int32 Fallback = FMath::Clamp(FallbackIndex, 1, FMath::Max(1, Num));
+    if (!IsValid(Vehicle) || Num < 2 || !FuelGuid.IsValid()) return Fallback;
+
+    AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
+    if (!IsValid(WheeledVehicle)) return Fallback;
+    const UFGVehiclePathPreset* Preset = WheeledVehicle->GetVehiclePathPreset();
+    AFGVehicleSubsystem* VehicleSubsystem = AFGVehicleSubsystem::Get(WheeledVehicle->GetWorld());
+    if (!Preset || !IsValid(VehicleSubsystem)) return Fallback;
+
+    const TSubclassOf<UFGItemDescriptor> FuelClass = Vehicle->GetFuelTypeDescriptor();
+    UFGInventoryComponent* FuelInventory = WheeledVehicle->GetFuelInventory();
+    const float EnergyPerItem = FuelClass ? UFGItemDescriptor::GetEnergyValue(FuelClass) : 0.0f;
+    if (!IsValid(FuelInventory) || !FuelClass || !FMath::IsFinite(EnergyPerItem) || EnergyPerItem <= 0.0f) return Fallback;
+    const float ReachableEnergy = FuelInventory->GetNumItems(FuelClass) * EnergyPerItem * FuelReachFraction;
+
+    auto Cost = [&](const FGuid& From, const FGuid& To) -> float
+    {
+        return From == To ? 0.0f : EstimatePathFuelConsumptionMW(VehicleSubsystem, Preset, WheeledVehicle->GetClass(), From, To);
+    };
+
+    // Leg i of the base loop runs BaseLoop[i] -> BaseLoop[(i + 1) % Num].
+    TArray<float> Legs;
+    Legs.SetNumZeroed(Num);
+    for (int32 LegIndex = 0; LegIndex < Num; ++LegIndex)
+    {
+        Legs[LegIndex] = Cost(BaseLoop[LegIndex], BaseLoop[(LegIndex + 1) % Num]);
+        if (Legs[LegIndex] < 0.0f) return Fallback;
+    }
+
+    // Inserting before BaseLoop[k] (k == Num: before the return to the producer) replaces leg k-1
+    // with two legs through the fuel stop; the detour is what that adds. The tank must reach the
+    // stop first: at the boundary the truck is still driving the last leg back to the producer, so
+    // that leg is spent before anything else.
+    float SpentBeforeLeg = Legs[Num - 1];
+    int32 Best = INDEX_NONE;
+    float BestExtra = TNumericLimits<float>::Max();
+    for (int32 Position = 1; Position <= Num; ++Position)
+    {
+        const FGuid& Prev = BaseLoop[Position - 1];
+        const FGuid& Next = BaseLoop[Position % Num];
+        const float ToFuel = Cost(Prev, FuelGuid);
+        const float FromFuel = Cost(FuelGuid, Next);
+        if (ToFuel < 0.0f || FromFuel < 0.0f) return Fallback;
+        const float Extra = ToFuel + FromFuel - Legs[Position - 1];
+        const bool bReachable = SpentBeforeLeg + ToFuel <= ReachableEnergy;
+        UE_LOG(LogDynamicTimeTableSubsystem, VeryVerbose,
+            TEXT("DISPATCH_FUEL_POSITION Truck='%s' Index=%d Extra=%.3f EnergyToReach=%.3f Reachable=%s"),
+            *DTSVehicleName(Vehicle), Position, Extra, SpentBeforeLeg + ToFuel, bReachable ? TEXT("true") : TEXT("false"));
+        if (bReachable && Extra < BestExtra)
+        {
+            BestExtra = Extra;
+            Best = Position;
+        }
+        SpentBeforeLeg += Legs[Position - 1];
+    }
+
+    // Nothing reachable at 80% of the tank: go for the pump first, right after loading - the
+    // closest the stop can be from where the truck is now.
+    const int32 Chosen = Best == INDEX_NONE ? 1 : Best;
+    UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+        TEXT("DISPATCH_FUEL_PLACED Truck='%s' Fuel=%s Index=%d Extra=%.3f Reachable=%s ReachableEnergy=%.3f LoopStops=%d"),
+        *DTSVehicleName(Vehicle), *FuelGuid.ToString(), Chosen,
+        Best == INDEX_NONE ? -1.0f : BestExtra, Best == INDEX_NONE ? TEXT("false") : TEXT("true"),
+        ReachableEnergy, Num);
+    return Chosen;
+}
+
+bool UDynamicTimeTableSubsystem::CutLapIfCargoEmpty(
+    AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId,
+    const TArray<FGuid>& Route, int32 Index, const TCHAR* Trigger)
+{
+    // Index 0 is the boundary and index 1 the first stop after loading; only from the second stop
+    // on can a delivery already have happened. The target itself has to be a requester of this
+    // resource: heading for the producer or an (F) there is nothing to cut short.
+    if (!IsValid(Vehicle) || Index < 2 || !Route.IsValidIndex(Index)) return false;
+    auto IsRequesterOfResource = [&](const FGuid& Guid) -> bool
+    {
+        return Guid.IsValid() && DispatchStations.ContainsByPredicate([&](const FDTTDispatchStation& Station)
+        {
+            return Station.DockingPathNodeGuid == Guid &&
+                Station.ResourceId.Equals(ResourceId, ESearchCase::IgnoreCase) &&
+                GetEffectiveDispatchRole(Station) == EDTTDispatchRole::Requester;
+        });
+    };
+    if (!IsRequesterOfResource(Route[Index])) return false;
+    bool bDeliveredBefore = false;
+    for (int32 RouteIndex = 1; RouteIndex < Index && !bDeliveredBefore; ++RouteIndex)
+    {
+        bDeliveredBefore = IsRequesterOfResource(Route[RouteIndex]);
+    }
+    if (!bDeliveredBefore) return false;
+
+    const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(ResourceId);
+    AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
+    UFGInventoryComponent* Storage = IsValid(WheeledVehicle) ? WheeledVehicle->GetStorageInventory() : nullptr;
+    if (!ItemClass || !IsValid(Storage)) return false;
+    const int32 OnBoard = Storage->GetNumItems(ItemClass);
+    // Strictly empty. Anything at all on board is still worth the next stop.
+    if (OnBoard > 0) return false;
+
+    // Everything before the current target stays; the rest of the lap goes. The truck's target
+    // index is now past the end of its route - what the autopilot does with that is the game's
+    // business (the vanilla UI removes waypoints from a driving truck the same way), and the next
+    // poll sees whichever index it settles on.
+    TArray<FGuid> NewRoute(Route.GetData(), Index);
+    if (NewRoute.Num() < 2) return false;
+    if (!ReplaceRoute(Vehicle, NewRoute))
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Warning,
+            TEXT("DISPATCH_LAP_CUT_FAILED Truck='%s' Resource='%s' Trigger=%s"),
+            *DTSVehicleName(Vehicle), *ResourceId, Trigger);
+        return false;
+    }
+
+    // Claims only after the write took: a dropped stop is free for the next truck.
+    for (int32 RouteIndex = Index; RouteIndex < Route.Num(); ++RouteIndex)
+    {
+        const FGuid& Dropped = Route[RouteIndex];
+        const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Owner = RequesterClaims.Find(Dropped);
+        if (!Owner || Owner->Get() != Vehicle) continue;
+        RequesterClaims.Remove(Dropped);
+        RequesterClaimedAtWorldSeconds.Remove(Dropped);
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+            TEXT("DISPATCH_CLAIM_RELEASED Truck='%s' RequesterGuid=%s Reason=cargo-empty"),
+            *DTSVehicleName(Vehicle), *Dropped.ToString());
+    }
+    UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+        TEXT("DISPATCH_LAP_CUT Truck='%s' Resource='%s' Kept=%d Dropped=%d Trigger=%s"),
+        *DTSVehicleName(Vehicle), *ResourceId, NewRoute.Num(), Route.Num() - Index, Trigger);
+    return true;
 }
 
 void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
@@ -1852,6 +2089,13 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
     // moved the reported index without bumping the route changelist, and PollTruckStates then
     // recorded the moved index, so the wrap to 0 was never seen and no boundary ran again - the
     // truck stopped refuelling for good and circled whatever the route last held.
+    if (Index > 0)
+    {
+        // The one mid-lap decision, and it only ever shortens the route: an empty truck heading for
+        // yet another requester turns back to the producer instead.
+        CutLapIfCargoEmpty(Vehicle, ResourceId, Route, Index, Trigger);
+        return;
+    }
     if (Index != 0 || Route.Num() < 1) return;
 
     if (!UpdateRememberedAnchors(Vehicle, ResourceId, Route)) return;
@@ -1865,8 +2109,9 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
     const TArray<FGuid> Requesters = SelectRequestersForResource(ResourceId, Vehicle);
 
     // The loop this lap delivers on. It never contains a fuel stop, so the fuel estimate is always
-    // taken on it directly. With no demand the truck keeps its last delivery loop - Producer and the
-    // last consumer - minus whichever (F) last lap added.
+    // taken on it directly. With no demand the truck keeps Producer and the last consumer of the
+    // previous lap - one stop, not the whole multi-stop lap replayed empty - minus whichever (F)
+    // last lap added.
     TArray<FGuid> BaseLoop;
     BaseLoop.Add(Anchors->ProducerGuid);
     if (Requesters.Num() > 0)
@@ -1875,11 +2120,13 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
     }
     else
     {
-        for (int32 RouteIndex = 1; RouteIndex < Route.Num(); ++RouteIndex)
+        for (int32 RouteIndex = Route.Num() - 1; RouteIndex >= 1; --RouteIndex)
         {
             const FGuid& Node = Route[RouteIndex];
-            if (Node == Anchors->FuelGuid || Node == Anchors->BorrowedFuelGuid) continue;
+            if (!Node.IsValid() || Node == Anchors->ProducerGuid ||
+                Node == Anchors->FuelGuid || Node == Anchors->BorrowedFuelGuid) continue;
             BaseLoop.Add(Node);
+            break;
         }
     }
     const TCHAR* BaseSource = Requesters.Num() > 0 ? TEXT("requester") : TEXT("kept-last-loop");
@@ -1902,19 +2149,25 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
     // fuel group it is about to choose from (GetDockAssignedCount).
     Anchors->BorrowedFuelGuid.Invalidate();
     bool bFuelIncluded = false;
+    int32 FuelPlacedIndex = INDEX_NONE;
 
     if (bHasDedicatedFuel)
     {
-        // A player's own (F). In the lap only when the tank needs it; the anchor keeps it, and its
-        // position, for the laps that leave it out. If the same dock is this lap's requester it is
-        // visited anyway - a delivery is never dropped just because the dock also carries (F).
+        // A player's own (F). In the lap only when the tank needs it; the anchor keeps it for the
+        // laps that leave it out. Where it goes is decided per lap: the position with the smallest
+        // detour that the tank can still reach, since with several consumers the pump may well sit
+        // closer to the second than to the first. The remembered position is the fallback when the
+        // path network cannot be costed. If the same dock is this lap's requester it is visited
+        // anyway - a delivery is never dropped just because the dock also carries (F).
         if (BaseLoop.Contains(Anchors->FuelGuid))
         {
             bFuelIncluded = true;
         }
         else if (!ShouldSkipFuelStop(Vehicle, BaseLoop))
         {
-            NewRoute.Insert(Anchors->FuelGuid, FMath::Clamp(Anchors->FuelInsertIndex, 1, NewRoute.Num()));
+            FuelPlacedIndex = FMath::Clamp(
+                ChooseFuelInsertIndex(Vehicle, BaseLoop, Anchors->FuelGuid, Anchors->FuelInsertIndex), 1, NewRoute.Num());
+            NewRoute.Insert(Anchors->FuelGuid, FuelPlacedIndex);
             bFuelIncluded = true;
         }
     }
@@ -1947,11 +2200,14 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
         if (ChosenGuid.IsValid())
         {
             Anchors->BorrowedFuelGuid = ChosenGuid;
-            // Right after the producer, not at the tail. The trigger fires with as little as one
-            // estimated lap in the tank, and a tail stop would demand the whole delivery lap plus
-            // the detour on that fuel. FindNearestFuelStop measured from the producer, so this is
-            // also the stop's shortest leg.
-            if (!NewRoute.Contains(ChosenGuid)) NewRoute.Insert(ChosenGuid, 1);
+            // Same placement rule as an own (F); the fallback is right after the producer, because
+            // the trigger fires with as little as two estimated laps in the tank and a tail stop
+            // would demand the whole delivery lap plus the detour on that fuel.
+            if (!NewRoute.Contains(ChosenGuid))
+            {
+                FuelPlacedIndex = FMath::Clamp(ChooseFuelInsertIndex(Vehicle, BaseLoop, ChosenGuid, 1), 1, NewRoute.Num());
+                NewRoute.Insert(ChosenGuid, FuelPlacedIndex);
+            }
             bFuelIncluded = true;
             UE_LOG(LogDynamicTimeTableSubsystem, Display,
                 TEXT("DISPATCH_FUEL_BORROWED Truck='%s' Resource='%s' Fuel=%s Trigger=%s"),
@@ -1992,11 +2248,11 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
     }
 
     UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
-        TEXT("DISPATCH_ROUTE_REPLACED Truck='%s' Resource='%s' Requesters=%d Base=%s DedicatedFuel=%s FuelBorrowed=%s FuelIncluded=%s FuelInsertIndex=%d Stops=%d Trigger=%s"),
+        TEXT("DISPATCH_ROUTE_REPLACED Truck='%s' Resource='%s' Requesters=%d Base=%s DedicatedFuel=%s FuelBorrowed=%s FuelIncluded=%s FuelIndex=%d RememberedFuelIndex=%d Stops=%d Trigger=%s"),
         *DTSVehicleName(Vehicle), *ResourceId, Requesters.Num(), BaseSource,
         bHasDedicatedFuel ? TEXT("true") : TEXT("false"),
         Anchors->BorrowedFuelGuid.IsValid() ? TEXT("true") : TEXT("false"),
-        bFuelIncluded ? TEXT("true") : TEXT("false"), Anchors->FuelInsertIndex, NewRoute.Num(), Trigger);
+        bFuelIncluded ? TEXT("true") : TEXT("false"), FuelPlacedIndex, Anchors->FuelInsertIndex, NewRoute.Num(), Trigger);
 }
 
 void UDynamicTimeTableSubsystem::ReleaseRequesterClaimIfDocked(AFGWheeledVehicleIdentifier* Vehicle)
@@ -2317,8 +2573,10 @@ TSubclassOf<UFGItemDescriptor> UDynamicTimeTableSubsystem::ResolveItemClassByNam
     if (ItemClassByNameCache.Num() == 0)
     {
         TArray<TSubclassOf<UFGItemDescriptor>> All;
+        // Fluids included: fluid trucks and fluid truck stations exist, and without this a
+        // "(Crude Oil)" tag could only ever resolve through the producer-cargo fallback.
         UFGBlueprintFunctionLibrary::GetAllDescriptorsSorted(const_cast<UDynamicTimeTableSubsystem*>(this), All,
-            /*includeFluids*/ false, /*includeBuildings*/ false, /*onlyUnlocked*/ false);
+            /*includeFluids*/ true, /*includeBuildings*/ false, /*onlyUnlocked*/ false);
         for (const TSubclassOf<UFGItemDescriptor>& Class : All)
         {
             if (!Class) continue;
