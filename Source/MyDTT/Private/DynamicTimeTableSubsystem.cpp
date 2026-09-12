@@ -1947,7 +1947,11 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
         if (ChosenGuid.IsValid())
         {
             Anchors->BorrowedFuelGuid = ChosenGuid;
-            if (!NewRoute.Contains(ChosenGuid)) NewRoute.Add(ChosenGuid);
+            // Right after the producer, not at the tail. The trigger fires with as little as one
+            // estimated lap in the tank, and a tail stop would demand the whole delivery lap plus
+            // the detour on that fuel. FindNearestFuelStop measured from the producer, so this is
+            // also the stop's shortest leg.
+            if (!NewRoute.Contains(ChosenGuid)) NewRoute.Insert(ChosenGuid, 1);
             bFuelIncluded = true;
             UE_LOG(LogDynamicTimeTableSubsystem, Display,
                 TEXT("DISPATCH_FUEL_BORROWED Truck='%s' Resource='%s' Fuel=%s Trigger=%s"),
