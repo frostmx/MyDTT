@@ -18,7 +18,7 @@ ADynamicTimeTableChatCommand::ADynamicTimeTableChatCommand()
     Usage = NSLOCTEXT(
         "DynamicTimeTable",
         "ChatCommand.DTT.Usage",
-        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt recalc - rebuild active bookings");
+        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt recalc - rebuild active bookings");
     Aliases.Add(TEXT("dynamictimetable"));
 }
 
@@ -95,6 +95,44 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
             Sender->SendChatMessage(Line, FLinearColor(0.20f, 0.80f, 1.00f));
         }
         return EExecutionStatus::COMPLETED;
+    }
+
+    if (Arguments.Num() >= 1 &&
+        Arguments[0].Equals(TEXT("depots"), ESearchCase::IgnoreCase))
+    {
+        TArray<FString> Lines;
+        Subsystem->GetDepotStatusLines(Lines);
+        for (const FString& Line : Lines)
+        {
+            Sender->SendChatMessage(Line, FLinearColor(0.20f, 0.80f, 1.00f));
+        }
+        return EExecutionStatus::COMPLETED;
+    }
+
+    if (Arguments.Num() >= 1 &&
+        (Arguments[0].Equals(TEXT("park"), ESearchCase::IgnoreCase) ||
+         Arguments[0].Equals(TEXT("release"), ESearchCase::IgnoreCase)))
+    {
+        // The truck name may contain spaces ("Iron Ore → Smelter A"); everything after the verb is it.
+        FString Query;
+        for (int32 Index = 1; Index < Arguments.Num(); ++Index)
+        {
+            if (!Query.IsEmpty()) Query += TEXT(" ");
+            Query += Arguments[Index];
+        }
+        if (Query.IsEmpty())
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("dTT: /dtt %s <truck> - the Name#number from /dtt depots, the number alone, or the display name."), *Arguments[0].ToLower()),
+                FLinearColor::Red);
+            return EExecutionStatus::BAD_ARGUMENTS;
+        }
+        FString Message;
+        const bool bOk = Arguments[0].Equals(TEXT("park"), ESearchCase::IgnoreCase)
+            ? Subsystem->CommandParkTruck(Query, Message)
+            : Subsystem->CommandReleaseTruck(Query, Message);
+        Sender->SendChatMessage(Message, bOk ? FLinearColor(0.20f, 0.80f, 1.00f) : FLinearColor::Red);
+        return bOk ? EExecutionStatus::COMPLETED : EExecutionStatus::UNCOMPLETED;
     }
 
     if (Arguments.Num() >= 1 &&

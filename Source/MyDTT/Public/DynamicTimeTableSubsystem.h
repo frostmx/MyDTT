@@ -99,6 +99,19 @@ public:
     static FString MakeDispatchTaggedName(const FString& BaseName, const FString& ResourceId, EDTTDispatchRole Role, int32 Threshold);
     /** Exact, resource-independent marker for an optional dedicated refuelling waypoint. */
     static bool ParseFuelStopTag(const FString& FullName, FString& OutBaseName);
+    /** Exact marker "(D)" for a depot: where a pool truck waits, held docked, between laps. */
+    static bool ParseDepotTag(const FString& FullName, FString& OutBaseName);
+    /** The name a player recognises: no group, dispatch, fuel or depot tag. */
+    static FString StripAllTags(const FString& FullName);
+
+    /** Pool trucks for ADTTSaveDataActor to write into the save. */
+    void ExportPoolTrucks(TArray<FDTTSavedPoolTruck>& OutTrucks) const;
+    /** /dtt depots: one line per depot with its claim, plus the pool trucks. */
+    void GetDepotStatusLines(TArray<FString>& OutLines) const;
+    /** /dtt park <truck>: sends a truck to the nearest free depot, joining the pool if needed. */
+    bool CommandParkTruck(const FString& TruckQuery, FString& OutMessage);
+    /** /dtt release <truck>: lets a parked truck go on a [Depot, Depot] loop; it parks again on return. */
+    bool CommandReleaseTruck(const FString& TruckQuery, FString& OutMessage);
 
     UPROPERTY(BlueprintAssignable, Category = "Dynamic Time Table")
     FDTTGroupsChangedDelegate OnGroupsChanged;
@@ -189,6 +202,17 @@ private:
     // live route. The one exception to "nothing here is SaveGame": ADTTSaveDataActor stores these,
     // since the route alone cannot bring an omitted (F) back after a load.
     TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTDispatchTruckAnchors> DispatchTruckAnchors;
+
+    // Shared pool. Depots are the docks carrying "(D)", rebuilt with the other tags. A depot is
+    // claimed by at most one truck: the one parked there or heading there. The pool state is the
+    // second SaveGame exception, for the same reason as the anchors: a truck saved while parked
+    // has to come back parked, and the route alone ([Depot, Depot]) does not say so.
+    TSet<FGuid> DispatchDepotGuids;
+    TMap<FGuid, TWeakObjectPtr<AFGWheeledVehicleIdentifier>> DepotClaims;
+    TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTPoolTruckState> PoolTrucks;
+    bool bParkedTrucksRestored = false;
+    double LastPoolDispatchSeconds = 0.0;
+    static constexpr double PoolDispatchIntervalSeconds = 5.0;
 
     void InitializePersistence();
     void ScheduleWorldStationsReady();
@@ -374,4 +398,34 @@ private:
      * manage, in which case the game's own transfer runs untouched.
      */
     bool ComputeTransferPlan(AFGWheeledVehicleIdentifier* Vehicle, class AFGBuildableDockingStation* Station, struct FDTTTransferPlan& OutPlan) const;
+
+    // Shared pool.
+    bool IsDepotGuid(const FGuid& PathNodeGuid) const { return DispatchDepotGuids.Contains(PathNodeGuid); }
+    bool RouteHasDepot(const TArray<FGuid>& Route) const;
+    /** The pool entry, created (POOL_JOINED, ToDepot) when the route carries a depot; null otherwise. */
+    FDTTPoolTruckState* EnsurePoolMembership(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& Route, const TCHAR* Reason);
+    /** Creates (or resets) the pool entry as ToDepot, claiming DepotGuid if valid, and drops the legacy bookkeeping. */
+    FDTTPoolTruckState& JoinPool(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& DepotGuid, const TCHAR* Reason);
+    void LeavePool(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason);
+    /** Nearest unclaimed depot reachable from FromGuid (a depot this truck already claims counts as free). */
+    FGuid FindNearestDepot(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& FromGuid) const;
+    void ClaimDepot(const FGuid& DepotGuid, AFGWheeledVehicleIdentifier* Vehicle);
+    void ReleaseDepotClaim(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason);
+    /** Holds the truck at the depot it just docked at. */
+    void ParkTruck(AFGWheeledVehicleIdentifier* Vehicle, FDTTPoolTruckState& State, class AFGBuildableDockingStation* Station);
+    /** Writes NewRoute, drops the hold and undocks the parked truck, which then drives to NewRoute[0]. */
+    bool ReleaseParkedTruck(AFGWheeledVehicleIdentifier* Vehicle, FDTTPoolTruckState& State, const TArray<FGuid>& NewRoute, EDTTTruckPhase NewPhase, const TCHAR* Reason);
+    /** Drops the hold without a route change; the truck stays where it is (player took over, eviction, lost). */
+    void UnparkTruck(AFGWheeledVehicleIdentifier* Vehicle, FDTTPoolTruckState& State, EDTTTruckPhase NewPhase, const TCHAR* Reason, bool bUndock);
+    /** The pool truck's share of ProcessCurrentTruckTarget. */
+    void ProcessPoolTruckTarget(AFGWheeledVehicleIdentifier* Vehicle, FDTTPoolTruckState& State, const TCHAR* Trigger);
+    /** Matches open requests to parked trucks. */
+    void RunPoolDispatch(const TCHAR* Trigger);
+    /** After a load: re-holds the trucks saved as parked, or sends stale ones back to a depot. */
+    void RestoreParkedTrucks();
+    void UpdatePoolVehicleName(AFGWheeledVehicleIdentifier* Vehicle, const FDTTPoolTruckState& State) const;
+    /** Display name of a dock without any of the tags, for names and chat lines. */
+    FString DockDisplayName(const FGuid& PathNodeGuid) const;
+    /** A truck by its log name ("Name#1234"), its object number, or its display name. */
+    AFGWheeledVehicleIdentifier* FindVehicleByQuery(const FString& Query) const;
 };

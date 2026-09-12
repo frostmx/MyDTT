@@ -19,8 +19,8 @@ void ADTTSaveDataActor::BeginPlay()
 {
     Super::BeginPlay();
     UE_LOG(LogDynamicTimeTableSaveData, Display,
-        TEXT("dTT save-data actor active. Version=%d Groups=%d TruckAnchors=%d"),
-        DataVersion, SavedGroups.Num(), SavedTruckAnchors.Num());
+        TEXT("dTT save-data actor active. Version=%d Groups=%d TruckAnchors=%d PoolTrucks=%d"),
+        DataVersion, SavedGroups.Num(), SavedTruckAnchors.Num(), SavedPoolTrucks.Num());
 }
 
 void ADTTSaveDataActor::SetGroups(const TArray<FDTTStationGroup>& InGroups)
@@ -37,11 +37,12 @@ void ADTTSaveDataActor::PreSaveGame_Implementation(int32 saveVersion, int32 game
         if (const UDynamicTimeTableSubsystem* Subsystem = World->GetSubsystem<UDynamicTimeTableSubsystem>())
         {
             Subsystem->ExportTruckAnchors(SavedTruckAnchors);
+            Subsystem->ExportPoolTrucks(SavedPoolTrucks);
         }
     }
     UE_LOG(LogDynamicTimeTableSaveData, Display,
-        TEXT("Saving dTT configuration. Groups=%d TruckAnchors=%d DataVersion=%d"),
-        SavedGroups.Num(), SavedTruckAnchors.Num(), DataVersion);
+        TEXT("Saving dTT configuration. Groups=%d TruckAnchors=%d PoolTrucks=%d DataVersion=%d"),
+        SavedGroups.Num(), SavedTruckAnchors.Num(), SavedPoolTrucks.Num(), DataVersion);
 }
 
 void ADTTSaveDataActor::PostSaveGame_Implementation(int32 saveVersion, int32 gameVersion)
@@ -55,8 +56,8 @@ void ADTTSaveDataActor::PreLoadGame_Implementation(int32 saveVersion, int32 game
 void ADTTSaveDataActor::PostLoadGame_Implementation(int32 saveVersion, int32 gameVersion)
 {
     UE_LOG(LogDynamicTimeTableSaveData, Display,
-        TEXT("Loaded dTT configuration. Groups=%d TruckAnchors=%d DataVersion=%d"),
-        SavedGroups.Num(), SavedTruckAnchors.Num(), DataVersion);
+        TEXT("Loaded dTT configuration. Groups=%d TruckAnchors=%d PoolTrucks=%d DataVersion=%d"),
+        SavedGroups.Num(), SavedTruckAnchors.Num(), SavedPoolTrucks.Num(), DataVersion);
 }
 
 void ADTTSaveDataActor::GatherDependencies_Implementation(TArray<UObject*>& out_dependentObjects)
@@ -76,6 +77,13 @@ void ADTTSaveDataActor::GatherDependencies_Implementation(TArray<UObject*>& out_
         }
     }
     for (const FDTTSavedTruckAnchors& Saved : SavedTruckAnchors)
+    {
+        if (IsValid(Saved.Vehicle.Get()))
+        {
+            out_dependentObjects.AddUnique(Saved.Vehicle.Get());
+        }
+    }
+    for (const FDTTSavedPoolTruck& Saved : SavedPoolTrucks)
     {
         if (IsValid(Saved.Vehicle.Get()))
         {

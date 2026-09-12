@@ -185,3 +185,74 @@ struct FDTTStationRuntimeLoad
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dynamic Time Table")
     bool bUnreachable = false;
 };
+
+/** Where a pool truck is in its life. Unmanaged is never stored: such a truck has no entry. */
+UENUM(BlueprintType)
+enum class EDTTTruckPhase : uint8
+{
+    Unmanaged,
+    // Heading for its depot on a [Depot, Depot] route; parks on arrival.
+    ToDepot,
+    // Docked at its depot and held there: the station's undock is cancelled until a request comes.
+    Parked,
+    // Running a dispatched lap [Producer, Requesters..., (F)?, Depot].
+    Assigned,
+    // The player switched the autopilot off or saved a route by hand; nothing is written until
+    // the truck next docks at a depot.
+    Manual
+};
+
+/**
+ * One shared-pool truck. A truck joins the pool when its route contains a (D) depot and leaves
+ * it when a player edit removes every depot. SaveGame so a truck saved while parked comes back
+ * parked: the game itself saves the docked actor and the docking flag, only the hold is ours.
+ */
+USTRUCT(BlueprintType)
+struct FDTTPoolTruckState
+{
+    GENERATED_BODY()
+
+    UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Dynamic Time Table")
+    EDTTTruckPhase Phase = EDTTTruckPhase::Unmanaged;
+
+    /** The depot claimed by this truck: where it is parked, or where it is heading. */
+    UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Dynamic Time Table")
+    FGuid DepotGuid;
+
+    /** Resource of the current or last lap. */
+    UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Dynamic Time Table")
+    FString ResourceId;
+
+    UPROPERTY(SaveGame)
+    FGuid ProducerGuid;
+
+    UPROPERTY(SaveGame)
+    TArray<FGuid> Requesters;
+
+    UPROPERTY(SaveGame)
+    FGuid FuelGuid;
+
+    /** True while the station hold is (or, right after a load, was) in place. */
+    UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Dynamic Time Table")
+    bool bParked = false;
+
+    /** Requester dock GUID -> items this lap planned to leave there. Runtime only. */
+    UPROPERTY()
+    TMap<FGuid, int32> PlannedItems;
+
+    /** World seconds of the last assignment. Runtime only. */
+    double AssignedAtSeconds = 0.0;
+};
+
+/** One pool truck as stored by ADTTSaveDataActor. */
+USTRUCT()
+struct FDTTSavedPoolTruck
+{
+    GENERATED_BODY()
+
+    UPROPERTY(SaveGame)
+    TObjectPtr<class AFGWheeledVehicleIdentifier> Vehicle = nullptr;
+
+    UPROPERTY(SaveGame)
+    FDTTPoolTruckState State;
+};

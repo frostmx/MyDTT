@@ -276,7 +276,8 @@ bool UDynamicTimeTableSubsystem::ParseDispatchTag(const FString& FullName, FStri
 
             // A neutral tag delegates its role to the station's live LOAD/UNLOAD switch. Keep
             // explicit +/- tags compatible so existing worlds do not need to rename stations.
-            if (Role == EDTTDispatchRole::None && !Inner.Equals(TEXT("F"), ESearchCase::IgnoreCase))
+            if (Role == EDTTDispatchRole::None && !Inner.Equals(TEXT("F"), ESearchCase::IgnoreCase) &&
+                !Inner.Equals(TEXT("D"), ESearchCase::IgnoreCase))
             {
                 Resource = Inner;
                 if (!Resource.IsEmpty())
@@ -334,6 +335,26 @@ bool UDynamicTimeTableSubsystem::ParseFuelStopTag(const FString& FullName, FStri
     return true;
 }
 
+bool UDynamicTimeTableSubsystem::ParseDepotTag(const FString& FullName, FString& OutBaseName)
+{
+    OutBaseName = FullName.TrimStartAndEnd();
+    static const FString Tag = TEXT("(D)");
+    const int32 TagIndex = FullName.Find(Tag, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
+    if (TagIndex == INDEX_NONE) return false;
+    OutBaseName = (FullName.Left(TagIndex) + FullName.Mid(TagIndex + Tag.Len())).TrimStartAndEnd();
+    return true;
+}
+
+FString UDynamicTimeTableSubsystem::StripAllTags(const FString& FullName)
+{
+    FString Name = StripDispatchTag(FullName);
+    FString Stripped;
+    if (ParseFuelStopTag(Name, Stripped)) Name = Stripped;
+    if (ParseDepotTag(Name, Stripped)) Name = Stripped;
+    Name = StripStationTag(Name).TrimStartAndEnd();
+    return Name.IsEmpty() ? FullName.TrimStartAndEnd() : Name;
+}
+
 void UDynamicTimeTableSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
@@ -350,6 +371,11 @@ void UDynamicTimeTableSubsystem::Deinitialize()
     RequesterClaimedAtWorldSeconds.Reset();
     ItemClassByNameCache.Reset();
     DispatchTruckAnchors.Reset();
+    DispatchDepotGuids.Reset();
+    DepotClaims.Reset();
+    PoolTrucks.Reset();
+    bParkedTrucksRestored = false;
+    LastPoolDispatchSeconds = 0.0;
     InternalTimeTableChanges.Reset();
     InternalRouteChanges.Reset();
     PendingTimeTableReevaluations.Reset();
@@ -444,6 +470,18 @@ void UDynamicTimeTableSubsystem::InitializePersistence()
         }
         UE_LOG(LogDynamicTimeTableSubsystem, Display,
             TEXT("DISPATCH_ANCHORS_RESTORED Count=%d Saved=%d"), Restored, Found->GetTruckAnchors().Num());
+
+        // The hold on a parked truck is re-applied by RestoreParkedTrucks once the stations are
+        // readable; until then the entry only says which trucks were parked and where.
+        int32 PoolRestored = 0;
+        for (const FDTTSavedPoolTruck& Saved : Found->GetPoolTrucks())
+        {
+            if (!IsValid(Saved.Vehicle.Get()) || Saved.State.Phase == EDTTTruckPhase::Unmanaged) continue;
+            PoolTrucks.Add(Saved.Vehicle.Get(), Saved.State);
+            ++PoolRestored;
+        }
+        UE_LOG(LogDynamicTimeTableSubsystem, Display,
+            TEXT("POOL_RESTORED Count=%d Saved=%d"), PoolRestored, Found->GetPoolTrucks().Num());
     }
     else if (GetWorld()->GetNetMode() != NM_Client)
     {
@@ -470,12 +508,13 @@ void UDynamicTimeTableSubsystem::InitializePersistence()
 void UDynamicTimeTableSubsystem::SyncConfigurationToSaveActor()
 {
     // The save actor stores no groups: the configuration lives in the station names, which the
-    // game saves itself. It is kept because the class is referenced by existing saves, and since
-    // version 5 it also carries the dispatch fuel anchors (see ExportTruckAnchors).
+    // game saves itself. It is kept because the class is referenced by existing saves; since
+    // version 5 it also carries the dispatch fuel anchors (see ExportTruckAnchors) and since 6 the
+    // pool trucks (ExportPoolTrucks).
     if (SaveDataActor.IsValid() && IsServer())
     {
         SaveDataActor->SetGroups(TArray<FDTTStationGroup>());
-        SaveDataActor->SetDataVersion(5);
+        SaveDataActor->SetDataVersion(6);
     }
 }
 
@@ -488,6 +527,18 @@ void UDynamicTimeTableSubsystem::ExportTruckAnchors(TArray<FDTTSavedTruckAnchors
         FDTTSavedTruckAnchors& Saved = OutAnchors.AddDefaulted_GetRef();
         Saved.Vehicle = Pair.Key.Get();
         Saved.Anchors = Pair.Value;
+    }
+}
+
+void UDynamicTimeTableSubsystem::ExportPoolTrucks(TArray<FDTTSavedPoolTruck>& OutTrucks) const
+{
+    OutTrucks.Reset();
+    for (const auto& Pair : PoolTrucks)
+    {
+        if (!Pair.Key.IsValid() || Pair.Value.Phase == EDTTTruckPhase::Unmanaged) continue;
+        FDTTSavedPoolTruck& Saved = OutTrucks.AddDefaulted_GetRef();
+        Saved.Vehicle = Pair.Key.Get();
+        Saved.State = Pair.Value;
     }
 }
 
@@ -765,16 +816,7 @@ void UDynamicTimeTableSubsystem::GetDispatchStatusLines(TArray<FString>& OutLine
 
     // One line per dispatch truck: its lap as written, where it is heading, and what is on board -
     // the route is the only place a multi-stop lap or a cut lap can be seen from chat.
-    auto ShortDockName = [&](const FGuid& Guid) -> FString
-    {
-        const AFGDockingStationIdentifier* Dock = FindDockByPathNode(Guid);
-        if (!IsValid(Dock)) return Guid.ToString().Left(8);
-        FString Name = StripDispatchTag(Dock->GetStationName().ToString());
-        FString WithoutFuelTag;
-        if (ParseFuelStopTag(Name, WithoutFuelTag)) Name = WithoutFuelTag;
-        Name = StripStationTag(Name).TrimStartAndEnd();
-        return Name.IsEmpty() ? Guid.ToString().Left(8) : Name;
-    };
+    auto ShortDockName = [&](const FGuid& Guid) -> FString { return DockDisplayName(Guid); };
     for (const auto& Pair : DispatchTruckAnchors)
     {
         AFGWheeledVehicleIdentifier* Vehicle = Pair.Key.Get();
@@ -916,6 +958,7 @@ void UDynamicTimeTableSubsystem::RebuildGroupsFromNames()
 
     TArray<FDTTDispatchStation> RebuiltDispatch;
     TSet<FGuid> RebuiltFuelStops;
+    TSet<FGuid> RebuiltDepots;
     if (AFGVehicleSubsystem* Vehicles = AFGVehicleSubsystem::Get(GetWorld()))
     {
         for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
@@ -943,6 +986,14 @@ void UDynamicTimeTableSubsystem::RebuildGroupsFromNames()
                 RebuiltFuelStops.Add(Identifier->GetPathNodeGUID());
                 UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
                     TEXT("DISPATCH_FUEL_TAG_FOUND Name=\"%s\" Guid=%s"),
+                    *FullName, *Identifier->GetPathNodeGUID().ToString());
+            }
+            FString DepotBase;
+            if (ParseDepotTag(FullName, DepotBase))
+            {
+                RebuiltDepots.Add(Identifier->GetPathNodeGUID());
+                UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+                    TEXT("DEPOT_TAG_FOUND Name=\"%s\" Guid=%s"),
                     *FullName, *Identifier->GetPathNodeGUID().ToString());
             }
 
@@ -1032,6 +1083,26 @@ void UDynamicTimeTableSubsystem::RebuildGroupsFromNames()
     // itself only ever runs on a name-fingerprint change, that is throttling enough.
     DispatchStations = MoveTemp(RebuiltDispatch);
     DispatchFuelStopGuids = MoveTemp(RebuiltFuelStops);
+    DispatchDepotGuids = MoveTemp(RebuiltDepots);
+    // A depot that lost its tag frees its claim; a truck parked there is let go, and one heading
+    // there picks another depot at its next boundary.
+    for (auto It = DepotClaims.CreateIterator(); It; ++It)
+    {
+        if (!It.Value().IsValid() || !DispatchDepotGuids.Contains(It.Key())) It.RemoveCurrent();
+    }
+    for (auto It = PoolTrucks.CreateIterator(); It; ++It)
+    {
+        if (!It.Key().IsValid()) { It.RemoveCurrent(); continue; }
+        FDTTPoolTruckState& State = It.Value();
+        if (State.DepotGuid.IsValid() && !DispatchDepotGuids.Contains(State.DepotGuid))
+        {
+            if (State.Phase == EDTTTruckPhase::Parked)
+            {
+                UnparkTruck(It.Key().Get(), State, EDTTTruckPhase::ToDepot, TEXT("depot untagged"), true);
+            }
+            State.DepotGuid.Invalidate();
+        }
+    }
     // Probe only after the complete station set is installed. A resource id can be an alias or use
     // the client's language while a dedicated server runs in English, so resolution can fall back
     // to the sole cargo class present at the matching LOAD producer.
@@ -1525,12 +1596,7 @@ void UDynamicTimeTableSubsystem::UpdateDispatchVehicleName(
     {
         if (const AFGDockingStationIdentifier* Destination = FindDockByPathNode(Route[CurrentTargetIndex]))
         {
-            const FString FullName = Destination->GetStationName().ToString();
-            DestinationName = StripDispatchTag(FullName);
-            FString WithoutFuelTag;
-            if (ParseFuelStopTag(DestinationName, WithoutFuelTag)) DestinationName = WithoutFuelTag;
-            DestinationName = StripStationTag(DestinationName).TrimStartAndEnd();
-            if (DestinationName.IsEmpty()) DestinationName = FullName.TrimStartAndEnd();
+            DestinationName = StripAllTags(Destination->GetStationName().ToString());
         }
     }
 
@@ -2490,6 +2556,15 @@ void UDynamicTimeTableSubsystem::ProcessCurrentTruckTarget(AFGWheeledVehicleIden
 
     const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
     const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
+
+    // A pool truck never enters the legacy planner: the pool writes its whole route.
+    if (FDTTPoolTruckState* Pool = EnsurePoolMembership(Vehicle, Route, Trigger))
+    {
+        UpdatePoolVehicleName(Vehicle, *Pool);
+        ProcessPoolTruckTarget(Vehicle, *Pool, Trigger);
+        return;
+    }
+
     const FString ResourceId = Route.Num() > 0
         ? ResolveDispatchResourceFromProducer(Route[0]) : FString();
     if (!ResourceId.IsEmpty())
@@ -2588,19 +2663,40 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         const int32 TargetIndex = Vehicle->GetCurrentTargetWaypointIndex();
         const bool bDocking = Vehicle->IsCurrentlyDocking();
         const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
-        const FString ResourceId = Route.Num() > 0
+        FDTTPoolTruckState* Pool = PoolTrucks.Find(Vehicle);
+        const FString ResourceId = !Pool && Route.Num() > 0
             ? ResolveDispatchResourceFromProducer(Route[0]) : FString();
-        if (!ResourceId.IsEmpty())
+        if (Pool)
+            UpdatePoolVehicleName(Vehicle, *Pool);
+        else if (!ResourceId.IsEmpty())
             UpdateDispatchVehicleName(Vehicle, ResourceId, Route, TargetIndex);
         FDTTTruckPollState* Previous = TruckPollStates.Find(Vehicle);
 
         // First sighting only records. Acting here would redirect a vehicle that is already most
-        // of the way to its target, every time the world loads.
+        // of the way to its target, every time the world loads. Joining the pool is recorded too:
+        // a route with a depot in it says what the truck is, not where to send it right now.
         if (!Previous)
         {
             FDTTTruckPollState& Added = TruckPollStates.Add(Vehicle, FDTTTruckPollState{TargetIndex, bDocking});
             Added.LastRoute = Route;
+            if (!Pool) EnsurePoolMembership(Vehicle, Route, TEXT("first sighting"));
             continue;
+        }
+
+        // A parked truck that the depot no longer reports as docked has been let go by something
+        // this mod did not see (the hook did not fire, or the station was rebuilt). Its hold is
+        // stale: drop it and let the truck drive its loop back to the depot.
+        if (Pool && Pool->Phase == EDTTTruckPhase::Parked && bParkedTrucksRestored)
+        {
+            const AFGDockingStationIdentifier* Dock = FindDockByPathNode(Pool->DepotGuid);
+            const AFGBuildableDockingStation* Depot = IsValid(Dock) ? Dock->GetStation() : nullptr;
+            const AActor* Docked = IsValid(Depot) ? Depot->GetDockedActor() : nullptr;
+            if (!IsValid(Depot) || Docked != Vehicle->GetOwnerVehicle() || !bDocking)
+            {
+                UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("PARK_LOST Truck='%s' Depot='%s' Docked='%s' Docking=%s"),
+                    *DTSVehicleName(Vehicle), *DockDisplayName(Pool->DepotGuid), *GetNameSafe(Docked), bDocking ? TEXT("true") : TEXT("false"));
+                UnparkTruck(Vehicle, *Pool, EDTTTruckPhase::ToDepot, TEXT("park lost"), false);
+            }
         }
 
         // Arrival frees the slot, but does not re-evaluate: the target is still the dock the
@@ -2650,6 +2746,14 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         Previous->bDocking = bDocking;
         Previous->LastRoute = Vehicle->GetVehicleRoute();
     }
+
+    // A request that opens while every truck is already parked has no boundary to be noticed at.
+    if (PoolTrucks.Num() > 0)
+    {
+        const UWorld* World = GetWorld();
+        const double Now = IsValid(World) ? World->GetTimeSeconds() : 0.0;
+        if (Now - LastPoolDispatchSeconds >= PoolDispatchIntervalSeconds) RunPoolDispatch(TEXT("timer"));
+    }
 }
 
 void UDynamicTimeTableSubsystem::HandleTruckDocked(AFGWheeledVehicle* Vehicle, AFGBuildableDockingStation* Station)
@@ -2677,6 +2781,21 @@ void UDynamicTimeTableSubsystem::HandleTruckDocked(AFGWheeledVehicle* Vehicle, A
     ReleaseTruckBooking(Identifier, TEXT("truck docked"));
     ReleaseRequesterClaimIfDocked(Identifier);
 
+    // A pool truck docking at a depot parks there: at its own depot at the end of a lap, or at
+    // any depot while it is looking for one. A lap in progress only parks at its own depot.
+    if (IsValid(Station))
+    {
+        if (FDTTPoolTruckState* Pool = PoolTrucks.Find(Identifier))
+        {
+            const AFGDockingStationIdentifier* StationIdentifier = Station->GetStationIdentifier();
+            const FGuid StationGuid = IsValid(StationIdentifier) ? StationIdentifier->GetPathNodeGUID() : FGuid();
+            if (IsDepotGuid(StationGuid) && (Pool->Phase != EDTTTruckPhase::Assigned || StationGuid == Pool->DepotGuid))
+            {
+                ParkTruck(Identifier, *Pool, Station);
+            }
+        }
+    }
+
     // The transfer at the end of this docking cycle moves what the lap planned, not what fits.
     // A plan is set only for a truck this mod manages; the game's own transfer runs otherwise.
     FDTTTransferPlan Plan;
@@ -2699,6 +2818,19 @@ void UDynamicTimeTableSubsystem::HandleTruckUndocked(AFGWheeledVehicle* Vehicle)
         *DTSVehicleName(Identifier), IsValid(Station) ? *DTSDockName(Station->GetStationIdentifier()) : TEXT("<none>"), TargetIndex);
 
     if (Station) FMyDTTHooks::ClearTransferPlan(Station);
+
+    // A release drops the phase before it undocks, so a truck still marked parked here was
+    // undocked behind this mod's back. The hold is gone with the docking; only the state is stale.
+    if (FDTTPoolTruckState* Pool = PoolTrucks.Find(Identifier))
+    {
+        if (Pool->Phase == EDTTTruckPhase::Parked)
+        {
+            UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("PARK_LOST Truck='%s' Depot='%s' Reason=undocked"),
+                *DTSVehicleName(Identifier), *DockDisplayName(Pool->DepotGuid));
+            UnparkTruck(Identifier, *Pool, EDTTTruckPhase::ToDepot, TEXT("undocked"), false);
+        }
+    }
+
     if (!State) return;
     State->DockedStation = nullptr;
 
@@ -2722,7 +2854,21 @@ void UDynamicTimeTableSubsystem::HandleParkedTruckEvicted(AFGBuildableDockingSta
     UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("DEPOT_EVICTED Station='%s' Parked='%s' By='%s'"),
         IsValid(Station) ? *DTSDockName(Station->GetStationIdentifier()) : TEXT("<none>"),
         IsValid(Station) ? *GetNameSafe(Station->GetDockedActor()) : TEXT("<none>"), *GetNameSafe(NewActor));
-    // Milestone 3 moves the parked truck back to ToDepot here; nothing is parked before that.
+    if (!IsValid(Station)) return;
+    const AFGDockingStationIdentifier* StationIdentifier = Station->GetStationIdentifier();
+    const FGuid StationGuid = IsValid(StationIdentifier) ? StationIdentifier->GetPathNodeGUID() : FGuid();
+    if (!StationGuid.IsValid()) return;
+
+    // The hook has already dropped the hold; the game undocks the truck next. It keeps its claim
+    // and its [Depot, Depot] loop, so it comes back and docks again once the intruder has left -
+    // or evicts the intruder itself, the way it was just evicted.
+    for (auto& Pair : PoolTrucks)
+    {
+        AFGWheeledVehicleIdentifier* Vehicle = Pair.Key.Get();
+        FDTTPoolTruckState& State = Pair.Value;
+        if (!IsValid(Vehicle) || State.Phase != EDTTTruckPhase::Parked || State.DepotGuid != StationGuid) continue;
+        UnparkTruck(Vehicle, State, EDTTTruckPhase::ToDepot, TEXT("evicted"), false);
+    }
 }
 
 void UDynamicTimeTableSubsystem::HandleVehicleRouteChanged(AFGWheeledVehicleIdentifier* Vehicle)
@@ -2756,6 +2902,24 @@ void UDynamicTimeTableSubsystem::HandleVehicleRouteChanged(AFGWheeledVehicleIden
     }
     ReleaseTruckBooking(Vehicle, TEXT("route saved"));
     ReleaseRequesterClaimsForVehicle(Vehicle, TEXT("route saved"));
+    // A pool truck whose saved route has no depot left is the player's again. One that still has
+    // a depot runs the player's route until it docks at a depot, where it parks and rejoins.
+    if (FDTTPoolTruckState* Pool = PoolTrucks.Find(Vehicle))
+    {
+        if (!RouteHasDepot(Vehicle->GetVehicleRoute()))
+        {
+            LeavePool(Vehicle, TEXT("route saved without a depot"));
+        }
+        else if (Pool->Phase == EDTTTruckPhase::Parked)
+        {
+            UnparkTruck(Vehicle, *Pool, EDTTTruckPhase::Manual, TEXT("route saved by player"), true);
+        }
+        else if (Pool->Phase != EDTTTruckPhase::Manual)
+        {
+            Pool->Phase = EDTTTruckPhase::Manual;
+            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_MANUAL Truck='%s' Reason=route saved by player"), *DTSVehicleName(Vehicle));
+        }
+    }
     // Not removed: the player may have edited during a lap that left the own (F) out, and the route
     // they saved then does not show it. The next boundary re-reads the (F) from the route if there
     // is one, and drops everything if the first stop changed (UpdateRememberedAnchors).
@@ -2774,6 +2938,23 @@ void UDynamicTimeTableSubsystem::HandleAutopilotChanged(AFGWheeledVehicleIdentif
     if (!IsServer() || !IsValid(Vehicle)) return;
     ReleaseTruckBooking(Vehicle, bEnabled ? TEXT("autopilot enabled") : TEXT("autopilot disabled"));
     ReleaseRequesterClaimsForVehicle(Vehicle, bEnabled ? TEXT("autopilot enabled") : TEXT("autopilot disabled"));
+    // A pool truck with the autopilot off is the player's: the hold goes, the depot claim goes,
+    // the membership stays so that it parks again once it is switched back on and reaches a depot.
+    if (FDTTPoolTruckState* Pool = PoolTrucks.Find(Vehicle))
+    {
+        if (!bEnabled)
+        {
+            if (Pool->Phase == EDTTTruckPhase::Parked) UnparkTruck(Vehicle, *Pool, EDTTTruckPhase::Manual, TEXT("autopilot disabled"), true);
+            else Pool->Phase = EDTTTruckPhase::Manual;
+            ReleaseDepotClaim(Vehicle, TEXT("autopilot disabled"));
+            Pool->DepotGuid.Invalidate();
+            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_MANUAL Truck='%s' Reason=autopilot disabled"), *DTSVehicleName(Vehicle));
+        }
+        else
+        {
+            Pool->Phase = EDTTTruckPhase::ToDepot;
+        }
+    }
     // Anchors survive the toggle for the same reason as in PollTruckStates.
     if (!bEnabled) return;
     PendingRouteReevaluations.Add(Vehicle);
@@ -2797,6 +2978,7 @@ void UDynamicTimeTableSubsystem::ScheduleWorldStationsReady()
         // Migration clears the flag again when it wants another go at a world that is still empty.
         if (!WeakThis->bWorldStationsReady) { WeakThis->ScheduleWorldStationsReady(); return; }
         WeakThis->RebuildGroupsFromNames();
+        WeakThis->RestoreParkedTrucks();
         WeakThis->RecalculateBookingsFromVanilla();
     }), 15.0f, false);
 }
@@ -2883,6 +3065,16 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
     const AFGDockingStationIdentifier* StationIdentifier = Station->GetStationIdentifier();
     if (!IsValid(StationIdentifier)) return false;
     const FGuid StationGuid = StationIdentifier->GetPathNodeGUID();
+
+    // A depot is a waiting place, not a stop: whatever the truck carries stays on board, and
+    // whatever the depot holds stays there.
+    if (PoolTrucks.Contains(Vehicle) && IsDepotGuid(StationGuid))
+    {
+        OutPlan.Mode = FDTTTransferPlan::EMode::Block;
+        UE_LOG(LogDynamicTimeTableSubsystem, Log, TEXT("XFER_PLAN Truck='%s' Station='%s' Mode=Block Reason=depot"),
+            *DTSVehicleName(Vehicle), *DTSDockName(StationIdentifier));
+        return true;
+    }
 
     const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
     const FString ResourceId = Route.Num() > 0 ? ResolveDispatchResourceFromProducer(Route[0]) : FString();
@@ -2979,5 +3171,484 @@ bool UDynamicTimeTableSubsystem::ReadDockCapacityInStacks(
     const int64 StackSize = FMath::Max(1, UFGItemDescriptor::GetStackSize(ItemClass));
     const int64 SlotSize = FMath::Max<int64>(1, Storage->GetSlotSize(0, ItemClass));
     OutCapacityStacks = int32(FMath::Max<int64>(1, (Storage->GetSizeLinear() * SlotSize) / StackSize));
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Shared pool. A truck whose route carries a "(D)" depot belongs to the pool: it drives to a
+// depot on a [Depot, Depot] loop, parks there held docked, and (milestone 4) is sent on a lap
+// when a requester opens. Everything here runs on the game thread; the hold itself lives in
+// FMyDTTHooks and is only switched on and off from here.
+// ---------------------------------------------------------------------------
+
+bool UDynamicTimeTableSubsystem::RouteHasDepot(const TArray<FGuid>& Route) const
+{
+    if (DispatchDepotGuids.Num() == 0) return false;
+    for (const FGuid& Node : Route) if (DispatchDepotGuids.Contains(Node)) return true;
+    return false;
+}
+
+FString UDynamicTimeTableSubsystem::DockDisplayName(const FGuid& PathNodeGuid) const
+{
+    const AFGDockingStationIdentifier* Dock = FindDockByPathNode(PathNodeGuid);
+    if (!IsValid(Dock)) return PathNodeGuid.IsValid() ? PathNodeGuid.ToString().Left(8) : FString(TEXT("?"));
+    return StripAllTags(Dock->GetStationName().ToString());
+}
+
+FDTTPoolTruckState& UDynamicTimeTableSubsystem::JoinPool(
+    AFGWheeledVehicleIdentifier* Vehicle, const FGuid& DepotGuid, const TCHAR* Reason)
+{
+    // The pool writes this truck's whole route from now on; the legacy planner's bookkeeping for
+    // it would only fight that.
+    ReleaseTruckBooking(Vehicle, TEXT("joined pool"));
+    ReleaseRequesterClaimsForVehicle(Vehicle, TEXT("joined pool"));
+    DispatchTruckAnchors.Remove(Vehicle);
+
+    FDTTPoolTruckState& State = PoolTrucks.FindOrAdd(Vehicle);
+    State = FDTTPoolTruckState();
+    State.Phase = EDTTTruckPhase::ToDepot;
+    if (DepotGuid.IsValid())
+    {
+        ClaimDepot(DepotGuid, Vehicle);
+        State.DepotGuid = DepotGuid;
+    }
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_JOINED Truck='%s' Depot='%s' Reason=%s Pool=%d"),
+        *DTSVehicleName(Vehicle), *DockDisplayName(DepotGuid), Reason, PoolTrucks.Num());
+    return State;
+}
+
+FDTTPoolTruckState* UDynamicTimeTableSubsystem::EnsurePoolMembership(
+    AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& Route, const TCHAR* Reason)
+{
+    if (!IsValid(Vehicle)) return nullptr;
+    if (FDTTPoolTruckState* Existing = PoolTrucks.Find(Vehicle)) return Existing;
+    if (!RouteHasDepot(Route)) return nullptr;
+
+    // The first depot in the route that nobody else claims is this truck's; otherwise it picks
+    // the nearest free one at its next boundary.
+    FGuid Depot;
+    for (const FGuid& Node : Route)
+    {
+        if (!IsDepotGuid(Node)) continue;
+        const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Claim = DepotClaims.Find(Node);
+        if (!Claim || !Claim->IsValid() || Claim->Get() == Vehicle) { Depot = Node; break; }
+    }
+    return &JoinPool(Vehicle, Depot, Reason);
+}
+
+void UDynamicTimeTableSubsystem::LeavePool(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason)
+{
+    FDTTPoolTruckState* State = PoolTrucks.Find(Vehicle);
+    if (!State) return;
+    if (State->Phase == EDTTTruckPhase::Parked) UnparkTruck(Vehicle, *State, EDTTTruckPhase::Unmanaged, Reason, true);
+    ReleaseDepotClaim(Vehicle, Reason);
+    PoolTrucks.Remove(Vehicle);
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_LEFT Truck='%s' Reason=%s Pool=%d"),
+        *DTSVehicleName(Vehicle), Reason, PoolTrucks.Num());
+}
+
+FGuid UDynamicTimeTableSubsystem::FindNearestDepot(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& FromGuid) const
+{
+    if (!IsValid(Vehicle) || !FromGuid.IsValid() || DispatchDepotGuids.Num() == 0) return FGuid();
+    AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
+    if (!IsValid(WheeledVehicle)) return FGuid();
+
+    AFGVehicleSubsystem* VehicleSubsystem = AFGVehicleSubsystem::Get(WheeledVehicle->GetWorld());
+    const UFGVehiclePathPreset* Preset = WheeledVehicle->GetVehiclePathPreset();
+    if (!IsValid(VehicleSubsystem) || !Preset) return FGuid();
+
+    FGuid Nearest;
+    float BestCost = TNumericLimits<float>::Max();
+    for (const FGuid& Candidate : DispatchDepotGuids)
+    {
+        if (!Candidate.IsValid()) continue;
+        const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Claim = DepotClaims.Find(Candidate);
+        if (Claim && Claim->IsValid() && Claim->Get() != Vehicle) continue;
+        // Standing at a free depot: that one, at no cost.
+        const float Cost = Candidate == FromGuid ? 0.0f
+            : EstimatePathFuelConsumptionMW(VehicleSubsystem, Preset, WheeledVehicle->GetClass(), FromGuid, Candidate);
+        if (Cost < 0.0f) continue;
+        if (Cost < BestCost) { BestCost = Cost; Nearest = Candidate; }
+    }
+    return Nearest;
+}
+
+void UDynamicTimeTableSubsystem::ClaimDepot(const FGuid& DepotGuid, AFGWheeledVehicleIdentifier* Vehicle)
+{
+    if (!DepotGuid.IsValid() || !IsValid(Vehicle)) return;
+    // One depot per truck as well as one truck per depot.
+    for (auto It = DepotClaims.CreateIterator(); It; ++It)
+    {
+        if (It.Key() != DepotGuid && It.Value().Get() == Vehicle) It.RemoveCurrent();
+    }
+    const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Existing = DepotClaims.Find(DepotGuid);
+    if (Existing && Existing->Get() == Vehicle) return;
+    DepotClaims.Add(DepotGuid, Vehicle);
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("DEPOT_CLAIMED Depot='%s' Truck='%s' Claims=%d/%d"),
+        *DockDisplayName(DepotGuid), *DTSVehicleName(Vehicle), DepotClaims.Num(), DispatchDepotGuids.Num());
+}
+
+void UDynamicTimeTableSubsystem::ReleaseDepotClaim(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason)
+{
+    for (auto It = DepotClaims.CreateIterator(); It; ++It)
+    {
+        if (It.Value().Get() != Vehicle) continue;
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("DEPOT_RELEASED Depot='%s' Truck='%s' Reason=%s"),
+            *DockDisplayName(It.Key()), *DTSVehicleName(Vehicle), Reason);
+        It.RemoveCurrent();
+    }
+}
+
+void UDynamicTimeTableSubsystem::ParkTruck(
+    AFGWheeledVehicleIdentifier* Vehicle, FDTTPoolTruckState& State, AFGBuildableDockingStation* Station)
+{
+    if (!IsValid(Vehicle) || !IsValid(Station)) return;
+    const AFGDockingStationIdentifier* StationIdentifier = Station->GetStationIdentifier();
+    const FGuid StationGuid = IsValid(StationIdentifier) ? StationIdentifier->GetPathNodeGUID() : FGuid();
+    if (!StationGuid.IsValid()) return;
+
+    // Possession wins over a claim: a truck that is heading here but has not arrived is sent to
+    // pick another depot at its next boundary, rather than evicting this one on arrival.
+    if (const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Claim = DepotClaims.Find(StationGuid))
+    {
+        AFGWheeledVehicleIdentifier* Other = Claim->Get();
+        if (IsValid(Other) && Other != Vehicle)
+        {
+            if (FDTTPoolTruckState* OtherState = PoolTrucks.Find(Other))
+            {
+                OtherState->DepotGuid.Invalidate();
+                PendingRouteReevaluations.Add(Other);
+                SchedulePendingRouteReevaluation();
+            }
+            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("DEPOT_CLAIM_TAKEN Depot='%s' From='%s' By='%s'"),
+                *DockDisplayName(StationGuid), *DTSVehicleName(Other), *DTSVehicleName(Vehicle));
+        }
+    }
+    ClaimDepot(StationGuid, Vehicle);
+    State.DepotGuid = StationGuid;
+    State.Phase = EDTTTruckPhase::Parked;
+    State.bParked = true;
+    State.PlannedItems.Reset();
+    FMyDTTHooks::SetHeld(Station, true, TEXT("parked"));
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("PARKED Truck='%s' Depot='%s' HoldInstalled=%s"),
+        *DTSVehicleName(Vehicle), *DockDisplayName(StationGuid), FMyDTTHooks::IsUndockHoldInstalled() ? TEXT("true") : TEXT("false"));
+    UpdatePoolVehicleName(Vehicle, State);
+    RunPoolDispatch(TEXT("truck parked"));
+}
+
+bool UDynamicTimeTableSubsystem::ReleaseParkedTruck(
+    AFGWheeledVehicleIdentifier* Vehicle, FDTTPoolTruckState& State, const TArray<FGuid>& NewRoute,
+    EDTTTruckPhase NewPhase, const TCHAR* Reason)
+{
+    if (!IsValid(Vehicle)) return false;
+    const AFGDockingStationIdentifier* Dock = FindDockByPathNode(State.DepotGuid);
+    AFGBuildableDockingStation* Station = IsValid(Dock) ? Dock->GetStation() : nullptr;
+
+    // Route first, hold second, undock last: the truck must already know where to go when the
+    // autopilot resumes, and the game re-saves the route at the end of a docking (see
+    // ROUTE_REVERTED_BY_GAME), which ReplaceRoute records for HandleVehicleRouteChanged.
+    if (!ReplaceRoute(Vehicle, NewRoute))
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("RELEASE_FAILED Truck='%s' Depot='%s' Stops=%d Reason=route-not-written"),
+            *DTSVehicleName(Vehicle), *DockDisplayName(State.DepotGuid), NewRoute.Num());
+        return false;
+    }
+    State.Phase = NewPhase;
+    State.bParked = false;
+    if (IsValid(Station))
+    {
+        FMyDTTHooks::SetHeld(Station, false, Reason);
+        // Mid-cycle the game's own deferred undock is still coming; forcing a second one here
+        // would undock twice.
+        if (!Station->IsLoadUnloading() && Station->GetDockedActor() == Vehicle->GetOwnerVehicle()) Station->ForceUndockActor();
+    }
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("RELEASED Truck='%s' Depot='%s' Phase=%s Stops=%d Reason=%s"),
+        *DTSVehicleName(Vehicle), *DockDisplayName(State.DepotGuid), *UEnum::GetDisplayValueAsText(NewPhase).ToString(), NewRoute.Num(), Reason);
+    UpdatePoolVehicleName(Vehicle, State);
+    return true;
+}
+
+void UDynamicTimeTableSubsystem::UnparkTruck(
+    AFGWheeledVehicleIdentifier* Vehicle, FDTTPoolTruckState& State, EDTTTruckPhase NewPhase, const TCHAR* Reason, bool bUndock)
+{
+    const AFGDockingStationIdentifier* Dock = FindDockByPathNode(State.DepotGuid);
+    AFGBuildableDockingStation* Station = IsValid(Dock) ? Dock->GetStation() : nullptr;
+    State.Phase = NewPhase;
+    State.bParked = false;
+    if (IsValid(Station) && FMyDTTHooks::IsHeld(Station))
+    {
+        FMyDTTHooks::SetHeld(Station, false, Reason);
+        if (bUndock && IsValid(Vehicle) && Station->GetDockedActor() == Vehicle->GetOwnerVehicle() && !Station->IsLoadUnloading())
+        {
+            Station->ForceUndockActor();
+        }
+    }
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("UNPARKED Truck='%s' Depot='%s' Phase=%s Undock=%s Reason=%s"),
+        *DTSVehicleName(Vehicle), *DockDisplayName(State.DepotGuid), *UEnum::GetDisplayValueAsText(NewPhase).ToString(),
+        bUndock ? TEXT("true") : TEXT("false"), Reason);
+    if (IsValid(Vehicle)) UpdatePoolVehicleName(Vehicle, State);
+}
+
+void UDynamicTimeTableSubsystem::ProcessPoolTruckTarget(
+    AFGWheeledVehicleIdentifier* Vehicle, FDTTPoolTruckState& State, const TCHAR* Trigger)
+{
+    if (!IsValid(Vehicle)) return;
+    switch (State.Phase)
+    {
+    case EDTTTruckPhase::ToDepot:
+        break;
+    case EDTTTruckPhase::Assigned:
+        // Milestone 4: the lap's boundaries (cut when empty, park on return).
+        return;
+    default:
+        // Parked: nothing to do until a request comes. Manual: the player's route runs as saved.
+        return;
+    }
+
+    const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+    const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
+    const FGuid From = Route.IsValidIndex(Index) ? Route[Index] : (Route.Num() > 0 ? Route[0] : FGuid());
+
+    // The claimed depot, if it is still a depot and still this truck's; otherwise the nearest one
+    // that nobody claims, measured from where the truck is heading now.
+    FGuid Depot = State.DepotGuid;
+    if (Depot.IsValid())
+    {
+        const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Claim = DepotClaims.Find(Depot);
+        if (!IsDepotGuid(Depot) || (Claim && Claim->IsValid() && Claim->Get() != Vehicle)) Depot.Invalidate();
+    }
+    if (!Depot.IsValid())
+    {
+        Depot = FindNearestDepot(Vehicle, From);
+        if (!Depot.IsValid())
+        {
+            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("DEPOT_NONE_FREE Truck='%s' From='%s' Depots=%d Claims=%d Trigger=%s"),
+                *DTSVehicleName(Vehicle), *DockDisplayName(From), DispatchDepotGuids.Num(), DepotClaims.Num(), Trigger);
+            State.DepotGuid.Invalidate();
+            return;
+        }
+        ClaimDepot(Depot, Vehicle);
+        State.DepotGuid = Depot;
+    }
+
+    // Twice the same node is a legal route (TooFewStations is Num() < 2) and the only one that
+    // keeps the truck circling back to the depot without visiting anything else.
+    const TArray<FGuid> NewRoute{ Depot, Depot };
+    if (Route != NewRoute)
+    {
+        const bool bWritten = ReplaceRoute(Vehicle, NewRoute);
+        UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_TO_DEPOT Truck='%s' Depot='%s' Written=%s Trigger=%s"),
+            *DTSVehicleName(Vehicle), *DockDisplayName(Depot), bWritten ? TEXT("true") : TEXT("false"), Trigger);
+    }
+    UpdatePoolVehicleName(Vehicle, State);
+}
+
+void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
+{
+    const UWorld* World = GetWorld();
+    LastPoolDispatchSeconds = IsValid(World) ? World->GetTimeSeconds() : 0.0;
+    int32 Parked = 0;
+    for (const auto& Pair : PoolTrucks) if (Pair.Key.IsValid() && Pair.Value.Phase == EDTTTruckPhase::Parked) ++Parked;
+    // Milestone 4 matches open requesters to these trucks; until then they wait.
+    UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_DISPATCH Trigger=%s Parked=%d Pool=%d Depots=%d"),
+        Trigger, Parked, PoolTrucks.Num(), DispatchDepotGuids.Num());
+}
+
+void UDynamicTimeTableSubsystem::RestoreParkedTrucks()
+{
+    if (bParkedTrucksRestored || !IsServer()) return;
+    bParkedTrucksRestored = true;
+
+    int32 Restored = 0, Stale = 0;
+    for (auto& Pair : PoolTrucks)
+    {
+        AFGWheeledVehicleIdentifier* Vehicle = Pair.Key.Get();
+        FDTTPoolTruckState& State = Pair.Value;
+        if (!IsValid(Vehicle)) continue;
+
+        if (State.DepotGuid.IsValid() && IsDepotGuid(State.DepotGuid)) ClaimDepot(State.DepotGuid, Vehicle);
+        else State.DepotGuid.Invalidate();
+        if (State.Phase != EDTTTruckPhase::Parked) { State.bParked = false; continue; }
+
+        // The game saved the docked actor and the docking flag; only the hold has to be put back.
+        // Anything else - the truck was moved, the station rebuilt - is a stale record.
+        const AFGDockingStationIdentifier* Dock = FindDockByPathNode(State.DepotGuid);
+        AFGBuildableDockingStation* Station = IsValid(Dock) ? Dock->GetStation() : nullptr;
+        AFGWheeledVehicle* Owner = Vehicle->GetOwnerVehicle();
+        const bool bStillDocked = IsValid(Station) && IsValid(Owner) &&
+            Station->GetDockedActor() == Owner && Vehicle->IsCurrentlyDocking();
+        if (bStillDocked)
+        {
+            FMyDTTHooks::SetHeld(Station, true, TEXT("restored"));
+            State.bParked = true;
+            ++Restored;
+            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("PARK_RESTORED Truck='%s' Depot='%s'"),
+                *DTSVehicleName(Vehicle), *DockDisplayName(State.DepotGuid));
+        }
+        else
+        {
+            State.Phase = EDTTTruckPhase::ToDepot;
+            State.bParked = false;
+            ++Stale;
+            UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("PARK_STALE Truck='%s' Depot='%s' Station=%s Docked='%s' Docking=%s"),
+                *DTSVehicleName(Vehicle), *DockDisplayName(State.DepotGuid), IsValid(Station) ? TEXT("ok") : TEXT("missing"),
+                IsValid(Station) ? *GetNameSafe(Station->GetDockedActor()) : TEXT("<none>"),
+                Vehicle->IsCurrentlyDocking() ? TEXT("true") : TEXT("false"));
+            // A dock record without the docking flag is the game's half-state; clear it so the
+            // truck can dock again.
+            if (IsValid(Station) && IsValid(Owner) && Station->GetDockedActor() == Owner && !Station->IsLoadUnloading())
+            {
+                Station->ForceUndockActor();
+            }
+        }
+        UpdatePoolVehicleName(Vehicle, State);
+    }
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("PARK_RESTORE_DONE Restored=%d Stale=%d Pool=%d Depots=%d"),
+        Restored, Stale, PoolTrucks.Num(), DispatchDepotGuids.Num());
+}
+
+void UDynamicTimeTableSubsystem::UpdatePoolVehicleName(AFGWheeledVehicleIdentifier* Vehicle, const FDTTPoolTruckState& State) const
+{
+    if (!IsValid(Vehicle)) return;
+    FString WantedName;
+    switch (State.Phase)
+    {
+    case EDTTTruckPhase::Parked:
+        WantedName = FString::Printf(TEXT("Parked @ %s"), *DockDisplayName(State.DepotGuid));
+        break;
+    case EDTTTruckPhase::ToDepot:
+        WantedName = State.DepotGuid.IsValid()
+            ? FString::Printf(TEXT("→ %s"), *DockDisplayName(State.DepotGuid))
+            : FString(TEXT("→ depot?"));
+        break;
+    case EDTTTruckPhase::Assigned:
+    {
+        const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+        const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
+        WantedName = Route.IsValidIndex(Index)
+            ? FString::Printf(TEXT("%s → %s"), *State.ResourceId, *DockDisplayName(Route[Index]))
+            : State.ResourceId;
+        break;
+    }
+    default:
+        // Manual: the player's name stays.
+        return;
+    }
+    const FString PreviousName = Vehicle->GetVehicleName().ToString();
+    if (PreviousName == WantedName) return;
+    Vehicle->SetVehicleName(FText::FromString(WantedName));
+    UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_TRUCK_RENAMED Previous='%s' New='%s'"), *PreviousName, *WantedName);
+}
+
+AFGWheeledVehicleIdentifier* UDynamicTimeTableSubsystem::FindVehicleByQuery(const FString& Query) const
+{
+    AFGVehicleSubsystem* VehicleSubsystem = AFGVehicleSubsystem::Get(GetWorld());
+    if (!IsValid(VehicleSubsystem)) return nullptr;
+    const FString Wanted = Query.TrimStartAndEnd();
+    if (Wanted.IsEmpty()) return nullptr;
+    AFGWheeledVehicleIdentifier* ByDisplayName = nullptr;
+    for (AFGWheeledVehicleIdentifier* Vehicle : VehicleSubsystem->GetAllVehicles())
+    {
+        if (!IsValid(Vehicle)) continue;
+        const FString LogName = DTSVehicleName(Vehicle);
+        if (LogName.Equals(Wanted, ESearchCase::IgnoreCase)) return Vehicle;
+        // The object number alone, "1234" or "#1234".
+        int32 Hash = INDEX_NONE;
+        const FString Number = LogName.FindLastChar(TEXT('#'), Hash) ? LogName.Mid(Hash + 1) : FString();
+        if (!Number.IsEmpty() && (Number == Wanted || (TEXT("#") + Number) == Wanted)) return Vehicle;
+        if (!ByDisplayName && Vehicle->GetVehicleName().ToString().Equals(Wanted, ESearchCase::IgnoreCase)) ByDisplayName = Vehicle;
+    }
+    return ByDisplayName;
+}
+
+void UDynamicTimeTableSubsystem::GetDepotStatusLines(TArray<FString>& OutLines) const
+{
+    OutLines.Reset();
+    if (DispatchDepotGuids.Num() == 0)
+    {
+        OutLines.Add(TEXT("dTT: no depots. Add \"(D)\" to a truck station name to make it one."));
+    }
+    for (const FGuid& Depot : DispatchDepotGuids)
+    {
+        const AFGDockingStationIdentifier* Dock = FindDockByPathNode(Depot);
+        const AFGBuildableDockingStation* Station = IsValid(Dock) ? Dock->GetStation() : nullptr;
+        const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Claim = DepotClaims.Find(Depot);
+        const AFGWheeledVehicleIdentifier* Claimant = Claim ? Claim->Get() : nullptr;
+        FString DockedName = TEXT("-");
+        if (IsValid(Station))
+        {
+            if (const AFGWheeledVehicle* Docked = Cast<AFGWheeledVehicle>(Station->GetDockedActor()))
+                DockedName = DTSVehicleName(Docked->GetVehicleIdentifier());
+        }
+        OutLines.Add(FString::Printf(TEXT("Depot '%s': claim=%s docked=%s held=%s"),
+            *DockDisplayName(Depot), IsValid(Claimant) ? *DTSVehicleName(Claimant) : TEXT("free"), *DockedName,
+            IsValid(Station) && FMyDTTHooks::IsHeld(Station) ? TEXT("yes") : TEXT("no")));
+    }
+    for (const auto& Pair : PoolTrucks)
+    {
+        const AFGWheeledVehicleIdentifier* Vehicle = Pair.Key.Get();
+        if (!IsValid(Vehicle)) continue;
+        const FDTTPoolTruckState& State = Pair.Value;
+        OutLines.Add(FString::Printf(TEXT("Truck '%s': %s depot=%s resource=%s autopilot=%s stops=%d"),
+            *DTSVehicleName(Vehicle), *UEnum::GetDisplayValueAsText(State.Phase).ToString(),
+            State.DepotGuid.IsValid() ? *DockDisplayName(State.DepotGuid) : TEXT("-"),
+            State.ResourceId.IsEmpty() ? TEXT("-") : *State.ResourceId,
+            Vehicle->IsAutopilotEnabled() ? TEXT("on") : TEXT("off"), Vehicle->GetVehicleRoute().Num()));
+    }
+    if (PoolTrucks.Num() == 0) OutLines.Add(TEXT("No pool trucks: a truck joins when its route contains a depot, or with /dtt park <truck>."));
+}
+
+bool UDynamicTimeTableSubsystem::CommandParkTruck(const FString& TruckQuery, FString& OutMessage)
+{
+    if (!IsServer()) { OutMessage = TEXT("dTT: only the server can park trucks."); return false; }
+    AFGWheeledVehicleIdentifier* Vehicle = FindVehicleByQuery(TruckQuery);
+    if (!IsValid(Vehicle)) { OutMessage = FString::Printf(TEXT("dTT: no truck matches '%s' (use the Name#number from /dtt depots or the display name)."), *TruckQuery); return false; }
+    if (!Vehicle->IsAutopilotEnabled()) { OutMessage = FString::Printf(TEXT("dTT: '%s' has its autopilot off."), *DTSVehicleName(Vehicle)); return false; }
+    if (DispatchDepotGuids.Num() == 0) { OutMessage = TEXT("dTT: there is no depot; add \"(D)\" to a truck station name."); return false; }
+
+    FDTTPoolTruckState* State = PoolTrucks.Find(Vehicle);
+    if (State && State->Phase == EDTTTruckPhase::Parked)
+    {
+        OutMessage = FString::Printf(TEXT("dTT: '%s' is already parked at %s."), *DTSVehicleName(Vehicle), *DockDisplayName(State->DepotGuid));
+        return false;
+    }
+    if (!State)
+    {
+        const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+        const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
+        const FGuid From = Route.IsValidIndex(Index) ? Route[Index] : (Route.Num() > 0 ? Route[0] : FGuid());
+        const FGuid Depot = FindNearestDepot(Vehicle, From);
+        if (!Depot.IsValid()) { OutMessage = FString::Printf(TEXT("dTT: no free depot reachable from '%s'."), *DockDisplayName(From)); return false; }
+        State = &JoinPool(Vehicle, Depot, TEXT("command"));
+    }
+    else
+    {
+        State->Phase = EDTTTruckPhase::ToDepot;
+    }
+    ProcessPoolTruckTarget(Vehicle, *State, TEXT("command park"));
+    OutMessage = State->DepotGuid.IsValid()
+        ? FString::Printf(TEXT("dTT: '%s' is heading for %s."), *DTSVehicleName(Vehicle), *DockDisplayName(State->DepotGuid))
+        : FString::Printf(TEXT("dTT: '%s' joined the pool but no depot is free right now."), *DTSVehicleName(Vehicle));
+    return State->DepotGuid.IsValid();
+}
+
+bool UDynamicTimeTableSubsystem::CommandReleaseTruck(const FString& TruckQuery, FString& OutMessage)
+{
+    if (!IsServer()) { OutMessage = TEXT("dTT: only the server can release trucks."); return false; }
+    AFGWheeledVehicleIdentifier* Vehicle = FindVehicleByQuery(TruckQuery);
+    if (!IsValid(Vehicle)) { OutMessage = FString::Printf(TEXT("dTT: no truck matches '%s'."), *TruckQuery); return false; }
+    FDTTPoolTruckState* State = PoolTrucks.Find(Vehicle);
+    if (!State || State->Phase != EDTTTruckPhase::Parked)
+    {
+        OutMessage = FString::Printf(TEXT("dTT: '%s' is not parked."), *DTSVehicleName(Vehicle));
+        return false;
+    }
+    const TArray<FGuid> Loop{ State->DepotGuid, State->DepotGuid };
+    if (!ReleaseParkedTruck(Vehicle, *State, Loop, EDTTTruckPhase::ToDepot, TEXT("command release")))
+    {
+        OutMessage = FString::Printf(TEXT("dTT: could not release '%s' (see the log)."), *DTSVehicleName(Vehicle));
+        return false;
+    }
+    OutMessage = FString::Printf(TEXT("dTT: '%s' released; it drives one loop and parks again at %s."), *DTSVehicleName(Vehicle), *DockDisplayName(State->DepotGuid));
     return true;
 }
