@@ -2368,14 +2368,20 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
         bFuelIncluded ? TEXT("true") : TEXT("false"), FuelPlacedIndex, Anchors->FuelInsertIndex, NewRoute.Num(), Trigger);
 }
 
-void UDynamicTimeTableSubsystem::ReleaseRequesterClaimIfDocked(AFGWheeledVehicleIdentifier* Vehicle)
+void UDynamicTimeTableSubsystem::ReleaseRequesterClaimIfDocked(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& StationGuid)
 {
     if (!IsValid(Vehicle)) return;
-    const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
-    const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
-    if (!Route.IsValidIndex(Index)) return;
-
-    const FGuid DockGuid = Route[Index];
+    FGuid DockGuid = StationGuid;
+    if (!DockGuid.IsValid())
+    {
+        // Releasing Route[Index] here released the *next* requester's claim while the truck was
+        // still loading at the producer, and another truck of the resource could claim that
+        // station in the meantime.
+        const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+        const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
+        if (Route.Num() < 1 || !Route.IsValidIndex(Index)) return;
+        DockGuid = Route[(Index - 1 + Route.Num()) % Route.Num()];
+    }
     const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Owner = RequesterClaims.Find(DockGuid);
     if (!Owner || Owner->Get() != Vehicle) return;
 
@@ -2704,7 +2710,10 @@ void UDynamicTimeTableSubsystem::HandleTruckDocked(AFGWheeledVehicle* Vehicle, A
     if (!Identifier->IsAutopilotEnabled()) return;
 
     ReleaseTruckBooking(Identifier, TEXT("truck docked"));
-    ReleaseRequesterClaimIfDocked(Identifier);
+    {
+        const AFGDockingStationIdentifier* DockedIdentifier = IsValid(Station) ? Station->GetStationIdentifier() : nullptr;
+        ReleaseRequesterClaimIfDocked(Identifier, IsValid(DockedIdentifier) ? DockedIdentifier->GetPathNodeGUID() : FGuid());
+    }
 
     // A pool truck docking at a depot parks there: at its own depot at the end of a lap, or at
     // any depot while it is looking for one. A lap in progress only parks at its own depot.

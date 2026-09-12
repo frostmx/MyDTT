@@ -407,7 +407,13 @@ private:
      */
     void ProcessDispatchTruckTarget(AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId, const TCHAR* Trigger);
     /** Releases this truck's claim when the waypoint it just docked at is the claimed requester. */
-    void ReleaseRequesterClaimIfDocked(AFGWheeledVehicleIdentifier* Vehicle);
+    /**
+     * Releases this truck's claim on the dock it just docked at: DockGuid when the docking hook
+     * supplied the station, otherwise the waypoint before the current target - at docking the
+     * autopilot has already moved the target on to the next stop (measured), so the current target
+     * is the stop the truck is heading for next, not the one it is standing at.
+     */
+    void ReleaseRequesterClaimIfDocked(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& DockGuid = FGuid());
     /** Drops claims whose truck disappeared or whose safety timeout elapsed. */
     void PruneStaleRequesterClaims();
     /** Drops every claim owned by a vehicle that no longer follows its dispatched route. */

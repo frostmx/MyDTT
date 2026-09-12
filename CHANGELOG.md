@@ -22,6 +22,10 @@
   `/dtt release <truck>`.
 - Server and clients have to run the same version: the window protocol is now 5. Saves gain the
   pool state (save data version 6); older saves load unchanged.
+- Fixed a requesting station being released for other trucks while the truck assigned to it was
+  still loading at the producer: the autopilot moves the target on at docking, and the release
+  looked at the target instead of the station the truck was standing at. With several trucks per
+  resource this let two of them head for the same station.
 
 ## 1.1.0
 
