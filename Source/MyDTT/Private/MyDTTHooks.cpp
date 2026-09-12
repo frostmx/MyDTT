@@ -9,6 +9,7 @@
 #if !WITH_EDITOR
 #include "Patching/NativeHookManager.h"
 #include "WheeledVehicles/FGWheeledVehicle.h"
+#include "FGDockableInterface.h"
 #include "DynamicTimeTableSubsystem.h"
 #include "Engine/World.h"
 #endif
@@ -200,23 +201,35 @@ void FMyDTTHooks::Install()
 
     // The docking events. Both are called by the station on the game thread (DockActor and
     // ForceUndockActor assert it), after the identifier's docking flag has been written.
-    Installing(TEXT("AFGWheeledVehicle::WasDocked_Implementation"));
-    SUBSCRIBE_METHOD_VIRTUAL_AFTER(AFGWheeledVehicle::WasDocked_Implementation, GetMutableDefault<AFGWheeledVehicle>(),
-        [](AFGWheeledVehicle* Self, AActor* StationActor)
+    //
+    // Hooked through the interface, not the vehicle class, on purpose. These overrides come from
+    // IFGDockableInterface, a secondary base 0x648 bytes into AFGWheeledVehicle, and MSVC compiled
+    // them with `this` = that interface subobject (the member pointer carries a this-adjustment of
+    // 0x648; the function body reads mVehicleIdentifier at [rcx+0x180], impossible for an actor
+    // pointer). SML hooks the resolved body and hands the handler the raw `this`, so a handler
+    // typed AFGWheeledVehicle* got a pointer into the middle of the actor and IsValid() failed
+    // silently: 2.0.0 as first built never saw a docking. Typed as the interface, `_getUObject()`
+    // goes through the interface vtable and yields the actor.
+    IFGDockableInterface* SampleDockable = GetMutableDefault<AFGWheeledVehicle>();
+    Installing(TEXT("IFGDockableInterface::WasDocked_Implementation (AFGWheeledVehicle)"));
+    SUBSCRIBE_METHOD_VIRTUAL_AFTER(IFGDockableInterface::WasDocked_Implementation, SampleDockable,
+        [](IFGDockableInterface* Self, AActor* StationActor)
         {
-            if (!IsValid(Self) || !Self->HasAuthority()) return;
-            if (UWorld* World = Self->GetWorld())
+            AFGWheeledVehicle* Vehicle = Self ? Cast<AFGWheeledVehicle>(Self->_getUObject()) : nullptr;
+            if (!IsValid(Vehicle) || !Vehicle->HasAuthority()) return;
+            if (UWorld* World = Vehicle->GetWorld())
                 if (auto* S = World->GetSubsystem<UDynamicTimeTableSubsystem>())
-                    S->HandleTruckDocked(Self, Cast<AFGBuildableDockingStation>(StationActor));
+                    S->HandleTruckDocked(Vehicle, Cast<AFGBuildableDockingStation>(StationActor));
         });
-    Installing(TEXT("AFGWheeledVehicle::WasUndocked_Implementation"));
-    SUBSCRIBE_METHOD_VIRTUAL_AFTER(AFGWheeledVehicle::WasUndocked_Implementation, GetMutableDefault<AFGWheeledVehicle>(),
-        [](AFGWheeledVehicle* Self)
+    Installing(TEXT("IFGDockableInterface::WasUndocked_Implementation (AFGWheeledVehicle)"));
+    SUBSCRIBE_METHOD_VIRTUAL_AFTER(IFGDockableInterface::WasUndocked_Implementation, SampleDockable,
+        [](IFGDockableInterface* Self)
         {
-            if (!IsValid(Self) || !Self->HasAuthority()) return;
-            if (UWorld* World = Self->GetWorld())
+            AFGWheeledVehicle* Vehicle = Self ? Cast<AFGWheeledVehicle>(Self->_getUObject()) : nullptr;
+            if (!IsValid(Vehicle) || !Vehicle->HasAuthority()) return;
+            if (UWorld* World = Vehicle->GetWorld())
                 if (auto* S = World->GetSubsystem<UDynamicTimeTableSubsystem>())
-                    S->HandleTruckUndocked(Self);
+                    S->HandleTruckUndocked(Vehicle);
         });
     GDockingHooksInstalled = true;
     UE_LOG(LogMyDTTHooks, Display, TEXT("docking-station hooks installed"));
