@@ -2,6 +2,7 @@
 
 #include "DTTSaveDataActor.h"
 #include "DynamicTimeTableChatCommand.h"
+#include "MyDTTHooks.h"
 #include "Command/ChatCommandLibrary.h"
 #include "FGTrain.h"
 #include "FGRailroadTimeTable.h"
@@ -2602,6 +2603,11 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         // vehicle is standing on, and rewriting that waypoint would send it away again.
         if (bDocking && !Previous->bDocking)
         {
+            // With the docking hooks installed this edge has already been handled by
+            // HandleTruckDocked; the releases are idempotent and the line is there to compare
+            // the two signals in the log.
+            UE_LOG(LogDynamicTimeTableSubsystem, Log, TEXT("DOCK_POLL Truck='%s' Index=%d Docking=true ViaHook=%s"),
+                *DTSVehicleName(Vehicle), TargetIndex, Previous->bDockedViaHook ? TEXT("true") : TEXT("false"));
             ReleaseTruckBooking(Vehicle, TEXT("truck docked"));
             ReleaseRequesterClaimIfDocked(Vehicle);
         }
@@ -2640,6 +2646,79 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         Previous->bDocking = bDocking;
         Previous->LastRoute = Vehicle->GetVehicleRoute();
     }
+}
+
+void UDynamicTimeTableSubsystem::HandleTruckDocked(AFGWheeledVehicle* Vehicle, AFGBuildableDockingStation* Station)
+{
+    if (!IsServer() || !IsValid(Vehicle)) return;
+    AFGWheeledVehicleIdentifier* Identifier = Vehicle->GetVehicleIdentifier();
+    if (!IsValid(Identifier)) return;
+
+    const int32 TargetIndex = Identifier->GetCurrentTargetWaypointIndex();
+    UE_LOG(LogDynamicTimeTableSubsystem, Log, TEXT("DOCK_EVENT Truck='%s' Station='%s' Index=%d Docking=true Autopilot=%s"),
+        *DTSVehicleName(Identifier), IsValid(Station) ? *DTSDockName(Station->GetStationIdentifier()) : TEXT("<none>"),
+        TargetIndex, Identifier->IsAutopilotEnabled() ? TEXT("on") : TEXT("off"));
+
+    FDTTTruckPollState* State = TruckPollStates.Find(Identifier);
+    if (State)
+    {
+        State->DockedStation = Station;
+        State->bDockedViaHook = true;
+    }
+    if (!Identifier->IsAutopilotEnabled()) return;
+
+    // What the poll's docking edge does; both are idempotent, so the poll seeing the same edge a
+    // moment later is harmless.
+    ReleaseTruckBooking(Identifier, TEXT("truck docked"));
+    ReleaseRequesterClaimIfDocked(Identifier);
+
+    // Milestone 1: every docking of a truck this subsystem knows gets a pass-through plan, only
+    // so the transfer hook proves it is reached (XFER_PROBE) without changing what moves.
+    if (IsValid(Station) && State)
+    {
+        FDTTTransferPlan Plan;
+        Plan.Mode = FDTTTransferPlan::EMode::PassThrough;
+        FMyDTTHooks::SetTransferPlan(Station, Plan);
+    }
+}
+
+void UDynamicTimeTableSubsystem::HandleTruckUndocked(AFGWheeledVehicle* Vehicle)
+{
+    if (!IsServer() || !IsValid(Vehicle)) return;
+    AFGWheeledVehicleIdentifier* Identifier = Vehicle->GetVehicleIdentifier();
+    if (!IsValid(Identifier)) return;
+
+    FDTTTruckPollState* State = TruckPollStates.Find(Identifier);
+    AFGBuildableDockingStation* Station = State ? State->DockedStation.Get() : nullptr;
+    const int32 TargetIndex = Identifier->GetCurrentTargetWaypointIndex();
+    UE_LOG(LogDynamicTimeTableSubsystem, Log, TEXT("DOCK_EVENT Truck='%s' Station='%s' Index=%d Docking=false"),
+        *DTSVehicleName(Identifier), IsValid(Station) ? *DTSDockName(Station->GetStationIdentifier()) : TEXT("<none>"), TargetIndex);
+
+    if (Station) FMyDTTHooks::ClearTransferPlan(Station);
+    if (!State) return;
+    State->DockedStation = nullptr;
+
+    // The poll's "undocked" branch, run now instead of up to a second later. Marking the state
+    // as no longer docking keeps the poll from running it a second time; the target index is
+    // left alone, since a boundary is recognised only by the poll seeing the index change.
+    const bool bWasDocking = State->bDocking;
+    State->bDocking = false;
+    if (!bWasDocking || !Identifier->IsAutopilotEnabled()) return;
+    const TArray<FGuid>& Route = Identifier->GetVehicleRoute();
+    const FString ResourceId = Route.Num() > 0 ? ResolveDispatchResourceFromProducer(Route[0]) : FString();
+    if (!ResourceId.IsEmpty() && TargetIndex > 0 && TargetIndex == State->TargetIndex)
+    {
+        ProcessCurrentTruckTarget(Identifier, TEXT("undocked"));
+    }
+}
+
+void UDynamicTimeTableSubsystem::HandleParkedTruckEvicted(AFGBuildableDockingStation* Station, AActor* NewActor)
+{
+    if (!IsServer()) return;
+    UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("DEPOT_EVICTED Station='%s' Parked='%s' By='%s'"),
+        IsValid(Station) ? *DTSDockName(Station->GetStationIdentifier()) : TEXT("<none>"),
+        IsValid(Station) ? *GetNameSafe(Station->GetDockedActor()) : TEXT("<none>"), *GetNameSafe(NewActor));
+    // Milestone 3 moves the parked truck back to ToDepot here; nothing is parked before that.
 }
 
 void UDynamicTimeTableSubsystem::HandleVehicleRouteChanged(AFGWheeledVehicleIdentifier* Vehicle)

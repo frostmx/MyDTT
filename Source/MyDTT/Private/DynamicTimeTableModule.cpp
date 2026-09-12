@@ -12,6 +12,7 @@
 #include "WheeledVehicles/FGWheeledVehicleIdentifier.h"
 #include "DynamicTimeTableSubsystem.h"
 #include "DynamicTimeTableRemoteCallObject.h"
+#include "MyDTTHooks.h"
 #include "Player/SMLRemoteCallObject.h"
 #include "GameFramework/GameModeBase.h"
 #include "Engine/World.h"
@@ -40,6 +41,8 @@ SUBSCRIBE_METHOD_AFTER(AFGTrain::SetSelfDrivingEnabled,[](AFGTrain* Train,bool E
 SUBSCRIBE_METHOD_AFTER(AFGWheeledVehicleIdentifier::SetVehicleRoute,[](AFGWheeledVehicleIdentifier* V,const TArray<FGuid>& Route){(void)Route;if(IsValid(V)&&IsValid(V->GetWorld()))if(auto* S=V->GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())S->HandleVehicleRouteChanged(V);});
 SUBSCRIBE_METHOD_AFTER(AFGWheeledVehicleIdentifier::SetAutopilotEnabled,[](AFGWheeledVehicleIdentifier* V,bool Enabled){if(IsValid(V)&&IsValid(V->GetWorld()))if(auto* S=V->GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())S->HandleAutopilotChanged(V,Enabled);});
 SUBSCRIBE_METHOD_AFTER(AFGDockingStationIdentifier::SetStationName,[](AFGDockingStationIdentifier* Id,const FText& Name){(void)Name;if(IsValid(Id)&&IsValid(Id->GetWorld()))if(auto* S=Id->GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())S->HandleDockingStationNameChanged(Id);});
+// Docking-station side: the transfer cap, the depot hold and the real docking events. See MyDTTHooks.
+FMyDTTHooks::Install();
 #endif
 }
 #if !WITH_EDITOR

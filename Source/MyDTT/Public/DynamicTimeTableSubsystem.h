@@ -40,6 +40,14 @@ public:
     void HandleAutopilotChanged(AFGWheeledVehicleIdentifier* Vehicle, bool bEnabled);
     void HandleDockingStationNameChanged(AFGDockingStationIdentifier* Identifier);
 
+    // The docking events themselves, from hooks on AFGWheeledVehicle::WasDocked_Implementation and
+    // WasUndocked_Implementation (see MyDTTHooks). The identifier's docking flag is written inline
+    // by those two, which is why the earlier hooks on its setter never fired. Game thread.
+    void HandleTruckDocked(class AFGWheeledVehicle* Vehicle, class AFGBuildableDockingStation* Station);
+    void HandleTruckUndocked(class AFGWheeledVehicle* Vehicle);
+    /** A held (parked) truck was pushed out of its station by another actor docking there. */
+    void HandleParkedTruckEvicted(class AFGBuildableDockingStation* Station, AActor* NewActor);
+
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") FGuid CreateGroup(const FString& GroupName, EDTTGroupKind Kind = EDTTGroupKind::Train);
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") bool RemoveGroup(FGuid GroupId);
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") bool RenameGroup(FGuid GroupId, const FString& NewName);
@@ -153,6 +161,11 @@ private:
         // come back is that revert, not a player edit, and the written route is put back.
         TArray<FGuid> LastWrittenRoute;
         TArray<FGuid> RouteBeforeLastWrite;
+        // The station the docking hook reported, while the truck stands on it. The transfer plan
+        // is keyed by it and cleared on undock.
+        TWeakObjectPtr<class AFGBuildableDockingStation> DockedStation;
+        // True once the hooks, not the poll, delivered this truck's docking edge.
+        bool bDockedViaHook = false;
     };
     TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTTruckPollState> TruckPollStates;
     FTimerHandle TruckPollTimerHandle;
