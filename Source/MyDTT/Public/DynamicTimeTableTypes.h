@@ -88,9 +88,10 @@ struct FDTTDispatchStation
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dynamic Time Table")
     EDTTDispatchRole Role = EDTTDispatchRole::None;
 
-    // Requester only: open (a candidate for dispatch) while the dock's stock is below this many stacks.
-    // INDEX_NONE for a neutral "(ResourceId)" tag: the default depends on the item's form (solid or
-    // fluid), which is only known once the resource resolves - see GetEffectiveThreshold.
+    // Requester only: the N of a "(ResourceId-N)" tag, INDEX_NONE for a neutral "(ResourceId)" tag.
+    // Not a threshold by itself but an offset from the dock's capacity: the requester is open while
+    // its stock is below capacity minus N stacks (a neutral tag: below capacity, i.e. not full).
+    // The capacity is only known from the live inventory - see GetEffectiveThreshold.
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dynamic Time Table")
     int32 Threshold = INDEX_NONE;
 

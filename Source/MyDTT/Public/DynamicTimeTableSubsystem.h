@@ -77,8 +77,11 @@ public:
 
     /**
      * A resource is written in a *separate* tag, e.g. "Iron Mine (Iron)". LOAD makes it a producer,
-     * UNLOAD a requester with the default threshold. "(Iron-10)" overrides that requester threshold;
-     * legacy explicit "(Iron+)" remains supported. Parentheses deliberately differ from the
+     * UNLOAD a requester. A requester is open while its stock is below its threshold, and the
+     * threshold is the station's capacity in stacks of that item: a station takes everything that
+     * fits, so "not full" is the only demand it can express. "(Iron-10)" lowers that threshold by
+     * ten stacks (open only with more than ten stacks free); N at or above the capacity never opens.
+     * Legacy explicit "(Iron+)" remains supported. Parentheses deliberately differ from the
      * "[group,N]" balancing tag, so one station can carry both independently.
      */
     static bool ParseDispatchTag(const FString& FullName, FString& OutBaseName, FString& OutResourceId, EDTTDispatchRole& OutRole, int32& OutThreshold);
@@ -237,13 +240,6 @@ private:
     int32 GetGroupPathNetworkID(const FDTTStationGroup& Group) const;
 
     // Resource dispatch.
-    // A neutral "(Resource)" requester tag carries no threshold of its own (FDTTDispatchStation::
-    // Threshold == INDEX_NONE); the default is picked once the item class is known, because the
-    // unit differs by form. For solids one stack is the item's stack size; for a fluid it is
-    // EStackSize::SS_FLUID = 50 000 L = 50 m3, so a fluid truck station (one 3 200 000 L slot)
-    // holds 64 stacks and a "half full" default wants 32 of them, not 10.
-    static constexpr int32 DefaultDispatchRequesterThresholdStacks = 10;
-    static constexpr int32 DefaultDispatchFluidThresholdStacks = 32;
     // Upper bound on requesters planned into one lap. The cargo-deficit estimate is the real
     // limit; this only caps the route length when many requesters are all nearly empty.
     static constexpr int32 MaxRequestersPerLap = 4;
@@ -296,7 +292,11 @@ private:
     bool IsFuelCriticallyLow(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& LoopWithoutFuel) const;
     /** Nearest (F)-tagged dock reachable from FromGuid on the same path network, or invalid if none. */
     FGuid FindNearestFuelStop(class AFGWheeledVehicle* Vehicle, const FGuid& FromGuid) const;
-    /** Explicit threshold from the tag, else the per-form default (solid vs fluid). */
+    /**
+     * The requester's threshold: the dock's capacity in stacks of the item minus the tag's offset
+     * (a neutral tag is offset 0), never below 0. INDEX_NONE when the capacity cannot be read -
+     * distinct from 0, which is a station whose offset is at or above its capacity and never opens.
+     */
     int32 GetEffectiveThreshold(const FDTTDispatchStation& Station, TSubclassOf<class UFGItemDescriptor> ItemClass) const;
     /**
      * Truck cargo in the same "stacks" unit as ReadDockStockInStacks: capacity from the inventory's
@@ -339,4 +339,10 @@ private:
     TSubclassOf<class UFGItemDescriptor> ResolveItemClassForResource(const FString& ResourceId) const;
     /** Current stock at a dock's connected storage, in whole stacks (rounded down). */
     int32 ReadDockStockInStacks(AFGDockingStationIdentifier* Dock, TSubclassOf<class UFGItemDescriptor> ItemClass) const;
+    /**
+     * What the dock's storage holds when full, in the same stacks unit; false (not 0) when the dock,
+     * its building or its inventory cannot be read. Same formula as EstimateTruckCargoStacks: slot
+     * size, not stack size, so a fluid station's single 3 200 000 L slot counts as 64 stacks.
+     */
+    bool ReadDockCapacityInStacks(AFGDockingStationIdentifier* Dock, TSubclassOf<class UFGItemDescriptor> ItemClass, int32& OutCapacityStacks) const;
 };

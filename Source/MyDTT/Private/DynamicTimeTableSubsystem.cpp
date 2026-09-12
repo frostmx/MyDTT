@@ -259,7 +259,7 @@ bool UDynamicTimeTableSubsystem::ParseDispatchTag(const FString& FullName, FStri
         }
         else
         {
-            // The threshold is whatever follows the last '-', and only if it is a plain
+            // The offset is whatever follows the last '-', and only if it is a plain
             // non-negative number, so a resource named "Iron Ore" still works.
             int32 Dash = INDEX_NONE;
             if (Inner.FindLastChar(TEXT('-'), Dash))
@@ -281,7 +281,7 @@ bool UDynamicTimeTableSubsystem::ParseDispatchTag(const FString& FullName, FStri
                 if (!Resource.IsEmpty())
                 {
                     Role = EDTTDispatchRole::ByStationMode;
-                    // Resolved later per item form; see GetEffectiveThreshold.
+                    // No offset: the threshold is the dock's full capacity (GetEffectiveThreshold).
                     Threshold = INDEX_NONE;
                 }
             }
@@ -750,11 +750,15 @@ void UDynamicTimeTableSubsystem::GetDispatchStatusLines(TArray<FString>& OutLine
         {
             Claim = Owner->IsValid() ? DTSVehicleName(Owner->Get()) : TEXT("<invalid vehicle>");
         }
-        const bool bOpen = bModeMatches && StockStacks >= 0 && StockStacks < Threshold;
+        int32 Capacity = INDEX_NONE;
+        if (ItemClass) ReadDockCapacityInStacks(Station.DockingStationIdentifier.Get(), ItemClass, Capacity);
+        const bool bOpen = bModeMatches && StockStacks >= 0 && Threshold > 0 && StockStacks < Threshold;
         OutLines.Add(FString::Printf(
-            TEXT("%s | Requester | %s | mode=%s active=%s | stock=%s/%d open=%s | claim=%s"),
+            TEXT("%s | Requester | %s | mode=%s active=%s | stock=%s/%s cap=%s open=%s | claim=%s"),
             *Station.ResourceId, *BaseName, ActualMode, bModeMatches ? TEXT("yes") : TEXT("no"),
-            StockStacks >= 0 ? *FString::FromInt(StockStacks) : TEXT("unknown"), Threshold,
+            StockStacks >= 0 ? *FString::FromInt(StockStacks) : TEXT("unknown"),
+            Threshold >= 0 ? *FString::FromInt(Threshold) : TEXT("?"),
+            Capacity >= 0 ? *FString::FromInt(Capacity) : TEXT("?"),
             bOpen ? TEXT("yes") : TEXT("no"), *Claim));
     }
 
@@ -815,8 +819,9 @@ void UDynamicTimeTableSubsystem::GetDispatchStatusLines(TArray<FString>& OutLine
     }
     else if (DispatchStations.Num() == 0 && DispatchFuelStopGuids.Num() == 0)
     {
-        OutLines.Add(TEXT("No dispatch tags. Use (Resource) on LOAD/UNLOAD stations, optional "
-            "(Resource-N) to override a requester threshold, and optional (F) on a fuel stop."));
+        OutLines.Add(TEXT("No dispatch tags. Use (Resource) on LOAD/UNLOAD stations - an UNLOAD station "
+            "requests while it is not full; optional (Resource-N) requests only with more than N stacks "
+            "free - and optional (F) on a fuel stop."));
     }
 }
 
@@ -968,12 +973,12 @@ void UDynamicTimeTableSubsystem::RebuildGroupsFromNames()
                 const EDTTDispatchRole EffectiveRole = GetEffectiveDispatchRole(Dispatch);
                 const bool bModeMatches = DoesDispatchStationMatchMode(Dispatch);
                 UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
-                    TEXT("DISPATCH_TAG_FOUND Name=\"%s\" Resource=\"%s\" Role=%s TagRole=%s Threshold=%s GetIsInLoadMode=%s ModeMatches=%s"),
+                    TEXT("DISPATCH_TAG_FOUND Name=\"%s\" Resource=\"%s\" Role=%s TagRole=%s Offset=%d GetIsInLoadMode=%s ModeMatches=%s"),
                     *FullName, *ResourceId,
                     EffectiveRole == EDTTDispatchRole::Producer ? TEXT("Producer") : TEXT("Requester"),
                     Role == EDTTDispatchRole::ByStationMode ? TEXT("ByStationMode")
                         : (Role == EDTTDispatchRole::Producer ? TEXT("ExplicitProducer") : TEXT("ExplicitRequester")),
-                    Threshold == INDEX_NONE ? TEXT("default") : *FString::FromInt(Threshold),
+                    FMath::Max(0, Threshold),
                     bIsLoadMode ? TEXT("true") : TEXT("false"), bModeMatches ? TEXT("true") : TEXT("false"));
                 if (!bModeMatches)
                 {
@@ -1034,10 +1039,23 @@ void UDynamicTimeTableSubsystem::RebuildGroupsFromNames()
         if (const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(Station.ResourceId))
         {
             const int32 Stock = ReadDockStockInStacks(Station.DockingStationIdentifier.Get(), ItemClass);
+            int32 Capacity = INDEX_NONE;
+            ReadDockCapacityInStacks(Station.DockingStationIdentifier.Get(), ItemClass, Capacity);
+            const int32 Threshold = GetEffectiveThreshold(Station, ItemClass);
             UE_LOG(LogDynamicTimeTableSubsystem, VeryVerbose,
-                TEXT("DISPATCH_STOCK_PROBE Name=\"%s\" Resource=\"%s\" Item=\"%s\" StockStacks=%d Threshold=%d"),
+                TEXT("DISPATCH_STOCK_PROBE Name=\"%s\" Resource=\"%s\" Item=\"%s\" StockStacks=%d Capacity=%d Threshold=%d"),
                 *Station.DisplayName, *Station.ResourceId, *UFGItemDescriptor::GetItemName(ItemClass).ToString(),
-                Stock, Station.Threshold);
+                Stock, Capacity, Threshold);
+            // An offset that eats the whole capacity is a tag that can never open - most likely a
+            // threshold written under the pre-1.1.0 meaning ("open below N stacks"). Said once per
+            // rebuild, which only runs on a name change.
+            if (GetEffectiveDispatchRole(Station) == EDTTDispatchRole::Requester &&
+                Capacity != INDEX_NONE && Station.Threshold != INDEX_NONE && Station.Threshold >= Capacity)
+            {
+                UE_LOG(LogDynamicTimeTableSubsystem, Warning,
+                    TEXT("DISPATCH_TAG_OFFSET_EXCEEDS_CAPACITY Name=\"%s\" Resource=\"%s\" Offset=%d Capacity=%d Action=never-opens"),
+                    *Station.DisplayName, *Station.ResourceId, Station.Threshold, Capacity);
+            }
         }
         else
         {
@@ -1817,16 +1835,13 @@ FGuid UDynamicTimeTableSubsystem::FindNearestFuelStop(AFGWheeledVehicle* Vehicle
 int32 UDynamicTimeTableSubsystem::GetEffectiveThreshold(
     const FDTTDispatchStation& Station, TSubclassOf<UFGItemDescriptor> ItemClass) const
 {
-    if (Station.Threshold != INDEX_NONE) return Station.Threshold;
-    if (ItemClass)
-    {
-        const EResourceForm Form = UFGItemDescriptor::GetForm(ItemClass);
-        if (Form == EResourceForm::RF_LIQUID || Form == EResourceForm::RF_GAS)
-        {
-            return DefaultDispatchFluidThresholdStacks;
-        }
-    }
-    return DefaultDispatchRequesterThresholdStacks;
+    // An UNLOAD dock takes whatever fits, so the only demand it can express is "not full": the
+    // threshold is its capacity, and the tag's N only lowers it. Capacity, not a fixed stack count,
+    // also makes the deficit (threshold minus stock) exactly the room the truck can unload into.
+    int32 Capacity = INDEX_NONE;
+    if (!ReadDockCapacityInStacks(Station.DockingStationIdentifier.Get(), ItemClass, Capacity)) return INDEX_NONE;
+    const int32 Offset = Station.Threshold == INDEX_NONE ? 0 : Station.Threshold;
+    return FMath::Max(0, Capacity - Offset);
 }
 
 bool UDynamicTimeTableSubsystem::EstimateTruckCargoStacks(
@@ -1894,7 +1909,10 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
         UE_LOG(LogDynamicTimeTableSubsystem, VeryVerbose,
             TEXT("DISPATCH_CANDIDATE Truck='%s' Resource='%s' Station='%s' StockStacks=%d Threshold=%d Open=%s"),
             *DTSVehicleName(Vehicle), *ResourceId, *Station.DisplayName, StockStacks, Threshold,
-            StockStacks < Threshold ? TEXT("true") : TEXT("false"));
+            Threshold != INDEX_NONE && StockStacks < Threshold ? TEXT("true") : TEXT("false"));
+        // INDEX_NONE: the dock's inventory could not be read, so neither stock nor capacity is known;
+        // a threshold of 0 (offset at or above capacity) simply never opens.
+        if (Threshold == INDEX_NONE) continue;
         if (StockStacks < Threshold)
         {
             FDispatchCandidate Candidate;
@@ -2685,4 +2703,18 @@ int32 UDynamicTimeTableSubsystem::ReadDockStockInStacks(AFGDockingStationIdentif
     if (!IsValid(Storage)) return 0;
     const int32 StackSize = FMath::Max(1, UFGItemDescriptor::GetStackSize(ItemClass));
     return Storage->GetNumItems(ItemClass) / StackSize;
+}
+
+bool UDynamicTimeTableSubsystem::ReadDockCapacityInStacks(
+    AFGDockingStationIdentifier* Dock, TSubclassOf<UFGItemDescriptor> ItemClass, int32& OutCapacityStacks) const
+{
+    OutCapacityStacks = INDEX_NONE;
+    if (!IsValid(Dock) || !ItemClass) return false;
+    AFGBuildableDockingStation* Building = Dock->GetStation();
+    UFGInventoryComponent* Storage = IsValid(Building) ? Building->GetInventory() : nullptr;
+    if (!IsValid(Storage) || Storage->GetSizeLinear() < 1) return false;
+    const int64 StackSize = FMath::Max(1, UFGItemDescriptor::GetStackSize(ItemClass));
+    const int64 SlotSize = FMath::Max<int64>(1, Storage->GetSlotSize(0, ItemClass));
+    OutCapacityStacks = int32(FMath::Max<int64>(1, (Storage->GetSizeLinear() * SlotSize) / StackSize));
+    return true;
 }
