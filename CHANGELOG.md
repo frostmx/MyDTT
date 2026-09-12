@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.0.9
+
+- A truck now serves several requesters in one lap. At the producer the dispatcher takes the most
+  starved open requesters, one after another, until their combined shortfall covers what the truck
+  can carry (at most four per lap), and writes them all into the route. A truck that runs out of
+  cargo on the way turns back to the producer instead of driving on to the remaining stops; those
+  stops are released for other trucks.
+- With no open request a truck now keeps only its producer and the last consumer of the previous
+  lap, instead of replaying the whole previous lap empty.
+- A fuel stop, own or borrowed, is now placed where it adds the least detour to the lap and can
+  still be reached on the current tank, instead of always at its remembered position (own) or
+  right after the producer (borrowed). The remembered position remains the fallback when the path
+  network cannot be costed.
+- Fluids: a resource tag naming a fluid (for example `(Crude Oil)`) now resolves by name; before it
+  only worked through the producer's cargo. For fluids one "stack" is 50 m³, so a fluid truck
+  station holds 64; the default requester threshold for a fluid is 32 stacks (1 600 m³), solids
+  keep 10. An explicit `(Resource-N)` threshold is unchanged.
+- `/dtt dispatch` lists the dispatch trucks with their current route, target and cargo.
+
 ## 1.0.8
 
 - A fuel stop borrowed for a low tank is now visited right after the producer instead of at the
