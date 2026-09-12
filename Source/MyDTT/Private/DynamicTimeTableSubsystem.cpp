@@ -3013,9 +3013,24 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
         return true;
     }
 
+    // A pool lap knows its resource and producer from its state: its route may start with the
+    // depot it was released from (see AssignPoolTruck), so Route[0] says nothing.
     const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
-    const FString ResourceId = Route.Num() > 0 ? ResolveDispatchResourceFromProducer(Route[0]) : FString();
-    if (ResourceId.IsEmpty()) return false;
+    const FDTTPoolTruckState* Pool = PoolTrucks.Find(Vehicle);
+    FString ResourceId;
+    FGuid ProducerGuid;
+    if (Pool)
+    {
+        if (Pool->Phase != EDTTTruckPhase::Assigned) return false;
+        ResourceId = Pool->ResourceId;
+        ProducerGuid = Pool->ProducerGuid;
+    }
+    else
+    {
+        ResourceId = Route.Num() > 0 ? ResolveDispatchResourceFromProducer(Route[0]) : FString();
+        ProducerGuid = Route.Num() > 0 ? Route[0] : FGuid();
+    }
+    if (ResourceId.IsEmpty() || !ProducerGuid.IsValid()) return false;
 
     const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(ResourceId);
     if (!ItemClass)
@@ -3027,15 +3042,16 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
     const int64 StackSize = FMath::Max(1, UFGItemDescriptor::GetStackSize(ItemClass));
     const TCHAR* Reason = TEXT("other stop");
 
-    if (StationGuid == Route[0] && Station->GetIsInLoadMode())
+    if (StationGuid == ProducerGuid && Station->GetIsInLoadMode())
     {
         // The producer. Load only what the requesters of this lap can take: each one's deficit,
         // read now, on top of what is already on board. A lap without a requester (no demand, the
         // last consumer kept for the round trip) loads as the game would.
         int64 DeficitItems = 0;
         int32 Requesters = 0;
-        for (int32 Index = 1; Index < Route.Num(); ++Index)
+        for (int32 Index = 0; Index < Route.Num(); ++Index)
         {
+            if (Route[Index] == ProducerGuid) continue;
             const FDTTDispatchStation* Stop = FindDispatchStationByGuid(Route[Index]);
             if (!Stop || !Stop->ResourceId.Equals(ResourceId, ESearchCase::IgnoreCase) ||
                 GetEffectiveDispatchRole(*Stop) != EDTTDispatchRole::Requester || !DoesDispatchStationMatchMode(*Stop))
@@ -3345,7 +3361,10 @@ void UDynamicTimeTableSubsystem::ProcessPoolTruckTarget(
         // happens on arrival at the last stop, the depot: HandleTruckDocked parks it there.
         const TArray<FGuid> Route = Vehicle->GetVehicleRoute();
         const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
-        if (Index > 0)
+        // The producer is not necessarily Route[0]: the lap may start with the depot it was
+        // released from (AssignPoolTruck), so "past the producer" is measured from its position.
+        const int32 ProducerIndex = FMath::Max(0, Route.IndexOfByKey(State.ProducerGuid));
+        if (Index > ProducerIndex)
         {
             ReleaseTruckBooking(Vehicle, TEXT("left producer"));
             CutLapIfCargoEmpty(Vehicle, State.ResourceId, Route, Index, Trigger, State.DepotGuid);
@@ -3461,7 +3480,16 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
 
     // Producer, the requesters, and the nearest free depot from the last of them: the truck ends
     // the lap where the next one is likely to start, not necessarily where it slept.
+    //
+    // The autopilot keeps its target index across a route write, and at the depot that index is
+    // whatever the [Depot, Depot] loop left it at - 1 as often as 0 (measured: the first pool lap
+    // drove straight to the requester with an empty truck). SetCurrentTargetWaypoint is a status
+    // setter, not a command (1.0.7), so the route is shaped to the index instead: as many copies
+    // of the depot in front as the index says, and the producer lands exactly on the target.
+    const int32 TargetIndex = FMath::Clamp(Vehicle->GetCurrentTargetWaypointIndex(), 0, 3);
     TArray<FGuid> NewRoute;
+    for (int32 Copy = 0; Copy < TargetIndex && StartDepot.IsValid(); ++Copy) NewRoute.Add(StartDepot);
+    const int32 ProducerIndex = NewRoute.Num();
     NewRoute.Add(ProducerGuid);
     NewRoute.Append(Requesters);
     FGuid ReturnDepot = FindNearestDepot(Vehicle, Requesters.Last());
@@ -3477,7 +3505,8 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
         FuelGuid = FindNearestFuelStop(Vehicle->GetOwnerVehicle(), ProducerGuid);
         if (FuelGuid.IsValid() && !NewRoute.Contains(FuelGuid))
         {
-            FuelIndex = FMath::Clamp(ChooseFuelInsertIndex(Vehicle, NewRoute, FuelGuid, 1), 1, NewRoute.Num() - 1);
+            // After the producer, before the depot.
+            FuelIndex = FMath::Clamp(ChooseFuelInsertIndex(Vehicle, NewRoute, FuelGuid, ProducerIndex + 1), ProducerIndex + 1, NewRoute.Num() - 1);
             NewRoute.Insert(FuelGuid, FuelIndex);
         }
         else if (!FuelGuid.IsValid())
@@ -3518,8 +3547,8 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     int32 PlannedItems = 0;
     for (const auto& Pair : State.PlannedItems) PlannedItems += Pair.Value;
     UE_LOG(LogDynamicTimeTableSubsystem, Display,
-        TEXT("POOL_ASSIGNED Truck='%s' Resource='%s' Producer='%s' Requesters=%d PlannedItems=%d Fuel=%s FuelIndex=%d From='%s' Depot='%s' Stops=%d Trigger=%s"),
-        *DTSVehicleName(Vehicle), *ResourceId, *DockDisplayName(ProducerGuid), Requesters.Num(), PlannedItems,
+        TEXT("POOL_ASSIGNED Truck='%s' Resource='%s' Producer='%s' ProducerIndex=%d Requesters=%d PlannedItems=%d Fuel=%s FuelIndex=%d From='%s' Depot='%s' Stops=%d Trigger=%s"),
+        *DTSVehicleName(Vehicle), *ResourceId, *DockDisplayName(ProducerGuid), ProducerIndex, Requesters.Num(), PlannedItems,
         FuelGuid.IsValid() ? *DockDisplayName(FuelGuid) : TEXT("-"), FuelIndex,
         *DockDisplayName(StartDepot), *DockDisplayName(ReturnDepot), NewRoute.Num(), Trigger);
     UpdatePoolVehicleName(Vehicle, State);
