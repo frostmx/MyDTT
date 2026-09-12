@@ -37,7 +37,13 @@ namespace
 
     FString DTSVehicleName(const AFGWheeledVehicleIdentifier* Vehicle)
     {
-        return IsValid(Vehicle) ? Vehicle->GetVehicleName().ToString() : TEXT("<none>");
+        if (!IsValid(Vehicle)) return TEXT("<none>");
+        // Two trucks on the same producer carry the same display name (it is "Resource -> stop"),
+        // so the identifier's object number is appended to tell their log lines apart.
+        FString Number = Vehicle->GetName();
+        int32 Underscore = INDEX_NONE;
+        if (Number.FindLastChar(TEXT('_'), Underscore)) Number = Number.Mid(Underscore + 1);
+        return FString::Printf(TEXT("%s#%s"), *Vehicle->GetVehicleName().ToString(), *Number);
     }
 
     bool DTSIsAllDigits(const FString& Text)
@@ -1620,15 +1626,22 @@ bool UDynamicTimeTableSubsystem::ReplaceRoute(
     for (const FGuid& Node : NewRoute) if (!Node.IsValid()) return false;
     if (Vehicle->GetVehicleRoute() == NewRoute) return true;
 
+    const TArray<FGuid> Before = Vehicle->GetVehicleRoute();
     InternalRouteChanges.Add(Vehicle);
     Vehicle->SetVehicleRoute(NewRoute);
     InternalRouteChanges.Remove(Vehicle);
     const bool bWritten = Vehicle->GetVehicleRoute() == NewRoute;
     // Keep the poll's copy current at once: the game may re-save the route before the next poll,
-    // and that re-save must compare equal, not read as a player edit.
+    // and that re-save must compare equal, not read as a player edit. The pre-write route is kept
+    // too, to recognise the game writing it back after a docking (HandleVehicleRouteChanged).
     if (bWritten)
     {
-        if (FDTTTruckPollState* Seen = TruckPollStates.Find(Vehicle)) Seen->LastRoute = NewRoute;
+        if (FDTTTruckPollState* Seen = TruckPollStates.Find(Vehicle))
+        {
+            Seen->LastRoute = NewRoute;
+            Seen->LastWrittenRoute = NewRoute;
+            Seen->RouteBeforeLastWrite = Before;
+        }
     }
     return bWritten;
 }
@@ -2502,11 +2515,13 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         {
             ProcessCurrentTruckTarget(Vehicle, TEXT("waypoint changed"));
         }
-        else if (!bDocking && Previous->bDocking && !ResourceId.IsEmpty())
+        else if (!bDocking && Previous->bDocking && !ResourceId.IsEmpty() && TargetIndex > 0)
         {
             // The index moves on at arrival, before the transfer (measured: docking at stop 1
             // already reports target 2), so "waypoint changed" always sees a full truck. Leaving
-            // the dock is the first moment the cargo after an unload can be judged.
+            // the dock is the first moment the cargo after an unload can be judged. Never at index
+            // 0: that is the last stop of the lap, whose boundary already ran on arrival, and
+            // running it again here re-claimed and rewrote the same lap five seconds later.
             ProcessCurrentTruckTarget(Vehicle, TEXT("undocked"));
         }
         else if (!ResourceId.IsEmpty() && Route.Num() < 2)
@@ -2544,6 +2559,19 @@ void UDynamicTimeTableSubsystem::HandleVehicleRouteChanged(AFGWheeledVehicleIden
         {
             UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("ROUTE_RESAVED_UNCHANGED Truck='%s' Waypoints=%d"),
                 *DTSVehicleName(Vehicle), Vehicle->GetVehicleRoute().Num());
+            return;
+        }
+        // The route that was there before this mod's last write is back: the game wrote its own
+        // copy back at the end of a docking that had begun before the write (a lap is rebuilt on
+        // arrival, while docking). Not an edit - restore the lap. Nothing else is touched: the
+        // claims are still right, and adopting an (F) out of that stale route would be wrong.
+        if (Seen->LastWrittenRoute.Num() >= 2 && Seen->LastWrittenRoute != Seen->RouteBeforeLastWrite &&
+            Seen->RouteBeforeLastWrite == Vehicle->GetVehicleRoute())
+        {
+            const TArray<FGuid> Restore = Seen->LastWrittenRoute;
+            const bool bRestored = ReplaceRoute(Vehicle, Restore);
+            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("ROUTE_REVERTED_BY_GAME Truck='%s' Waypoints=%d Restored=%s Stops=%d"),
+                *DTSVehicleName(Vehicle), Vehicle->GetVehicleRoute().Num(), bRestored ? TEXT("true") : TEXT("false"), Restore.Num());
             return;
         }
     }

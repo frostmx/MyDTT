@@ -144,6 +144,12 @@ private:
         // The route as last seen, so that the game re-saving it unchanged (it does, on every
         // docking) is not mistaken for a player edit in HandleVehicleRouteChanged.
         TArray<FGuid> LastRoute;
+        // What this mod wrote last, and what the route was right before that write. The game keeps
+        // its own copy of the route across a docking and writes it back when the docking ends; a
+        // lap rebuilt while the truck was docking is reverted by that. Seeing the pre-write route
+        // come back is that revert, not a player edit, and the written route is put back.
+        TArray<FGuid> LastWrittenRoute;
+        TArray<FGuid> RouteBeforeLastWrite;
     };
     TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTTruckPollState> TruckPollStates;
     FTimerHandle TruckPollTimerHandle;
