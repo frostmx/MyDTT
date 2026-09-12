@@ -1957,6 +1957,9 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
     // while the ones before it leave something on board. A truck that empties early anyway cuts
     // the rest of the lap (CutLapIfCargoEmpty), so overshooting here costs one detour at most.
     int32 CoveredDeficit = 0;
+    FDTTDispatchTruckAnchors* Anchors = DispatchTruckAnchors.Find(Vehicle);
+    if (Anchors) Anchors->PlannedItems.Reset();
+    const int32 StackSize = FMath::Max(1, UFGItemDescriptor::GetStackSize(ItemClass));
     for (int32 Priority = 0; Priority < Candidates.Num() && Result.Num() < MaxRequestersPerLap; ++Priority)
     {
         if (Priority > 0 && CoveredDeficit >= AvailableStacks) break;
@@ -1966,6 +1969,7 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
         RequesterClaimedAtWorldSeconds.Add(Selected->DockingPathNodeGuid, ClaimedAt);
         Result.Add(Selected->DockingPathNodeGuid);
         CoveredDeficit += FMath::Max(1, Candidate.Threshold - Candidate.StockStacks);
+        if (Anchors) Anchors->PlannedItems.Add(Selected->DockingPathNodeGuid, FMath::Max(0, Candidate.Threshold - Candidate.StockStacks) * StackSize);
         UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
             TEXT("DISPATCH_CLAIMED Truck='%s' Resource='%s' Requester='%s' Guid=%s Priority=%d StockStacks=%d Threshold=%d FillRatio=%.6f"),
             *DTSVehicleName(Vehicle), *ResourceId, *Selected->DisplayName,
@@ -2603,11 +2607,11 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         // vehicle is standing on, and rewriting that waypoint would send it away again.
         if (bDocking && !Previous->bDocking)
         {
-            // With the docking hooks installed this edge has already been handled by
-            // HandleTruckDocked; the releases are idempotent and the line is there to compare
-            // the two signals in the log.
-            UE_LOG(LogDynamicTimeTableSubsystem, Log, TEXT("DOCK_POLL Truck='%s' Index=%d Docking=true ViaHook=%s"),
-                *DTSVehicleName(Vehicle), TargetIndex, Previous->bDockedViaHook ? TEXT("true") : TEXT("false"));
+            // With the docking hooks installed HandleTruckDocked has already marked the state
+            // docked and this edge never shows; it remains as the fallback for a build where the
+            // hooks did not install.
+            UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("DOCK_POLL Truck='%s' Index=%d Docking=true HooksInstalled=%s"),
+                *DTSVehicleName(Vehicle), TargetIndex, FMyDTTHooks::AreDockingHooksInstalled() ? TEXT("true") : TEXT("false"));
             ReleaseTruckBooking(Vehicle, TEXT("truck docked"));
             ReleaseRequesterClaimIfDocked(Vehicle);
         }
@@ -2664,20 +2668,20 @@ void UDynamicTimeTableSubsystem::HandleTruckDocked(AFGWheeledVehicle* Vehicle, A
     {
         State->DockedStation = Station;
         State->bDockedViaHook = true;
+        // The poll's docking edge is this event, delivered late; marking the state docked here
+        // keeps the poll from running the same edge again a second later.
+        State->bDocking = true;
     }
     if (!Identifier->IsAutopilotEnabled()) return;
 
-    // What the poll's docking edge does; both are idempotent, so the poll seeing the same edge a
-    // moment later is harmless.
     ReleaseTruckBooking(Identifier, TEXT("truck docked"));
     ReleaseRequesterClaimIfDocked(Identifier);
 
-    // Milestone 1: every docking of a truck this subsystem knows gets a pass-through plan, only
-    // so the transfer hook proves it is reached (XFER_PROBE) without changing what moves.
-    if (IsValid(Station) && State)
+    // The transfer at the end of this docking cycle moves what the lap planned, not what fits.
+    // A plan is set only for a truck this mod manages; the game's own transfer runs otherwise.
+    FDTTTransferPlan Plan;
+    if (IsValid(Station) && ComputeTransferPlan(Identifier, Station, Plan))
     {
-        FDTTTransferPlan Plan;
-        Plan.Mode = FDTTTransferPlan::EMode::PassThrough;
         FMyDTTHooks::SetTransferPlan(Station, Plan);
     }
 }
@@ -2860,6 +2864,108 @@ int32 UDynamicTimeTableSubsystem::ReadDockStockInStacks(AFGDockingStationIdentif
     if (!IsValid(Storage)) return 0;
     const int32 StackSize = FMath::Max(1, UFGItemDescriptor::GetStackSize(ItemClass));
     return Storage->GetNumItems(ItemClass) / StackSize;
+}
+
+const FDTTDispatchStation* UDynamicTimeTableSubsystem::FindDispatchStationByGuid(const FGuid& PathNodeGuid) const
+{
+    if (!PathNodeGuid.IsValid()) return nullptr;
+    return DispatchStations.FindByPredicate([&](const FDTTDispatchStation& Station)
+    {
+        return Station.DockingPathNodeGuid == PathNodeGuid;
+    });
+}
+
+bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
+    AFGWheeledVehicleIdentifier* Vehicle, AFGBuildableDockingStation* Station, FDTTTransferPlan& OutPlan) const
+{
+    OutPlan = FDTTTransferPlan();
+    if (!IsValid(Vehicle) || !IsValid(Station)) return false;
+    const AFGDockingStationIdentifier* StationIdentifier = Station->GetStationIdentifier();
+    if (!IsValid(StationIdentifier)) return false;
+    const FGuid StationGuid = StationIdentifier->GetPathNodeGUID();
+
+    const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+    const FString ResourceId = Route.Num() > 0 ? ResolveDispatchResourceFromProducer(Route[0]) : FString();
+    if (ResourceId.IsEmpty()) return false;
+
+    const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(ResourceId);
+    if (!ItemClass)
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("XFER_PLAN Truck='%s' Station='%s' Mode=PassThrough Reason=item-class-not-found Resource='%s'"),
+            *DTSVehicleName(Vehicle), *DTSDockName(StationIdentifier), *ResourceId);
+        return true;
+    }
+    const int64 StackSize = FMath::Max(1, UFGItemDescriptor::GetStackSize(ItemClass));
+    const TCHAR* Reason = TEXT("other stop");
+
+    if (StationGuid == Route[0] && Station->GetIsInLoadMode())
+    {
+        // The producer. Load only what the requesters of this lap can take: each one's deficit,
+        // read now, on top of what is already on board. A lap without a requester (no demand, the
+        // last consumer kept for the round trip) loads as the game would.
+        int64 DeficitItems = 0;
+        int32 Requesters = 0;
+        for (int32 Index = 1; Index < Route.Num(); ++Index)
+        {
+            const FDTTDispatchStation* Stop = FindDispatchStationByGuid(Route[Index]);
+            if (!Stop || !Stop->ResourceId.Equals(ResourceId, ESearchCase::IgnoreCase) ||
+                GetEffectiveDispatchRole(*Stop) != EDTTDispatchRole::Requester || !DoesDispatchStationMatchMode(*Stop))
+            {
+                continue;
+            }
+            const int32 Threshold = GetEffectiveThreshold(*Stop, ItemClass);
+            if (Threshold == INDEX_NONE) continue;
+            const int32 Stock = ReadDockStockInStacks(Stop->DockingStationIdentifier.Get(), ItemClass);
+            DeficitItems += int64(FMath::Max(0, Threshold - Stock)) * StackSize;
+            ++Requesters;
+        }
+        if (Requesters > 0)
+        {
+            AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
+            UFGInventoryComponent* Storage = IsValid(WheeledVehicle) ? WheeledVehicle->GetStorageInventory() : nullptr;
+            const int64 OnBoard = IsValid(Storage) ? Storage->GetNumItems(ItemClass) : 0;
+            int64 CapacityItems = TNumericLimits<int32>::Max();
+            if (IsValid(Storage) && Storage->GetSizeLinear() > 0)
+            {
+                CapacityItems = int64(Storage->GetSizeLinear()) * FMath::Max<int64>(1, Storage->GetSlotSize(0, ItemClass));
+            }
+            OutPlan.Mode = FDTTTransferPlan::EMode::FillTo;
+            OutPlan.ItemClass = ItemClass;
+            OutPlan.TargetItems = int32(FMath::Min<int64>(OnBoard + DeficitItems, FMath::Min<int64>(CapacityItems, TNumericLimits<int32>::Max())));
+            Reason = TEXT("producer");
+        }
+        else
+        {
+            Reason = TEXT("producer without requesters");
+        }
+    }
+    else if (const FDTTDispatchStation* Stop = FindDispatchStationByGuid(StationGuid))
+    {
+        if (Stop->ResourceId.Equals(ResourceId, ESearchCase::IgnoreCase) &&
+            GetEffectiveDispatchRole(*Stop) == EDTTDispatchRole::Requester && DoesDispatchStationMatchMode(*Stop))
+        {
+            // A requester: fill it up to its threshold and not beyond, so "(Iron-10)" really keeps
+            // ten stacks free and the truck carries the rest on to the next stop.
+            const int32 Threshold = GetEffectiveThreshold(*Stop, ItemClass);
+            if (Threshold != INDEX_NONE)
+            {
+                OutPlan.Mode = FDTTTransferPlan::EMode::FillTo;
+                OutPlan.ItemClass = ItemClass;
+                OutPlan.TargetItems = int32(FMath::Min<int64>(int64(Threshold) * StackSize, TNumericLimits<int32>::Max()));
+                Reason = TEXT("requester");
+            }
+            else
+            {
+                Reason = TEXT("requester capacity unreadable");
+            }
+        }
+    }
+
+    UE_LOG(LogDynamicTimeTableSubsystem, Log, TEXT("XFER_PLAN Truck='%s' Station='%s' Mode=%s Item=%s Target=%d Reason=%s"),
+        *DTSVehicleName(Vehicle), *DTSDockName(StationIdentifier),
+        OutPlan.Mode == FDTTTransferPlan::EMode::FillTo ? TEXT("FillTo") : OutPlan.Mode == FDTTTransferPlan::EMode::Block ? TEXT("Block") : TEXT("PassThrough"),
+        *ItemClass->GetName(), OutPlan.TargetItems, Reason);
+    return true;
 }
 
 bool UDynamicTimeTableSubsystem::ReadDockCapacityInStacks(

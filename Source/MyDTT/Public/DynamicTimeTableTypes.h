@@ -136,6 +136,12 @@ struct FDTTDispatchTruckAnchors
     // is just what this mod wrote last lap. Runtime only.
     UPROPERTY()
     bool bRouteEditedByPlayer = false;
+
+    // Requester dock GUID -> items this lap plans to leave there (deficit at planning time).
+    // Diagnostic: the transfer cap itself is recomputed from the live stock when the truck docks.
+    // Runtime only.
+    UPROPERTY()
+    TMap<FGuid, int32> PlannedItems;
 };
 
 /** One dispatch truck's anchors as stored by ADTTSaveDataActor. */

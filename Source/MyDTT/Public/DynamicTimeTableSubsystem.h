@@ -365,4 +365,13 @@ private:
      * size, not stack size, so a fluid station's single 3 200 000 L slot counts as 64 stacks.
      */
     bool ReadDockCapacityInStacks(AFGDockingStationIdentifier* Dock, TSubclassOf<class UFGItemDescriptor> ItemClass, int32& OutCapacityStacks) const;
+    const FDTTDispatchStation* FindDispatchStationByGuid(const FGuid& PathNodeGuid) const;
+    /**
+     * What the station may move to or from this truck at the end of its docking cycle, applied
+     * by the transfer hook (see MyDTTHooks). For a dispatch truck: the producer fills it up to
+     * this lap's summed requester deficits, a requester of the lap's resource is filled up to its
+     * threshold, any other stop moves what the game would. False for a truck this mod does not
+     * manage, in which case the game's own transfer runs untouched.
+     */
+    bool ComputeTransferPlan(AFGWheeledVehicleIdentifier* Vehicle, class AFGBuildableDockingStation* Station, struct FDTTTransferPlan& OutPlan) const;
 };
