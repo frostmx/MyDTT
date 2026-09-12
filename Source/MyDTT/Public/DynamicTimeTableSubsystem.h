@@ -310,6 +310,13 @@ private:
      */
     TArray<FGuid> SelectRequestersForResource(const FString& ResourceId, AFGWheeledVehicleIdentifier* Vehicle);
     /**
+     * The producer for the coming lap. With Route[0] in a [group], the group rule applied to the
+     * producer side of a dispatch lap: the LOAD producer of the same resource in that group with
+     * the fewest trucks per slot (ties: more stock, then the current one), and a booking on it
+     * until the truck docks there. Without a group, CurrentProducer unchanged.
+     */
+    FGuid ChooseProducerFromGroup(AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId, const FGuid& CurrentProducer);
+    /**
      * Position in BaseLoop for a fuel stop: the insertion with the smallest detour among those the
      * tank can reach. FallbackIndex when no leg cost is estimable or no position is reachable.
      */

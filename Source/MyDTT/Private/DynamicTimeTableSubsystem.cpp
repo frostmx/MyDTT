@@ -1274,10 +1274,10 @@ int32 UDynamicTimeTableSubsystem::GetDockAssignedCount(AFGDockingStationIdentifi
     if(!IsValid(Id))return 0;
     int32 C=0;
     for(const auto&P:TruckBookings)if(P.Key.IsValid()&&P.Value.Get()==Id)++C;
-    // Dispatch trucks never use TruckBookings (they clear it every tick - "resource dispatch" in
-    // ProcessCurrentTruckTarget), so a borrowed or dedicated (F) they currently hold has to be
-    // counted here too, or SelectBestStation would be blind to their claims on a fuel group. An own
-    // (F) counts only on laps that actually include it: the anchor outlives laps that leave it out.
+    // A dispatch truck books only its producer (ChooseProducerFromGroup), never a fuel stop, so a
+    // borrowed or dedicated (F) it currently holds has to be counted here too, or SelectBestStation
+    // would be blind to its claim on a fuel group. An own (F) counts only on laps that actually
+    // include it: the anchor outlives laps that leave it out.
     const FGuid PathNodeGuid=Id->GetPathNodeGUID();
     if(PathNodeGuid.IsValid())
         for(const auto&P:DispatchTruckAnchors)
@@ -1978,6 +1978,76 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
     return Result;
 }
 
+FGuid UDynamicTimeTableSubsystem::ChooseProducerFromGroup(
+    AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId, const FGuid& CurrentProducer)
+{
+    FDTTStationGroup* Group = FindGroupByDock(FindDockByPathNode(CurrentProducer));
+    if (!Group) return CurrentProducer;
+
+    // The truck's own booking (a producer docking that was never observed) must not weigh on the
+    // dock it is about to choose from.
+    ReleaseTruckBooking(Vehicle, TEXT("producer boundary"));
+
+    const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(ResourceId);
+    // Same tolerance as SelectBestStation: the ratio is computed, never stored, and 1/3 has to
+    // match 1/3.
+    constexpr double RatioTolerance = 1e-6;
+    const FDTTStationEntry* Best = nullptr;
+    double BestRatio = TNumericLimits<double>::Max();
+    int32 BestStock = INDEX_NONE;
+    int32 BestLoad = 0;
+    int32 Candidates = 0;
+    for (const FDTTStationEntry& Entry : Group->Stations)
+    {
+        AFGDockingStationIdentifier* Dock = Entry.DockingStationIdentifier.Get();
+        if (!IsValid(Dock) || Entry.TargetSlots <= 0) continue;
+        const FGuid Guid = Dock->GetPathNodeGUID();
+        // Only a LOAD producer of this resource can stand in for Route[0]: a member of the group
+        // that is in UNLOAD, or tagged with another resource, is not a place to load at.
+        const bool bProducer = DispatchStations.ContainsByPredicate([&](const FDTTDispatchStation& Station)
+        {
+            return Station.DockingPathNodeGuid == Guid &&
+                Station.ResourceId.Equals(ResourceId, ESearchCase::IgnoreCase) &&
+                GetEffectiveDispatchRole(Station) == EDTTDispatchRole::Producer &&
+                DoesDispatchStationMatchMode(Station);
+        });
+        if (!bProducer) continue;
+        ++Candidates;
+        const int32 Load = GetDockAssignedCount(Dock);
+        const double Ratio = double(Load) / double(Entry.TargetSlots);
+        const int32 Stock = ItemClass ? ReadDockStockInStacks(Dock, ItemClass) : 0;
+        UE_LOG(LogDynamicTimeTableSubsystem, VeryVerbose,
+            TEXT("DISPATCH_PRODUCER_CANDIDATE Truck='%s' Producer='%s' Load=%d/%d Ratio=%.3f Stock=%d"),
+            *DTSVehicleName(Vehicle), *Entry.DisplayName, Load, Entry.TargetSlots, Ratio, Stock);
+        // Load first, as in every group; a tie goes to the fuller station rather than a rotation
+        // cursor, and to the current producer when the stock ties too (no rewrite for nothing).
+        bool bBetter = Ratio < BestRatio - RatioTolerance;
+        if (!bBetter && Ratio <= BestRatio + RatioTolerance)
+        {
+            bBetter = Stock > BestStock || (Stock == BestStock && Guid == CurrentProducer);
+        }
+        if (bBetter)
+        {
+            Best = &Entry;
+            BestRatio = Ratio;
+            BestStock = Stock;
+            BestLoad = Load;
+        }
+    }
+    if (!Best) return CurrentProducer;
+
+    AFGDockingStationIdentifier* ChosenDock = Best->DockingStationIdentifier.Get();
+    const FGuid Chosen = ChosenDock->GetPathNodeGUID();
+    // Booked like any group target; released when the truck docks there (PollTruckStates).
+    TruckBookings.Add(Vehicle, ChosenDock);
+    OnGroupsChanged.Broadcast(); OnGroupsChangedNative.Broadcast();
+    UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+        TEXT("DISPATCH_PRODUCER_SELECTED Truck='%s' Resource='%s' Group='%s' Producer='%s' Changed=%s Load=%d/%d Stock=%d Candidates=%d"),
+        *DTSVehicleName(Vehicle), *ResourceId, *Group->GroupName, *Best->DisplayName,
+        Chosen != CurrentProducer ? TEXT("true") : TEXT("false"), BestLoad + 1, Best->TargetSlots, BestStock, Candidates);
+    return Chosen;
+}
+
 int32 UDynamicTimeTableSubsystem::ChooseFuelInsertIndex(
     AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& BaseLoop,
     const FGuid& FuelGuid, int32 FallbackIndex) const
@@ -2130,6 +2200,9 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
     // truck stopped refuelling for good and circled whatever the route last held.
     if (Index > 0)
     {
+        // The producer booking normally went at docking there; this closes the gap if that
+        // transition was missed, so the slot is not held for a whole lap.
+        ReleaseTruckBooking(Vehicle, TEXT("left producer"));
         // The one mid-lap decision, and it only ever shortens the route: an empty truck heading for
         // yet another requester turns back to the producer instead.
         CutLapIfCargoEmpty(Vehicle, ResourceId, Route, Index, Trigger);
@@ -2141,6 +2214,12 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
 
     FDTTDispatchTruckAnchors* Anchors = DispatchTruckAnchors.Find(Vehicle);
     if (!Anchors || !Anchors->ProducerGuid.IsValid()) return;
+
+    // With the producer in a [group], this lap loads at whichever LOAD producer of the group the
+    // group rule picks. That is this mod's own change of Route[0], not a hand edit, so the anchors
+    // follow it here and UpdateRememberedAnchors sees them agree at the next boundary.
+    const FGuid ChosenProducer = ChooseProducerFromGroup(Vehicle, ResourceId, Anchors->ProducerGuid);
+    if (ChosenProducer.IsValid() && ChosenProducer != Anchors->ProducerGuid) Anchors->ProducerGuid = ChosenProducer;
 
     // Index zero starts a new lap. A docking transition normally released the previous claim;
     // this also closes the gap if that transition was missed while the actor was not observable.
@@ -2413,7 +2492,6 @@ void UDynamicTimeTableSubsystem::ProcessCurrentTruckTarget(AFGWheeledVehicleIden
         // Dispatch and load-balancing are independent modes. Route[0], not the mutable display
         // name, opts this truck in and supplies the resource for every subsequent waypoint.
         UpdateDispatchVehicleName(Vehicle, ResourceId, Route, Index);
-        ReleaseTruckBooking(Vehicle, TEXT("resource dispatch"));
         ProcessDispatchTruckTarget(Vehicle, ResourceId, Trigger);
         return;
     }
