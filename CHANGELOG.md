@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.0
+
+- A requester's threshold is now the station's capacity: an UNLOAD station takes whatever fits,
+  so "not full" is the only demand it can express, and a neutral `(Resource)` tag requests a
+  delivery whenever the station has room. `(Resource-N)` now means capacity minus N stacks - the
+  station requests only with more than N stacks free. The old fixed defaults (10 stacks for
+  solids, 32 for fluids) are gone, and the lap's cargo deficit is exactly the room the chosen
+  stations can take. An N at or above the capacity never opens the station; that is reported
+  once per rebuild as `DISPATCH_TAG_OFFSET_EXCEEDS_CAPACITY`.
+- A producer that belongs to a `[group]` is now picked per lap by the group's balancing rule:
+  among the group's LOAD stations of the same resource, the one with the fewest trucks booked per
+  slot, ties going to the fuller station. Several loading stations of one resource thus share the
+  trucks; the truck books the chosen producer until it docks there.
+- `/dtt dispatch` shows the requester's capacity next to its stock and threshold.
+
 ## 1.0.9
 
 - A truck now serves several requesters in one lap. At the producer the dispatcher takes the most

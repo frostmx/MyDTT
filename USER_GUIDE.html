@@ -39,7 +39,7 @@
       <header>
         <div class="eyebrow">Руководство пользователя</div>
         <h1>Доставка по реальному спросу</h1>
-        <p class="lead">MyDTT автоматически строит маршрут грузовика от производителя к самым нуждающимся станциям, где запас выбранного ресурса опустился ниже заданного порога — столько станций за рейс, сколько покроет груз. Несколько грузовиков делят заявки между собой, а отдельную заправку можно сделать опциональной.</p>
+        <p class="lead">MyDTT автоматически строит маршрут грузовика от производителя к самым нуждающимся станциям, где для выбранного ресурса есть свободное место — столько станций за рейс, сколько покроет груз. Несколько грузовиков делят заявки между собой, а отдельную заправку можно сделать опциональной.</p>
         <div class="callout"><strong>Главное правило:</strong> роль станции задаётся одновременно тегом в имени и её штатным переключателем. Производитель должен быть в режиме <span class="mode load">LOAD</span>, потребитель — <span class="mode unload">UNLOAD</span>. Имя грузовика настраивать не нужно.</div>
       </header>
 
@@ -47,7 +47,7 @@
         <h2>Быстрый старт</h2>
         <div class="grid">
           <article class="card"><span class="step-number">1</span><h3>Отметьте производителя</h3><p>Добавьте тег <code>(Ресурс)</code> к станции и включите <span class="mode load">LOAD</span>. Пример: <code>НПЗ (Packaged Fuel)</code>.</p></article>
-          <article class="card"><span class="step-number">2</span><h3>Отметьте потребителей</h3><p>Используйте тот же тег на станциях <span class="mode unload">UNLOAD</span>. Порог по умолчанию — 10 полных стаков для предметов и 32 для жидкостей; <code>(Ресурс-N)</code> переопределяет его.</p></article>
+          <article class="card"><span class="step-number">2</span><h3>Отметьте потребителей</h3><p>Используйте тот же тег на станциях <span class="mode unload">UNLOAD</span>. Станция заказывает доставку, пока не полна; <code>(Ресурс-N)</code> — только пока свободно больше N стаков.</p></article>
           <article class="card"><span class="step-number">3</span><h3>Запишите производителя первым</h3><p>Первая станция, <code>Route[0]</code>, всегда производитель. Именно из её тега MyDTT узнаёт ресурс; исходное имя грузовика не имеет значения.</p></article>
           <article class="card"><span class="step-number">4</span><h3>Включите автопилот</h3><p>MyDTT добавит нужного потребителя сам и назовёт машину по шаблону <code>Ресурс → Текущая станция</code>. Заправка <code>(F)</code> необязательна.</p></article>
         </div>
@@ -59,15 +59,15 @@
           <thead><tr><th>Имя</th><th>Режим</th><th>Назначение</th></tr></thead>
           <tbody>
             <tr><td><code>НПЗ (Packaged Fuel)</code></td><td><span class="mode load">LOAD</span></td><td>Производитель ресурса. Он должен быть первым пунктом базового маршрута.</td></tr>
-            <tr><td><code>Склад А (Packaged Fuel)</code></td><td><span class="mode unload">UNLOAD</span></td><td>Потребитель открыт для доставки, пока в станции меньше 10 полных стаков.</td></tr>
-            <tr><td><code>Склад B (Packaged Fuel-25)</code></td><td><span class="mode unload">UNLOAD</span></td><td>Потребитель с явным порогом: доставка нужна ниже 25 полных стаков.</td></tr>
+            <tr><td><code>Склад А (Packaged Fuel)</code></td><td><span class="mode unload">UNLOAD</span></td><td>Потребитель открыт для доставки, пока станция не полна (48 стаков у обычной, 64 у жидкостной).</td></tr>
+            <tr><td><code>Склад B (Packaged Fuel-25)</code></td><td><span class="mode unload">UNLOAD</span></td><td>Потребитель со смещением: доставка нужна, только когда свободно больше 25 стаков, то есть при запасе ниже 48 − 25 = 23 стаков.</td></tr>
             <tr><td><code>АЗС (F)</code></td><td>любой</td><td>Необязательная выделенная заправка. Тег ровно <code>(F)</code>, без имени ресурса.</td></tr>
           </tbody>
         </table>
         <div class="callout"><strong>Один тег — две роли.</strong> Для нейтрального <code>(Ресурс)</code> штатный переключатель определяет роль: LOAD — производитель, UNLOAD — потребитель. Переключение применяется без переименования.</div>
         <div class="callout"><strong>Можно использовать своё имя ресурса.</strong> Если оно не совпадает с языком dedicated server, MyDTT определяет предмет по содержимому LOAD-производителя. На таком производителе должен находиться ровно один вид груза.</div>
         <div class="callout warning"><strong>Старый синтаксис поддерживается.</strong> Явный <code>(Ресурс+)</code> работает только с LOAD, а <code>(Ресурс-N)</code> — только с UNLOAD. При противоречии станция игнорируется.</div>
-        <p>Количество предметов считается в <strong>полных стаках</strong>: неполный остаток округляется вниз. Порог относится к складу станции, а не к инвентарю грузовика.</p>
+        <p>Количество предметов считается в <strong>полных стаках</strong>: неполный остаток округляется вниз. Порог — это ёмкость склада станции в стаках ресурса минус N из тега; он относится к складу станции, а не к инвентарю грузовика. Станция не умеет принять «ровно N», она забирает всё, что влезает, поэтому нехватка (порог минус запас) — это ровно то место, куда грузовик разгрузится. N не меньше ёмкости — станция не откроется никогда, в логе <code>DISPATCH_TAG_OFFSET_EXCEEDS_CAPACITY</code>.</p>
       </section>
 
       <section id="route">
@@ -108,19 +108,20 @@
         <div class="grid">
           <article class="example"><h3>Простая доставка</h3><p><code>Шахта (Iron Ore)</code> <span class="mode load">LOAD</span><br><code>Литейная (Iron Ore)</code> <span class="mode unload">UNLOAD</span></p><p>Начальный маршрут: только <code>Шахта</code>. Имя машины станет <code>Iron Ore → Шахта</code>, затем <code>Iron Ore → Литейная</code>.</p></article>
           <article class="example"><h3>С отдельной заправкой</h3><p><code>НПЗ (Packaged Fuel)</code> <span class="mode load">LOAD</span><br><code>Удалённый склад (Packaged Fuel-12)</code> <span class="mode unload">UNLOAD</span><br><code>Дорожная АЗС (F)</code></p><p>База: <code>НПЗ → АЗС</code>; склад добавляется по спросу. Исходное имя грузовика может быть любым.</p></article>
-          <article class="example"><h3>Несколько потребителей</h3><p><code>Склад A (Iron Ore-10)</code>: 2 стака<br><code>Склад B (Iron Ore-20)</code>: 8 стаков<br>Грузовик на 48 стаков</p><p>Отношения: <code>2/10 = 0.2</code> и <code>8/20 = 0.4</code>. Первым идёт склад A (нехватка 8), его одного грузу мало — добавляется склад B (нехватка 12). Круг: <code>Producer → A → B</code>. Опустеет после A — вернётся к Producer, не заезжая на B.</p></article>
+          <article class="example"><h3>Несколько потребителей</h3><p><code>Склад A (Iron Ore)</code>: 30 стаков из 48<br><code>Склад B (Iron Ore-20)</code>: 8 стаков из 48, порог 28<br>Грузовик на 25 стаков</p><p>Отношения: <code>30/48 = 0.63</code> и <code>8/28 = 0.29</code>. Первым идёт склад B (нехватка 20), его одного грузу мало — добавляется склад A (нехватка 18). Круг: <code>Producer → B → A</code>. Опустеет после B — вернётся к Producer, не заезжая на A.</p></article>
+          <article class="example"><h3>Несколько производителей</h3><p><code>Медь 1 (Copper Ore) [медь]</code>, <code>Медь 2 (Copper Ore) [медь]</code>, <code>Медь 3 (Copper Ore) [медь,2]</code> — все <span class="mode load">LOAD</span></p><p>В маршруте грузовика первой стоит любая из них. На границе каждого круга производитель выбирается по правилу групп: меньше всего грузовиков на слот, при равенстве — где больше запаса. Выбранная станция бронируется до стыковки, как у обычных групп.</p></article>
           <article class="example"><h3>Несколько грузовиков</h3><p>У обоих грузовиков первым пунктом стоит LOAD-производитель <code>(Iron Ore)</code>. Первый закрепляет за собой лучшие заявки на свой рейс. Второй видит только ещё не закреплённых потребителей и берёт следующих.</p></article>
         </div>
       </section>
 
       <section id="diagnostics">
         <h2>Команды и диагностика</h2>
-        <table><thead><tr><th>Команда чата</th><th>Что делает</th></tr></thead><tbody><tr><td><code>/dtt</code></td><td>Открывает интерфейс MyDTT.</td></tr><tr><td><code>/dtt groups</code></td><td>Показывает распознанные группы станций.</td></tr><tr><td><code>/dtt dispatch [ресурс]</code></td><td>Показывает станции диспетчера, режим, запас, порог, открытые заявки и закрепивший грузовик, а также каждый грузовик диспетчера с его маршрутом, целью и грузом. С аргументом — только строки этого ресурса, без секции заправок.</td></tr><tr><td><code>/dtt recalc</code></td><td>Пересчитывает активные бронирования групп.</td></tr></tbody></table>
+        <table><thead><tr><th>Команда чата</th><th>Что делает</th></tr></thead><tbody><tr><td><code>/dtt</code></td><td>Открывает интерфейс MyDTT.</td></tr><tr><td><code>/dtt groups</code></td><td>Показывает распознанные группы станций.</td></tr><tr><td><code>/dtt dispatch [ресурс]</code></td><td>Показывает станции диспетчера, режим, запас, порог и ёмкость, открытые заявки и закрепивший грузовик, а также каждый грузовик диспетчера с его маршрутом, целью и грузом. С аргументом — только строки этого ресурса, без секции заправок.</td></tr><tr><td><code>/dtt recalc</code></td><td>Пересчитывает активные бронирования групп.</td></tr></tbody></table>
         <div class="terminal" role="region" aria-label="Пример вывода команды dtt dispatch"><pre><span class="prompt">/dtt dispatch</span>
 dTT dispatch: stations=3 fuel-stops=1 active-claims=1
 Packaged Fuel | Producer  | НПЗ     | mode=LOAD   active=yes | stock=42 stacks
-Packaged Fuel | Requester | Склад A | mode=UNLOAD active=yes | stock=2/10 open=yes | claim=Truck 1
-Packaged Fuel | Requester | Склад B | mode=UNLOAD active=yes | stock=13/10 open=no | claim=free
+Packaged Fuel | Requester | Склад A | mode=UNLOAD active=yes | stock=2/48 cap=48 open=yes | claim=Truck 1
+Packaged Fuel | Requester | Склад B | mode=UNLOAD active=yes | stock=45/48 cap=48 open=no | claim=free
 Packaged Fuel | Truck | Packaged Fuel → Склад A | route=[НПЗ > Склад A] target=1 | cargo=25/25 stacks
 Fuel (F) | Дорожная АЗС | guid=…</pre></div>
       </section>
@@ -128,14 +129,14 @@ Fuel (F) | Дорожная АЗС | guid=…</pre></div>
       <section id="troubleshooting">
         <h2>Если грузовик не перестраивает маршрут</h2>
         <ol class="checklist">
-          <li>Убедитесь, что Producer с тегом ресурса записан первым пунктом маршрута; исходное имя машины не используется.</li><li>Проверьте переключатель станции: Producer — <span class="mode load">LOAD</span>, Requester — <span class="mode unload">UNLOAD</span>.</li><li>Остальные станции можно не добавлять вручную: потребителя выберет диспетчер.</li><li>Дождитесь возвращения к цели с индексом <code>0</code>: посреди рейса маршрут специально не меняется.</li><li>Выполните <code>/dtt dispatch</code> и проверьте поля <code>active</code>, <code>stock</code>, <code>open</code> и <code>claim</code>.</li><li>Если используется локализованное или своё имя ресурса, убедитесь, что LOAD-производитель содержит один вид груза. Жидкости поддерживаются: жидкостный грузовик и жидкостная станция считаются в «стаках» по 50 м³ (станция вмещает 64), порог по умолчанию для жидкости — 32 стака, то есть 1 600 м³.</li>
+          <li>Убедитесь, что Producer с тегом ресурса записан первым пунктом маршрута; исходное имя машины не используется.</li><li>Проверьте переключатель станции: Producer — <span class="mode load">LOAD</span>, Requester — <span class="mode unload">UNLOAD</span>.</li><li>Остальные станции можно не добавлять вручную: потребителя выберет диспетчер.</li><li>Дождитесь возвращения к цели с индексом <code>0</code>: посреди рейса маршрут специально не меняется.</li><li>Выполните <code>/dtt dispatch</code> и проверьте поля <code>active</code>, <code>stock</code>, <code>open</code> и <code>claim</code>.</li><li>Если используется локализованное или своё имя ресурса, убедитесь, что LOAD-производитель содержит один вид груза. Жидкости поддерживаются: жидкостный грузовик и жидкостная станция считаются в «стаках» по 50 м³ (станция вмещает 64), так что порог по умолчанию у жидкостной станции — 64 стака, то есть 3 200 м³, а <code>(Нефть-16)</code> откроет её при запасе ниже 2 400 м³.</li>
         </ol>
       </section>
 
       <section>
         <h2>Существующий интерфейс расписаний</h2><p>Диспетчер ресурсов дополняет прежнюю систему групп и динамических расписаний. Короткая демонстрация основного интерфейса:</p><img class="media" src="media/screenshots/DTT_Main.gif" alt="Анимация основного интерфейса MyDTT">
       </section>
-      <footer>MyDTT 1.0.9 · персональная сборка · работает локально без подключения к интернету.</footer>
+      <footer>MyDTT 1.1.0 · персональная сборка · работает локально без подключения к интернету.</footer>
     </main>
   </div>
   <script>
