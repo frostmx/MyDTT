@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.8
+
+- A fuel stop borrowed for a low tank is now visited right after the producer instead of at the
+  end of the lap. Before, a truck flagged low could be asked to finish its whole delivery lap
+  before reaching the pump, and could run dry on the way.
+
 ## 1.0.7
 
 - Fixed trucks with their own `(F)` stopping refuelling for good, and trucks with no open request
