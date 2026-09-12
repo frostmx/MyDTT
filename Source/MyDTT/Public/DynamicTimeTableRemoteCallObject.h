@@ -3,16 +3,31 @@
 #include "FGRemoteCallObject.h"
 #include "DynamicTimeTableTypes.h"
 #include "DynamicTimeTableRemoteCallObject.generated.h"
+/** Which parts of the snapshot a request asks for; the window asks only for its open tab. */
+namespace EDTTSnapshotSection
+{
+    enum Type : int32
+    {
+        None = 0,
+        Groups = 1,
+        Dispatch = 2,
+        Trucks = 4,
+    };
+}
 USTRUCT(BlueprintType)
 struct FDTTClientSnapshot
 {
     GENERATED_BODY()
-    UPROPERTY(BlueprintReadOnly) int32 ProtocolVersion = 4;
+    UPROPERTY(BlueprintReadOnly) int32 ProtocolVersion = 5;
     UPROPERTY(BlueprintReadOnly) int32 Revision = 0;
+    // EDTTSnapshotSection bits this snapshot carries; the client keeps the other sections it has.
+    UPROPERTY(BlueprintReadOnly) int32 Sections = 0;
     UPROPERTY(BlueprintReadOnly) TArray<FDTTStationGroup> Groups;
     UPROPERTY(BlueprintReadOnly) TArray<FString> AvailableStations;
     UPROPERTY(BlueprintReadOnly) TArray<FString> AvailableTruckStations;
     UPROPERTY(BlueprintReadOnly) TArray<FDTTStationRuntimeLoad> RuntimeLoads;
+    UPROPERTY(BlueprintReadOnly) TArray<FDTTDispatchRow> DispatchRows;
+    UPROPERTY(BlueprintReadOnly) TArray<FDTTTruckRow> TruckRows;
 };
 DECLARE_MULTICAST_DELEGATE(FDTTClientSnapshotChanged);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FDTTClientOperationResult, bool, const FString&);
@@ -22,12 +37,15 @@ class MYDTT_API UDynamicTimeTableRemoteCallObject : public UFGRemoteCallObject
     GENERATED_BODY()
 public:
     // 4: groups come from tags in the station names, and every edit is a rename.
-    static constexpr int32 ProtocolVersion = 4;
+    // 5: sectioned snapshots with the dispatch and truck rows.
+    static constexpr int32 ProtocolVersion = 5;
+    // A section is cut here so that the whole snapshot stays well under the 64 KB reliable bunch.
+    static constexpr int32 MaxSnapshotRows = 400;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     const FDTTClientSnapshot& GetSnapshot() const { return CachedSnapshot; }
     FDTTClientSnapshotChanged OnSnapshotChanged;
     FDTTClientOperationResult OnOperationResult;
-    void RequestSnapshot();
+    void RequestSnapshot(int32 Sections = EDTTSnapshotSection::Groups);
     void RequestCreateGroup(const FString& GroupName, EDTTGroupKind Kind);
     void RequestRenameGroup(FGuid GroupId, const FString& NewName);
     void RequestDeleteGroup(FGuid GroupId);
@@ -40,7 +58,7 @@ public:
 private:
     UPROPERTY(Replicated) bool bReplicationAnchor = true;
     UPROPERTY() FDTTClientSnapshot CachedSnapshot;
-    UFUNCTION(Server, Reliable) void Server_RequestSnapshot(int32 ClientProtocol);
+    UFUNCTION(Server, Reliable) void Server_RequestSnapshot(int32 ClientProtocol, int32 Sections);
     UFUNCTION(Server, Reliable) void Server_CreateGroup(const FString& GroupName, EDTTGroupKind Kind, int32 ClientProtocol);
     UFUNCTION(Server, Reliable) void Server_RenameGroup(FGuid GroupId, const FString& NewName, int32 ClientProtocol);
     UFUNCTION(Server, Reliable) void Server_DeleteGroup(FGuid GroupId, int32 ClientProtocol);
@@ -51,7 +69,7 @@ private:
     UFUNCTION(Client, Reliable) void Client_ReceiveSnapshot(const FDTTClientSnapshot& Snapshot);
     UFUNCTION(Client, Reliable) void Client_OperationResult(bool bSuccess, const FString& Message);
     bool Check(int32 ClientProtocol);
-    void SendSnapshot();
+    void SendSnapshot(int32 Sections);
     void StartLiveUpdates();
     void PollLiveSnapshot();
 

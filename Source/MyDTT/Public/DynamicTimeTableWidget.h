@@ -11,6 +11,7 @@ class UEditableTextBox;
 class UScrollBox;
 class USpinBox;
 class UTextBlock;
+class UWidgetSwitcher;
 class UDynamicTimeTableRemoteCallObject;
 
 UCLASS(NotBlueprintable)
@@ -30,7 +31,23 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table")
     void RefreshData();
 
+    /** EDTTSnapshotSection bits the open tab needs; the RCO's live poll asks for exactly these. */
+    int32 GetRequestedSections() const;
+
 private:
+    // Tabs: 0 groups (editor + booking status), 1 dispatch stations, 2 trucks.
+    UPROPERTY() TObjectPtr<UWidgetSwitcher> Pages;
+    UPROPERTY() TObjectPtr<UButton> GroupsTabButton;
+    UPROPERTY() TObjectPtr<UButton> DispatchTabButton;
+    UPROPERTY() TObjectPtr<UButton> TrucksTabButton;
+    UPROPERTY() TObjectPtr<UScrollBox> DispatchScrollBox;
+    UPROPERTY() TObjectPtr<UScrollBox> TruckScrollBox;
+    UPROPERTY() TArray<TObjectPtr<UTextBlock>> DispatchRowTexts;
+    UPROPERTY() TArray<TObjectPtr<UTextBlock>> TruckRowTexts;
+    TArray<FString> DispatchRowKeys;
+    TArray<FString> TruckRowKeys;
+    int32 ActiveTab = 0;
+
     UPROPERTY() TObjectPtr<UScrollBox> GroupScrollBox;
     UPROPERTY() TObjectPtr<UTextBlock> SummaryText;
     UPROPERTY() TObjectPtr<UTextBlock> EditorStatusText;
@@ -75,6 +92,11 @@ private:
     void BuildEditorPanel(class UVerticalBox* Main);
     void CloseWindow();
     void RefreshRuntimeDisplay();
+    void SetActiveTab(int32 Tab);
+    void RefreshDispatchDisplay();
+    void RefreshTruckDisplay();
+    void RefreshRowList(UScrollBox* Box, TArray<TObjectPtr<UTextBlock>>& Texts, TArray<FString>& Keys,
+        const TArray<FString>& NewKeys, const TArray<FString>& Lines, const TArray<FLinearColor>& Colors);
     void RebuildRuntimeDisplay();
     void UpdateRuntimeDisplayInPlace();
     bool RuntimeLayoutMatches() const;
@@ -88,6 +110,9 @@ private:
     void HandleRemoteResult(bool bSuccess, const FString& Message);
 
     UFUNCTION() void HandleCloseClicked();
+    UFUNCTION() void HandleGroupsTabClicked();
+    UFUNCTION() void HandleDispatchTabClicked();
+    UFUNCTION() void HandleTrucksTabClicked();
     UFUNCTION() void HandleRecalculateClicked();
     UFUNCTION() void HandleCreateGroupClicked();
     UFUNCTION() void HandleRenameGroupClicked();

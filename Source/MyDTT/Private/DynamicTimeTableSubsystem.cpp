@@ -754,118 +754,35 @@ void UDynamicTimeTableSubsystem::GetDispatchStatusLines(TArray<FString>& OutLine
 {
     OutLines.Reset();
     OutLines.Add(ResourceFilter.IsEmpty()
-        ? FString::Printf(TEXT("dTT dispatch: stations=%d fuel-stops=%d active-claims=%d"),
-            DispatchStations.Num(), DispatchFuelStopGuids.Num(), RequesterClaims.Num())
+        ? FString::Printf(TEXT("dTT dispatch: stations=%d fuel-stops=%d depots=%d active-claims=%d pool=%d"),
+            DispatchStations.Num(), DispatchFuelStopGuids.Num(), DispatchDepotGuids.Num(), RequesterClaims.Num(), PoolTrucks.Num())
         : FString::Printf(TEXT("dTT dispatch: resource='%s'"), *ResourceFilter));
 
-    TArray<FDTTDispatchStation> Stations = DispatchStations;
-    if (!ResourceFilter.IsEmpty())
+    // Stations, then depots and fuel stops (only without a filter: they are not tied to one
+    // resource and chat has no scrollback to spare), then the trucks - one line each, the route
+    // being the only place a multi-stop lap or a cut lap can be seen from chat.
+    TArray<FDTTDispatchRow> Rows;
+    BuildDispatchRows(Rows, ResourceFilter);
+    int32 Stations = 0;
+    for (const FDTTDispatchRow& Row : Rows)
     {
-        Stations.RemoveAll([&](const FDTTDispatchStation& Station)
-        {
-            return !Station.ResourceId.Equals(ResourceFilter, ESearchCase::IgnoreCase);
-        });
+        if (!Row.bDepot && !Row.bFuelStop) ++Stations;
+        OutLines.Add(FormatDispatchRow(Row));
     }
-    Stations.Sort([](const FDTTDispatchStation& A, const FDTTDispatchStation& B)
-    {
-        const int32 ResourceCompare = A.ResourceId.Compare(B.ResourceId, ESearchCase::IgnoreCase);
-        if (ResourceCompare != 0) return ResourceCompare < 0;
-        if (A.Role != B.Role) return static_cast<uint8>(A.Role) < static_cast<uint8>(B.Role);
-        return A.DisplayName < B.DisplayName;
-    });
+    TArray<FDTTTruckRow> Trucks;
+    BuildTruckRows(Trucks, ResourceFilter);
+    for (const FDTTTruckRow& Row : Trucks) OutLines.Add(FormatTruckRow(Row));
 
-    for (const FDTTDispatchStation& Station : Stations)
-    {
-        const AFGDockingStationIdentifier* Identifier = Station.DockingStationIdentifier.Get();
-        const AFGBuildableDockingStation* Dock = IsValid(Identifier) ? Identifier->GetStation() : nullptr;
-        const TCHAR* ActualMode = !IsValid(Dock) ? TEXT("unavailable")
-            : (Dock->GetIsInLoadMode() ? TEXT("LOAD") : TEXT("UNLOAD"));
-        const bool bModeMatches = DoesDispatchStationMatchMode(Station);
-        const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(Station.ResourceId);
-        const int32 StockStacks = ItemClass
-            ? ReadDockStockInStacks(Station.DockingStationIdentifier.Get(), ItemClass) : INDEX_NONE;
-        const int32 Threshold = GetEffectiveThreshold(Station, ItemClass);
-        const FString BaseName = StripDispatchTag(Station.DisplayName);
-
-        const EDTTDispatchRole EffectiveRole = GetEffectiveDispatchRole(Station);
-        if (EffectiveRole == EDTTDispatchRole::Producer)
-        {
-            OutLines.Add(FString::Printf(
-                TEXT("%s | Producer | %s | mode=%s active=%s | stock=%s"),
-                *Station.ResourceId, *BaseName, ActualMode, bModeMatches ? TEXT("yes") : TEXT("no"),
-                StockStacks >= 0 ? *FString::Printf(TEXT("%d stacks"), StockStacks) : TEXT("unknown")));
-            continue;
-        }
-
-        FString Claim = TEXT("free");
-        if (const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Owner =
-            RequesterClaims.Find(Station.DockingPathNodeGuid))
-        {
-            Claim = Owner->IsValid() ? DTSVehicleName(Owner->Get()) : TEXT("<invalid vehicle>");
-        }
-        int32 Capacity = INDEX_NONE;
-        if (ItemClass) ReadDockCapacityInStacks(Station.DockingStationIdentifier.Get(), ItemClass, Capacity);
-        const bool bOpen = bModeMatches && StockStacks >= 0 && Threshold > 0 && StockStacks < Threshold;
-        OutLines.Add(FString::Printf(
-            TEXT("%s | Requester | %s | mode=%s active=%s | stock=%s/%s cap=%s open=%s | claim=%s"),
-            *Station.ResourceId, *BaseName, ActualMode, bModeMatches ? TEXT("yes") : TEXT("no"),
-            StockStacks >= 0 ? *FString::FromInt(StockStacks) : TEXT("unknown"),
-            Threshold >= 0 ? *FString::FromInt(Threshold) : TEXT("?"),
-            Capacity >= 0 ? *FString::FromInt(Capacity) : TEXT("?"),
-            bOpen ? TEXT("yes") : TEXT("no"), *Claim));
-    }
-
-    // One line per dispatch truck: its lap as written, where it is heading, and what is on board -
-    // the route is the only place a multi-stop lap or a cut lap can be seen from chat.
-    auto ShortDockName = [&](const FGuid& Guid) -> FString { return DockDisplayName(Guid); };
-    for (const auto& Pair : DispatchTruckAnchors)
-    {
-        AFGWheeledVehicleIdentifier* Vehicle = Pair.Key.Get();
-        if (!IsValid(Vehicle)) continue;
-        const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
-        const FString ResourceId = Route.Num() > 0 ? ResolveDispatchResourceFromProducer(Route[0]) : FString();
-        if (ResourceId.IsEmpty()) continue;
-        if (!ResourceFilter.IsEmpty() && !ResourceId.Equals(ResourceFilter, ESearchCase::IgnoreCase)) continue;
-
-        TArray<FString> Stops;
-        for (const FGuid& Node : Route) Stops.Add(ShortDockName(Node));
-        int32 CapacityStacks = 0, OnBoardStacks = 0;
-        const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(ResourceId);
-        const bool bCargoKnown = EstimateTruckCargoStacks(Vehicle, ItemClass, CapacityStacks, OnBoardStacks);
-        OutLines.Add(FString::Printf(
-            TEXT("%s | Truck | %s | route=[%s] target=%d%s | cargo=%s"),
-            *ResourceId, *DTSVehicleName(Vehicle), *FString::Join(Stops, TEXT(" > ")),
-            Vehicle->GetCurrentTargetWaypointIndex(), Vehicle->IsAutopilotEnabled() ? TEXT("") : TEXT(" autopilot=off"),
-            bCargoKnown ? *FString::Printf(TEXT("%d/%d stacks"), OnBoardStacks, CapacityStacks) : TEXT("unknown")));
-    }
-
-    // Fuel stops aren't tied to one resource - every dispatch truck can borrow any of them - so a
-    // per-resource filter drops this section too, since it is the same regardless of which
-    // resource was asked about and chat has no scrollback to spare on it.
-    if (ResourceFilter.IsEmpty())
-    {
-        TArray<FGuid> FuelStops = DispatchFuelStopGuids.Array();
-        FuelStops.Sort([](const FGuid& A, const FGuid& B){ return A.ToString() < B.ToString(); });
-        for (const FGuid& FuelGuid : FuelStops)
-        {
-            const AFGDockingStationIdentifier* FuelDock = FindDockByPathNode(FuelGuid);
-            const FString Name = IsValid(FuelDock)
-                ? FuelDock->GetStationName().ToString() : TEXT("<missing dock>");
-            OutLines.Add(FString::Printf(TEXT("Fuel (F) | %s | guid=%s"),
-                *Name, *FuelGuid.ToString()));
-        }
-    }
-
-    if (!ResourceFilter.IsEmpty() && Stations.Num() == 0)
+    if (!ResourceFilter.IsEmpty() && Stations == 0)
     {
         OutLines.Add(FString::Printf(
             TEXT("No dispatch stations tagged with resource '%s'."), *ResourceFilter));
     }
-    else if (DispatchStations.Num() == 0 && DispatchFuelStopGuids.Num() == 0)
+    else if (DispatchStations.Num() == 0 && DispatchFuelStopGuids.Num() == 0 && DispatchDepotGuids.Num() == 0)
     {
         OutLines.Add(TEXT("No dispatch tags. Use (Resource) on LOAD/UNLOAD stations - an UNLOAD station "
             "requests while it is not full; optional (Resource-N) requests only with more than N stacks "
-            "free - and optional (F) on a fuel stop."));
+            "free - optional (F) on a fuel stop, and (D) on a depot where pool trucks wait."));
     }
 }
 
@@ -3947,4 +3864,264 @@ bool UDynamicTimeTableSubsystem::CommandReleaseTruck(const FString& TruckQuery, 
     }
     OutMessage = FString::Printf(TEXT("dTT: '%s' released; it drives one loop and parks again at %s."), *DTSVehicleName(Vehicle), *DockDisplayName(State->DepotGuid));
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Rows for the Dispatch and Trucks tabs, the chat listings and the RCO snapshot. Built here so
+// that every view shows the same thing; formatting is static so the client can format a
+// snapshot row without a subsystem.
+// ---------------------------------------------------------------------------
+
+FString UDynamicTimeTableSubsystem::PhaseLabel(EDTTTruckPhase Phase)
+{
+    switch (Phase)
+    {
+    case EDTTTruckPhase::ToDepot: return TEXT("ToDepot");
+    case EDTTTruckPhase::Parked: return TEXT("Parked");
+    case EDTTTruckPhase::Assigned: return TEXT("Assigned");
+    case EDTTTruckPhase::Manual: return TEXT("Manual");
+    default: return TEXT("Unmanaged");
+    }
+}
+
+void UDynamicTimeTableSubsystem::BuildDispatchRows(TArray<FDTTDispatchRow>& OutRows, const FString& ResourceFilter) const
+{
+    OutRows.Reset();
+    TArray<FDTTDispatchStation> Stations = DispatchStations;
+    if (!ResourceFilter.IsEmpty())
+    {
+        Stations.RemoveAll([&](const FDTTDispatchStation& Station)
+        {
+            return !Station.ResourceId.Equals(ResourceFilter, ESearchCase::IgnoreCase);
+        });
+    }
+    Stations.Sort([](const FDTTDispatchStation& A, const FDTTDispatchStation& B)
+    {
+        const int32 ResourceCompare = A.ResourceId.Compare(B.ResourceId, ESearchCase::IgnoreCase);
+        if (ResourceCompare != 0) return ResourceCompare < 0;
+        if (A.Role != B.Role) return static_cast<uint8>(A.Role) < static_cast<uint8>(B.Role);
+        return A.DisplayName < B.DisplayName;
+    });
+
+    for (const FDTTDispatchStation& Station : Stations)
+    {
+        const AFGDockingStationIdentifier* Identifier = Station.DockingStationIdentifier.Get();
+        const AFGBuildableDockingStation* Dock = IsValid(Identifier) ? Identifier->GetStation() : nullptr;
+        const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(Station.ResourceId);
+
+        FDTTDispatchRow& Row = OutRows.AddDefaulted_GetRef();
+        Row.ResourceId = Station.ResourceId;
+        Row.StationName = StripDispatchTag(Station.DisplayName);
+        Row.DockingPathNodeGuid = Station.DockingPathNodeGuid;
+        Row.Role = GetEffectiveDispatchRole(Station);
+        Row.bModeKnown = IsValid(Dock);
+        Row.bLoadMode = IsValid(Dock) && Dock->GetIsInLoadMode();
+        Row.bModeMatches = DoesDispatchStationMatchMode(Station);
+        Row.StockStacks = ItemClass ? ReadDockStockInStacks(Station.DockingStationIdentifier.Get(), ItemClass) : INDEX_NONE;
+        Row.ThresholdStacks = GetEffectiveThreshold(Station, ItemClass);
+        if (ItemClass) ReadDockCapacityInStacks(Station.DockingStationIdentifier.Get(), ItemClass, Row.CapacityStacks);
+        if (Row.Role == EDTTDispatchRole::Producer) continue;
+
+        Row.bOpen = Row.bModeMatches && Row.StockStacks >= 0 && Row.ThresholdStacks > 0 && Row.StockStacks < Row.ThresholdStacks;
+        if (const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Owner = RequesterClaims.Find(Station.DockingPathNodeGuid))
+        {
+            AFGWheeledVehicleIdentifier* Vehicle = Owner->Get();
+            Row.ClaimOwner = IsValid(Vehicle) ? DTSVehicleName(Vehicle) : TEXT("<invalid vehicle>");
+            // What the claiming truck's lap planned to leave here, in the row's stacks unit.
+            const int32* PlannedItems = nullptr;
+            if (const FDTTPoolTruckState* Pool = PoolTrucks.Find(Vehicle)) PlannedItems = Pool->PlannedItems.Find(Station.DockingPathNodeGuid);
+            else if (const FDTTDispatchTruckAnchors* Anchors = DispatchTruckAnchors.Find(Vehicle)) PlannedItems = Anchors->PlannedItems.Find(Station.DockingPathNodeGuid);
+            if (PlannedItems && ItemClass)
+            {
+                Row.PlannedStacks = *PlannedItems / FMath::Max(1, UFGItemDescriptor::GetStackSize(ItemClass));
+            }
+        }
+    }
+
+    // Depots and fuel stops belong to no resource, so a per-resource listing leaves them out.
+    if (!ResourceFilter.IsEmpty()) return;
+    TArray<FGuid> Depots = DispatchDepotGuids.Array();
+    Depots.Sort([](const FGuid& A, const FGuid& B) { return A.ToString() < B.ToString(); });
+    for (const FGuid& Depot : Depots)
+    {
+        const AFGDockingStationIdentifier* Dock = FindDockByPathNode(Depot);
+        const AFGBuildableDockingStation* Station = IsValid(Dock) ? Dock->GetStation() : nullptr;
+        FDTTDispatchRow& Row = OutRows.AddDefaulted_GetRef();
+        Row.bDepot = true;
+        Row.StationName = DockDisplayName(Depot);
+        Row.DockingPathNodeGuid = Depot;
+        Row.bModeKnown = IsValid(Station);
+        Row.bModeMatches = true;
+        if (const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Claim = DepotClaims.Find(Depot))
+        {
+            Row.ClaimOwner = Claim->IsValid() ? DTSVehicleName(Claim->Get()) : TEXT("<invalid vehicle>");
+        }
+        FString Docked = TEXT("-");
+        if (IsValid(Station))
+        {
+            if (const AFGWheeledVehicle* DockedVehicle = Cast<AFGWheeledVehicle>(Station->GetDockedActor()))
+                Docked = DTSVehicleName(DockedVehicle->GetVehicleIdentifier());
+        }
+        Row.Note = FString::Printf(TEXT("docked=%s held=%s"), *Docked,
+            IsValid(Station) && FMyDTTHooks::IsHeld(Station) ? TEXT("yes") : TEXT("no"));
+    }
+    TArray<FGuid> FuelStops = DispatchFuelStopGuids.Array();
+    FuelStops.Sort([](const FGuid& A, const FGuid& B) { return A.ToString() < B.ToString(); });
+    for (const FGuid& FuelGuid : FuelStops)
+    {
+        const AFGDockingStationIdentifier* FuelDock = FindDockByPathNode(FuelGuid);
+        FDTTDispatchRow& Row = OutRows.AddDefaulted_GetRef();
+        Row.bFuelStop = true;
+        Row.StationName = IsValid(FuelDock) ? FuelDock->GetStationName().ToString() : TEXT("<missing dock>");
+        Row.DockingPathNodeGuid = FuelGuid;
+        Row.bModeKnown = IsValid(FuelDock);
+        Row.bModeMatches = true;
+        Row.Note = FString::Printf(TEXT("guid=%s"), *FuelGuid.ToString());
+    }
+}
+
+FString UDynamicTimeTableSubsystem::FormatDispatchRow(const FDTTDispatchRow& Row)
+{
+    if (Row.bDepot)
+    {
+        return FString::Printf(TEXT("Depot (D) | %s | claim=%s | %s"),
+            *Row.StationName, Row.ClaimOwner.IsEmpty() ? TEXT("free") : *Row.ClaimOwner, *Row.Note);
+    }
+    if (Row.bFuelStop)
+    {
+        return FString::Printf(TEXT("Fuel (F) | %s | %s"), *Row.StationName, *Row.Note);
+    }
+    const TCHAR* ActualMode = !Row.bModeKnown ? TEXT("unavailable") : (Row.bLoadMode ? TEXT("LOAD") : TEXT("UNLOAD"));
+    if (Row.Role == EDTTDispatchRole::Producer)
+    {
+        return FString::Printf(TEXT("%s | Producer | %s | mode=%s active=%s | stock=%s"),
+            *Row.ResourceId, *Row.StationName, ActualMode, Row.bModeMatches ? TEXT("yes") : TEXT("no"),
+            Row.StockStacks >= 0 ? *FString::Printf(TEXT("%d stacks"), Row.StockStacks) : TEXT("unknown"));
+    }
+    return FString::Printf(TEXT("%s | Requester | %s | mode=%s active=%s | stock=%s/%s cap=%s open=%s | claim=%s%s"),
+        *Row.ResourceId, *Row.StationName, ActualMode, Row.bModeMatches ? TEXT("yes") : TEXT("no"),
+        Row.StockStacks >= 0 ? *FString::FromInt(Row.StockStacks) : TEXT("unknown"),
+        Row.ThresholdStacks >= 0 ? *FString::FromInt(Row.ThresholdStacks) : TEXT("?"),
+        Row.CapacityStacks >= 0 ? *FString::FromInt(Row.CapacityStacks) : TEXT("?"),
+        Row.bOpen ? TEXT("yes") : TEXT("no"),
+        Row.ClaimOwner.IsEmpty() ? TEXT("free") : *Row.ClaimOwner,
+        Row.PlannedStacks > 0 ? *FString::Printf(TEXT(" planned=%d"), Row.PlannedStacks) : TEXT(""));
+}
+
+void UDynamicTimeTableSubsystem::BuildTruckRows(TArray<FDTTTruckRow>& OutRows, const FString& ResourceFilter) const
+{
+    OutRows.Reset();
+    auto FillCommon = [&](FDTTTruckRow& Row, AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<UFGItemDescriptor> ItemClass)
+    {
+        Row.Name = DTSVehicleName(Vehicle);
+        const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+        for (const FGuid& Node : Route) Row.RouteStops.Add(DockDisplayName(Node));
+        Row.TargetIndex = Vehicle->GetCurrentTargetWaypointIndex();
+        Row.bAutopilot = Vehicle->IsAutopilotEnabled();
+        Row.bDocking = Vehicle->IsCurrentlyDocking();
+        if (ItemClass)
+        {
+            int32 Capacity = 0, OnBoard = 0;
+            if (EstimateTruckCargoStacks(Vehicle, ItemClass, Capacity, OnBoard))
+            {
+                Row.CargoStacks = OnBoard;
+                Row.CargoCapacityStacks = Capacity;
+            }
+        }
+        else
+        {
+            // No resource to count in: occupied slots against the slot count.
+            AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
+            UFGInventoryComponent* Storage = IsValid(WheeledVehicle) ? WheeledVehicle->GetStorageInventory() : nullptr;
+            if (IsValid(Storage) && Storage->GetSizeLinear() > 0)
+            {
+                TArray<FInventoryStack> Stacks;
+                Storage->GetInventoryStacks(Stacks);
+                Row.CargoStacks = Stacks.Num();
+                Row.CargoCapacityStacks = Storage->GetSizeLinear();
+            }
+        }
+    };
+    auto PlannedSummary = [&](const TMap<FGuid, int32>& Planned, TSubclassOf<UFGItemDescriptor> ItemClass) -> FString
+    {
+        const int32 StackSize = ItemClass ? FMath::Max(1, UFGItemDescriptor::GetStackSize(ItemClass)) : 1;
+        TArray<FString> Parts;
+        for (const auto& Pair : Planned)
+        {
+            Parts.Add(FString::Printf(TEXT("%s:%d"), *DockDisplayName(Pair.Key), Pair.Value / StackSize));
+        }
+        Parts.Sort();
+        return FString::Join(Parts, TEXT(", "));
+    };
+
+    for (const auto& Pair : DispatchTruckAnchors)
+    {
+        AFGWheeledVehicleIdentifier* Vehicle = Pair.Key.Get();
+        if (!IsValid(Vehicle) || PoolTrucks.Contains(Vehicle)) continue;
+        const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+        const FString ResourceId = Route.Num() > 0 ? ResolveDispatchResourceFromProducer(Route[0]) : FString();
+        if (ResourceId.IsEmpty()) continue;
+        if (!ResourceFilter.IsEmpty() && !ResourceId.Equals(ResourceFilter, ESearchCase::IgnoreCase)) continue;
+        const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(ResourceId);
+        FDTTTruckRow& Row = OutRows.AddDefaulted_GetRef();
+        Row.bPool = false;
+        Row.Phase = EDTTTruckPhase::Unmanaged;
+        Row.ResourceId = ResourceId;
+        FillCommon(Row, Vehicle, ItemClass);
+        Row.PlannedSummary = PlannedSummary(Pair.Value.PlannedItems, ItemClass);
+    }
+    for (const auto& Pair : PoolTrucks)
+    {
+        AFGWheeledVehicleIdentifier* Vehicle = Pair.Key.Get();
+        if (!IsValid(Vehicle)) continue;
+        const FDTTPoolTruckState& State = Pair.Value;
+        if (!ResourceFilter.IsEmpty() && !State.ResourceId.Equals(ResourceFilter, ESearchCase::IgnoreCase)) continue;
+        const TSubclassOf<UFGItemDescriptor> ItemClass = State.ResourceId.IsEmpty() ? nullptr : ResolveItemClassForResource(State.ResourceId);
+        FDTTTruckRow& Row = OutRows.AddDefaulted_GetRef();
+        Row.bPool = true;
+        Row.Phase = State.Phase;
+        Row.ResourceId = State.ResourceId;
+        Row.DepotName = State.DepotGuid.IsValid() ? DockDisplayName(State.DepotGuid) : FString();
+        FillCommon(Row, Vehicle, ItemClass);
+        Row.PlannedSummary = State.Phase == EDTTTruckPhase::Assigned ? PlannedSummary(State.PlannedItems, ItemClass) : FString();
+    }
+    OutRows.Sort([](const FDTTTruckRow& A, const FDTTTruckRow& B)
+    {
+        if (A.bPool != B.bPool) return !A.bPool;
+        return A.Name < B.Name;
+    });
+}
+
+FString UDynamicTimeTableSubsystem::FormatTruckRow(const FDTTTruckRow& Row)
+{
+    const FString Cargo = Row.CargoCapacityStacks >= 0
+        ? FString::Printf(TEXT("%d/%d stacks"), Row.CargoStacks, Row.CargoCapacityStacks) : FString(TEXT("unknown"));
+    const FString Route = FString::Join(Row.RouteStops, TEXT(" > "));
+    if (!Row.bPool)
+    {
+        return FString::Printf(TEXT("%s | Truck | %s | route=[%s] target=%d%s | cargo=%s%s"),
+            *Row.ResourceId, *Row.Name, *Route, Row.TargetIndex, Row.bAutopilot ? TEXT("") : TEXT(" autopilot=off"), *Cargo,
+            Row.PlannedSummary.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" | planned=%s"), *Row.PlannedSummary));
+    }
+    return FString::Printf(TEXT("%s | Pool %s | %s | depot=%s | route=[%s] target=%d%s%s | cargo=%s%s"),
+        Row.ResourceId.IsEmpty() ? TEXT("-") : *Row.ResourceId, *PhaseLabel(Row.Phase), *Row.Name,
+        Row.DepotName.IsEmpty() ? TEXT("-") : *Row.DepotName, *Route, Row.TargetIndex,
+        Row.bAutopilot ? TEXT("") : TEXT(" autopilot=off"), Row.bDocking ? TEXT(" docked") : TEXT(""), *Cargo,
+        Row.PlannedSummary.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" | planned=%s"), *Row.PlannedSummary));
+}
+
+void UDynamicTimeTableSubsystem::GetTruckStatusLines(TArray<FString>& OutLines, const FString& ResourceFilter) const
+{
+    OutLines.Reset();
+    TArray<FDTTTruckRow> Rows;
+    BuildTruckRows(Rows, ResourceFilter);
+    int32 Pool = 0;
+    for (const FDTTTruckRow& Row : Rows) if (Row.bPool) ++Pool;
+    OutLines.Add(FString::Printf(TEXT("dTT trucks: dispatch=%d pool=%d depots=%d"), Rows.Num() - Pool, Pool, DispatchDepotGuids.Num()));
+    for (const FDTTTruckRow& Row : Rows) OutLines.Add(FormatTruckRow(Row));
+    if (Rows.Num() == 0)
+    {
+        OutLines.Add(TEXT("No managed trucks. A truck whose first stop is a (Resource) LOAD station runs dispatch laps; "
+            "one whose route contains a (D) depot joins the pool."));
+    }
 }

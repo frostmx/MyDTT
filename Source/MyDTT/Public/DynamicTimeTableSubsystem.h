@@ -61,6 +61,15 @@ public:
      * ResourceFilter, when non-empty, limits the listing to stations tagged with that resource
      * (case-insensitive) and drops the fuel-stop section, since chat has no scrollback. */
     void GetDispatchStatusLines(TArray<FString>& OutLines, const FString& ResourceFilter = FString()) const;
+    /** /dtt trucks: every dispatch and pool truck, one line each. */
+    void GetTruckStatusLines(TArray<FString>& OutLines, const FString& ResourceFilter = FString()) const;
+    /** Rows behind the Dispatch tab, the chat listing and the snapshot; depots and fuel stops only with no filter. */
+    void BuildDispatchRows(TArray<FDTTDispatchRow>& OutRows, const FString& ResourceFilter = FString()) const;
+    /** Rows behind the Trucks tab, the chat listing and the snapshot. */
+    void BuildTruckRows(TArray<FDTTTruckRow>& OutRows, const FString& ResourceFilter = FString()) const;
+    static FString FormatDispatchRow(const FDTTDispatchRow& Row);
+    static FString FormatTruckRow(const FDTTTruckRow& Row);
+    static FString PhaseLabel(EDTTTruckPhase Phase);
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") void GetGroupRuntimeLoad(FGuid GroupId, TArray<FDTTStationRuntimeLoad>& OutLoads) const;
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Runtime") void RecalculateBookingsFromVanilla();
     int32 GetConfigurationRevision() const { return ConfigurationRevision; }

@@ -18,7 +18,7 @@ ADynamicTimeTableChatCommand::ADynamicTimeTableChatCommand()
     Usage = NSLOCTEXT(
         "DynamicTimeTable",
         "ChatCommand.DTT.Usage",
-        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt recalc - rebuild active bookings");
+        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt trucks [resource] - list dispatch and pool trucks; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt recalc - rebuild active bookings");
     Aliases.Add(TEXT("dynamictimetable"));
 }
 
@@ -90,6 +90,19 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
         const FString ResourceFilter = Arguments.Num() >= 2 ? Arguments[1] : FString();
         TArray<FString> Lines;
         Subsystem->GetDispatchStatusLines(Lines, ResourceFilter);
+        for (const FString& Line : Lines)
+        {
+            Sender->SendChatMessage(Line, FLinearColor(0.20f, 0.80f, 1.00f));
+        }
+        return EExecutionStatus::COMPLETED;
+    }
+
+    if (Arguments.Num() >= 1 &&
+        Arguments[0].Equals(TEXT("trucks"), ESearchCase::IgnoreCase))
+    {
+        const FString ResourceFilter = Arguments.Num() >= 2 ? Arguments[1] : FString();
+        TArray<FString> Lines;
+        Subsystem->GetTruckStatusLines(Lines, ResourceFilter);
         for (const FString& Line : Lines)
         {
             Sender->SendChatMessage(Line, FLinearColor(0.20f, 0.80f, 1.00f));

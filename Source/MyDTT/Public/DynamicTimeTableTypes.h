@@ -256,3 +256,50 @@ struct FDTTSavedPoolTruck
     UPROPERTY(SaveGame)
     FDTTPoolTruckState State;
 };
+
+/** One line of the Dispatch tab / "/dtt dispatch": a tagged station, a depot or a fuel stop. */
+USTRUCT(BlueprintType)
+struct FDTTDispatchRow
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString ResourceId;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString StationName;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FGuid DockingPathNodeGuid;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") EDTTDispatchRole Role = EDTTDispatchRole::None;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bDepot = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bFuelStop = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bModeKnown = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bLoadMode = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bModeMatches = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 StockStacks = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 ThresholdStacks = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 CapacityStacks = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bOpen = false;
+    /** Requester: the truck holding the claim; depot: the truck parked or heading there. Empty when free. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString ClaimOwner;
+    /** Requester: stacks the claiming truck's lap plans to leave here. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 PlannedStacks = 0;
+    /** Depot: docked truck and hold; fuel stop: the guid. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString Note;
+};
+
+/** One line of the Trucks tab / "/dtt trucks": a legacy dispatch truck or a pool truck. */
+USTRUCT(BlueprintType)
+struct FDTTTruckRow
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString Name;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bPool = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") EDTTTruckPhase Phase = EDTTTruckPhase::Unmanaged;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString ResourceId;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TArray<FString> RouteStops;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 TargetIndex = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 CargoStacks = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 CargoCapacityStacks = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString DepotName;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString PlannedSummary;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bAutopilot = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bDocking = false;
+};

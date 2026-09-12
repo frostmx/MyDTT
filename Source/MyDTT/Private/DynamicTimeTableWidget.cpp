@@ -19,6 +19,8 @@
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
+#include "Components/WidgetSwitcher.h"
+#include "Components/WidgetSwitcherSlot.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDynamicTimeTableWidget, Log, All);
 
@@ -90,6 +92,9 @@ void UDynamicTimeTableWidget::NativeConstruct()
     RemoveStationButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleRemoveStationClicked);
     GroupSelector->OnSelectionChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleGroupSelectionChanged);
     GroupStationSelector->OnSelectionChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleGroupStationSelectionChanged);
+    GroupsTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleGroupsTabClicked);
+    DispatchTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleDispatchTabClicked);
+    TrucksTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleTrucksTabClicked);
     SetDefaultFocusWidget(CloseButton);
 
     if (UDynamicTimeTableSubsystem* Subsystem = GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())
@@ -106,6 +111,7 @@ void UDynamicTimeTableWidget::NativeConstruct()
         }
     }
     RefreshData();
+    SetActiveTab(ActiveTab);
     if (!IsRemoteClient())
     {
         if (UDynamicTimeTableSubsystem* Subsystem = GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())
@@ -209,11 +215,29 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     SummaryText = MakeText(WidgetTree,TEXT("Loading..."),16,FLinearColor(0.78f,0.85f,0.9f));
     Main->AddChildToVerticalBox(SummaryText)->SetPadding(FMargin(5));
 
-    BuildEditorPanel(Main);
+    // Three pages in one window; the tab row switches them, the active one is tinted.
+    UHorizontalBox* Tabs = WidgetTree->ConstructWidget<UHorizontalBox>();
+    Main->AddChildToVerticalBox(Tabs)->SetPadding(FMargin(5,0,5,4));
+    GroupsTabButton = MakeButton(WidgetTree,TEXT("Groups")); AddRowItem(Tabs,GroupsTabButton,3);
+    DispatchTabButton = MakeButton(WidgetTree,TEXT("Dispatch")); AddRowItem(Tabs,DispatchTabButton,3);
+    TrucksTabButton = MakeButton(WidgetTree,TEXT("Trucks")); AddRowItem(Tabs,TrucksTabButton,3);
 
+    Pages = WidgetTree->ConstructWidget<UWidgetSwitcher>();
+    UVerticalBoxSlot* PagesSlot = Main->AddChildToVerticalBox(Pages);
+    PagesSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+
+    UVerticalBox* GroupsPage = WidgetTree->ConstructWidget<UVerticalBox>();
+    Pages->AddChild(GroupsPage);
+    BuildEditorPanel(GroupsPage);
     GroupScrollBox = WidgetTree->ConstructWidget<UScrollBox>();
-    UVerticalBoxSlot* ScrollSlot = Main->AddChildToVerticalBox(GroupScrollBox);
+    UVerticalBoxSlot* ScrollSlot = GroupsPage->AddChildToVerticalBox(GroupScrollBox);
     ScrollSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill)); ScrollSlot->SetPadding(FMargin(5,8));
+
+    DispatchScrollBox = WidgetTree->ConstructWidget<UScrollBox>();
+    Pages->AddChild(DispatchScrollBox);
+    TruckScrollBox = WidgetTree->ConstructWidget<UScrollBox>();
+    Pages->AddChild(TruckScrollBox);
+    Pages->SetActiveWidgetIndex(0);
 
     UHorizontalBox* Footer = WidgetTree->ConstructWidget<UHorizontalBox>();
     Main->AddChildToVerticalBox(Footer)->SetHorizontalAlignment(HAlign_Right);
@@ -306,9 +330,12 @@ void UDynamicTimeTableWidget::RefreshData()
 {
     RebuildRuntimeDisplay();
     RefreshEditorControls();
+    if (ActiveTab != 0) RefreshRuntimeDisplay();
 }
 void UDynamicTimeTableWidget::RefreshRuntimeDisplay()
 {
+    if (ActiveTab == 1) { RefreshDispatchDisplay(); return; }
+    if (ActiveTab == 2) { RefreshTruckDisplay(); return; }
     if (!GroupScrollBox) return;
 
     if (!RuntimeLayoutMatches())
@@ -487,3 +514,153 @@ void UDynamicTimeTableWidget::HandleApplySlotsClicked(){int32 Slots=FMath::Clamp
 void UDynamicTimeTableWidget::HandleRemoveStationClicked(){if(IsRemoteClient()){if(RemoteCallObject)RemoteCallObject->RequestRemoveStation(SelectedGroupId,GetSelectedGroupStationName());}else if(auto*S=GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())S->RemoveStationByName(SelectedGroupId,GetSelectedGroupStationName());}
 void UDynamicTimeTableWidget::HandleRecalculateClicked(){if(IsRemoteClient()){if(RemoteCallObject)RemoteCallObject->RequestRecalculate();}else if(auto*S=GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())S->RecalculateBookingsFromVanilla();}
 void UDynamicTimeTableWidget::HandleCloseClicked(){CloseWindow();}void UDynamicTimeTableWidget::CloseWindow(){AFGPlayerController*P=Cast<AFGPlayerController>(GetOwningPlayer());RemoveFromParent();if(IsValid(P)){FInputModeGameOnly I;P->SetInputMode(I);P->SetShowMouseCursor(false);P->SetIgnoreMoveInput(false);P->SetIgnoreLookInput(false);}}
+
+// ---------------------------------------------------------------------------
+// Dispatch and Trucks tabs: one text row per dispatch station / truck, rebuilt only when the
+// set of rows changes and updated in place otherwise, like the groups page.
+// ---------------------------------------------------------------------------
+
+int32 UDynamicTimeTableWidget::GetRequestedSections() const
+{
+    switch (ActiveTab)
+    {
+    case 1: return EDTTSnapshotSection::Dispatch;
+    case 2: return EDTTSnapshotSection::Trucks;
+    default: return EDTTSnapshotSection::Groups;
+    }
+}
+
+void UDynamicTimeTableWidget::SetActiveTab(int32 Tab)
+{
+    ActiveTab = FMath::Clamp(Tab, 0, 2);
+    if (Pages) Pages->SetActiveWidgetIndex(ActiveTab);
+    const FLinearColor Active(0.2f, 0.8f, 1.0f, 1.0f);
+    const FLinearColor Inactive(0.55f, 0.6f, 0.65f, 1.0f);
+    if (GroupsTabButton) GroupsTabButton->SetBackgroundColor(ActiveTab == 0 ? Active : Inactive);
+    if (DispatchTabButton) DispatchTabButton->SetBackgroundColor(ActiveTab == 1 ? Active : Inactive);
+    if (TrucksTabButton) TrucksTabButton->SetBackgroundColor(ActiveTab == 2 ? Active : Inactive);
+    // A remote client shows the last snapshot of this section until the next one arrives; ask now
+    // rather than at the next 1.5 s tick.
+    if (IsRemoteClient() && RemoteCallObject) RemoteCallObject->RequestSnapshot(GetRequestedSections());
+    RefreshRuntimeDisplay();
+}
+
+void UDynamicTimeTableWidget::HandleGroupsTabClicked() { SetActiveTab(0); }
+void UDynamicTimeTableWidget::HandleDispatchTabClicked() { SetActiveTab(1); }
+void UDynamicTimeTableWidget::HandleTrucksTabClicked() { SetActiveTab(2); }
+
+void UDynamicTimeTableWidget::RefreshRowList(
+    UScrollBox* Box, TArray<TObjectPtr<UTextBlock>>& Texts, TArray<FString>& Keys,
+    const TArray<FString>& NewKeys, const TArray<FString>& Lines, const TArray<FLinearColor>& Colors)
+{
+    if (!Box) return;
+    if (Keys != NewKeys || Texts.Num() != NewKeys.Num())
+    {
+        Box->ClearChildren();
+        Texts.Reset();
+        Keys = NewKeys;
+        for (int32 Index = 0; Index < NewKeys.Num(); ++Index)
+        {
+            UTextBlock* Text = MakeText(WidgetTree, FString(), 15, FLinearColor::White);
+            Text->SetAutoWrapText(true);
+            Box->AddChild(Text);
+            Texts.Add(Text);
+        }
+    }
+    for (int32 Index = 0; Index < Texts.Num() && Index < Lines.Num(); ++Index)
+    {
+        Texts[Index]->SetText(FText::FromString(Lines[Index]));
+        Texts[Index]->SetColorAndOpacity(FSlateColor(Colors.IsValidIndex(Index) ? Colors[Index] : FLinearColor::White));
+    }
+}
+
+void UDynamicTimeTableWidget::RefreshDispatchDisplay()
+{
+    TArray<FDTTDispatchRow> Rows;
+    if (IsRemoteClient())
+    {
+        if (RemoteCallObject) Rows = RemoteCallObject->GetSnapshot().DispatchRows;
+    }
+    else if (UDynamicTimeTableSubsystem* Subsystem = GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())
+    {
+        Subsystem->BuildDispatchRows(Rows);
+    }
+
+    TArray<FString> Keys, Lines;
+    TArray<FLinearColor> Colors;
+    int32 Open = 0, Depots = 0;
+    for (const FDTTDispatchRow& Row : Rows)
+    {
+        Keys.Add(FString::Printf(TEXT("%s|%s|%s"), Row.bDepot ? TEXT("D") : Row.bFuelStop ? TEXT("F") : *Row.ResourceId,
+            *Row.DockingPathNodeGuid.ToString(), *Row.StationName));
+        Lines.Add(UDynamicTimeTableSubsystem::FormatDispatchRow(Row));
+        FLinearColor Color = FLinearColor::White;
+        if (Row.bDepot) { Color = FLinearColor(0.6f, 0.7f, 0.85f); ++Depots; }
+        else if (Row.bFuelStop) Color = FLinearColor(1.0f, 0.75f, 0.35f);
+        else if (!Row.bModeMatches) Color = FLinearColor::Red;
+        else if (Row.Role == EDTTDispatchRole::Producer) Color = FLinearColor(0.2f, 0.8f, 1.0f);
+        else if (Row.bOpen) { Color = Row.ClaimOwner.IsEmpty() ? FLinearColor(0.3f, 1.0f, 0.5f) : FLinearColor(1.0f, 0.85f, 0.3f); ++Open; }
+        Colors.Add(Color);
+    }
+    if (Rows.Num() == 0)
+    {
+        Keys.Add(TEXT("empty"));
+        Lines.Add(TEXT("No dispatch tags. Use (Resource) on LOAD/UNLOAD stations, (Resource-N) to request only with more than N stacks free, (F) on a fuel stop, (D) on a depot."));
+        Colors.Add(FLinearColor(0.7f, 0.8f, 0.85f));
+    }
+    if (SummaryText)
+    {
+        SummaryText->SetText(FText::FromString(FString::Printf(TEXT("%d dispatch row(s), %d open, %d depot(s) - %s"),
+            Rows.Num(), Open, Depots, IsRemoteClient() ? TEXT("server snapshot") : TEXT("live"))));
+    }
+    RefreshRowList(DispatchScrollBox, DispatchRowTexts, DispatchRowKeys, Keys, Lines, Colors);
+}
+
+void UDynamicTimeTableWidget::RefreshTruckDisplay()
+{
+    TArray<FDTTTruckRow> Rows;
+    if (IsRemoteClient())
+    {
+        if (RemoteCallObject) Rows = RemoteCallObject->GetSnapshot().TruckRows;
+    }
+    else if (UDynamicTimeTableSubsystem* Subsystem = GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())
+    {
+        Subsystem->BuildTruckRows(Rows);
+    }
+
+    TArray<FString> Keys, Lines;
+    TArray<FLinearColor> Colors;
+    int32 Pool = 0, Parked = 0;
+    for (const FDTTTruckRow& Row : Rows)
+    {
+        Keys.Add(FString::Printf(TEXT("%s|%s"), Row.bPool ? TEXT("P") : TEXT("L"), *Row.Name));
+        Lines.Add(UDynamicTimeTableSubsystem::FormatTruckRow(Row));
+        FLinearColor Color = FLinearColor::White;
+        if (!Row.bAutopilot) Color = FLinearColor(1.0f, 0.55f, 0.1f);
+        else if (Row.bPool)
+        {
+            switch (Row.Phase)
+            {
+            case EDTTTruckPhase::Parked: Color = FLinearColor(0.6f, 0.6f, 0.6f); break;
+            case EDTTTruckPhase::Assigned: Color = FLinearColor(0.2f, 0.8f, 1.0f); break;
+            case EDTTTruckPhase::Manual: Color = FLinearColor(1.0f, 0.55f, 0.1f); break;
+            case EDTTTruckPhase::ToDepot: Color = FLinearColor(0.6f, 0.7f, 0.85f); break;
+            default: break;
+            }
+        }
+        if (Row.bPool) { ++Pool; if (Row.Phase == EDTTTruckPhase::Parked) ++Parked; }
+        Colors.Add(Color);
+    }
+    if (Rows.Num() == 0)
+    {
+        Keys.Add(TEXT("empty"));
+        Lines.Add(TEXT("No managed trucks. A truck whose first stop is a (Resource) LOAD station runs dispatch laps; one whose route contains a (D) depot joins the pool."));
+        Colors.Add(FLinearColor(0.7f, 0.8f, 0.85f));
+    }
+    if (SummaryText)
+    {
+        SummaryText->SetText(FText::FromString(FString::Printf(TEXT("%d truck(s), %d in the pool, %d parked - %s"),
+            Rows.Num(), Pool, Parked, IsRemoteClient() ? TEXT("server snapshot") : TEXT("live"))));
+    }
+    RefreshRowList(TruckScrollBox, TruckRowTexts, TruckRowKeys, Keys, Lines, Colors);
+}
