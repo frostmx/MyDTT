@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.0.0
+
+- Trucks can now share a pool instead of each being bound to one producer. Tag a truck station
+  `(D)` to make it a depot: a truck whose route contains a depot joins the pool, drives there and
+  waits, docked, until a `(Resource)` station somewhere requests a delivery. The dispatcher then
+  sends the nearest suitable parked truck to the loading station with the most stock, on to the
+  requesting stations, and back to the nearest free depot. Solid and fluid trucks are matched to
+  the resource's form; a truck carrying something else is not sent. Trucks without a depot in
+  their route keep working exactly as in 1.x.
+- Stations now move exactly what the delivery plans: a requesting station is filled up to its
+  threshold and no further, the loading station gives the truck only what the requesters of the
+  lap can take, and a depot moves nothing. Before, a docking moved everything that fit, which is
+  why `(Resource-N)` had to be a workaround for "leave N stacks free".
+- Docking is now observed directly instead of by polling, so bookings and claims are released the
+  moment a truck docks and a lap's next step is decided the moment it leaves.
+- The `/dtt` window has three tabs: Groups (as before), Dispatch (every tagged station, depot and
+  fuel stop with stock, threshold, capacity, claim and the planned delivery) and Trucks (every
+  dispatch and pool truck with its phase, depot, route, target and cargo). Rows update in place.
+- New chat commands: `/dtt trucks [resource]`, `/dtt depots`, `/dtt park <truck>`,
+  `/dtt release <truck>`.
+- Server and clients have to run the same version: the window protocol is now 5. Saves gain the
+  pool state (save data version 6); older saves load unchanged.
+
 ## 1.1.0
 
 - A requester's threshold is now the station's capacity: an UNLOAD station takes whatever fits,
