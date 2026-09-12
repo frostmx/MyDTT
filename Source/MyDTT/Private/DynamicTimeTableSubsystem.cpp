@@ -3605,6 +3605,7 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
         return A.ResourceId < B.ResourceId;
     });
 
+    const bool bTimerPass = FCString::Strcmp(Trigger, TEXT("timer")) == 0;
     int32 Assigned = 0;
     for (const FDemand& Demand : Demands)
     {
@@ -3614,8 +3615,16 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
         FGuid Producer = ChooseProducerForResource(Idle[0].Key, Demand.ResourceId, ItemClass, Idle[0].Value->DepotGuid, ProducerStock);
         if (!Producer.IsValid())
         {
-            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_SKIP Resource='%s' Open=%d Reason=no-producer-with-stock Trigger=%s"),
-                *Demand.ResourceId, Demand.Open, Trigger);
+            // The timer pass repeats every 5 s while a demand stays unserved; only a pass with a
+            // reason to expect a change (a truck just parked) says so at Display.
+            if (bTimerPass)
+            {
+                UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_SKIP Resource='%s' Open=%d Reason=no-producer-with-stock Trigger=%s"), *Demand.ResourceId, Demand.Open, Trigger);
+            }
+            else
+            {
+                UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_SKIP Resource='%s' Open=%d Reason=no-producer-with-stock Trigger=%s"), *Demand.ResourceId, Demand.Open, Trigger);
+            }
             continue;
         }
         const AFGDockingStationIdentifier* ProducerDock = FindDockByPathNode(Producer);
@@ -3674,8 +3683,14 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
         }
         if (BestIdle == INDEX_NONE)
         {
-            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_SKIP Resource='%s' Open=%d Reason=no-suitable-truck Idle=%d Trigger=%s"),
-                *Demand.ResourceId, Demand.Open, Idle.Num(), Trigger);
+            if (bTimerPass)
+            {
+                UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_SKIP Resource='%s' Open=%d Reason=no-suitable-truck Idle=%d Trigger=%s"), *Demand.ResourceId, Demand.Open, Idle.Num(), Trigger);
+            }
+            else
+            {
+                UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_SKIP Resource='%s' Open=%d Reason=no-suitable-truck Idle=%d Trigger=%s"), *Demand.ResourceId, Demand.Open, Idle.Num(), Trigger);
+            }
             continue;
         }
 
