@@ -141,6 +141,9 @@ private:
         // A one-stop route never changes its target index, so neither of the two signals above
         // ever fires for it; this paces the timed re-check that stands in for them.
         double LastIdleRecheckSeconds = 0.0;
+        // The route as last seen, so that the game re-saving it unchanged (it does, on every
+        // docking) is not mistaken for a player edit in HandleVehicleRouteChanged.
+        TArray<FGuid> LastRoute;
     };
     TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTTruckPollState> TruckPollStates;
     FTimerHandle TruckPollTimerHandle;

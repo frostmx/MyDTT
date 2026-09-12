@@ -18,6 +18,9 @@
   station holds 64; the default requester threshold for a fluid is 32 stacks (1 600 m³), solids
   keep 10. An explicit `(Resource-N)` threshold is unchanged.
 - `/dtt dispatch` lists the dispatch trucks with their current route, target and cargo.
+- Fixed the game's own route re-saves being taken for player edits. The game writes a truck's
+  unchanged route back on every docking; the dispatcher released that truck's remaining claims
+  and treated the lap as hand-edited each time. Only a route that actually differs counts now.
 
 ## 1.0.8
 

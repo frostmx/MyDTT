@@ -1623,7 +1623,14 @@ bool UDynamicTimeTableSubsystem::ReplaceRoute(
     InternalRouteChanges.Add(Vehicle);
     Vehicle->SetVehicleRoute(NewRoute);
     InternalRouteChanges.Remove(Vehicle);
-    return Vehicle->GetVehicleRoute() == NewRoute;
+    const bool bWritten = Vehicle->GetVehicleRoute() == NewRoute;
+    // Keep the poll's copy current at once: the game may re-save the route before the next poll,
+    // and that re-save must compare equal, not read as a player edit.
+    if (bWritten)
+    {
+        if (FDTTTruckPollState* Seen = TruckPollStates.Find(Vehicle)) Seen->LastRoute = NewRoute;
+    }
+    return bWritten;
 }
 
 float UDynamicTimeTableSubsystem::SumSegmentFuelConsumption(
@@ -2017,7 +2024,8 @@ bool UDynamicTimeTableSubsystem::CutLapIfCargoEmpty(
     const TArray<FGuid>& Route, int32 Index, const TCHAR* Trigger)
 {
     // Index 0 is the boundary and index 1 the first stop after loading; only from the second stop
-    // on can a delivery already have happened. The target itself has to be a requester of this
+    // on can a delivery already have happened. Reached from the undock transition in
+    // PollTruckStates: the index had already moved on when the truck docked. The target itself has to be a requester of this
     // resource: heading for the producer or an (F) there is nothing to cut short.
     if (!IsValid(Vehicle) || Index < 2 || !Route.IsValidIndex(Index)) return false;
     auto IsRequesterOfResource = [&](const FGuid& Guid) -> bool
@@ -2476,7 +2484,8 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         // of the way to its target, every time the world loads.
         if (!Previous)
         {
-            TruckPollStates.Add(Vehicle, FDTTTruckPollState{TargetIndex, bDocking});
+            FDTTTruckPollState& Added = TruckPollStates.Add(Vehicle, FDTTTruckPollState{TargetIndex, bDocking});
+            Added.LastRoute = Route;
             continue;
         }
 
@@ -2492,6 +2501,13 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         if (TargetIndex != Previous->TargetIndex)
         {
             ProcessCurrentTruckTarget(Vehicle, TEXT("waypoint changed"));
+        }
+        else if (!bDocking && Previous->bDocking && !ResourceId.IsEmpty())
+        {
+            // The index moves on at arrival, before the transfer (measured: docking at stop 1
+            // already reports target 2), so "waypoint changed" always sees a full truck. Leaving
+            // the dock is the first moment the cargo after an unload can be judged.
+            ProcessCurrentTruckTarget(Vehicle, TEXT("undocked"));
         }
         else if (!ResourceId.IsEmpty() && Route.Num() < 2)
         {
@@ -2511,12 +2527,26 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         // the index change, so recording anything else here can hide the next one.
         Previous->TargetIndex = TargetIndex;
         Previous->bDocking = bDocking;
+        Previous->LastRoute = Vehicle->GetVehicleRoute();
     }
 }
 
 void UDynamicTimeTableSubsystem::HandleVehicleRouteChanged(AFGWheeledVehicleIdentifier* Vehicle)
 {
     if (!IsServer() || !IsValid(Vehicle) || InternalRouteChanges.Contains(Vehicle)) return;
+    // The game calls SetVehicleRoute with the unchanged route on its own - measured three times
+    // per docking. Only a route that actually differs from the one last seen is a player edit;
+    // treating the re-saves as edits dropped the other claims of a multi-stop lap at the first
+    // unload and marked every lap as hand-edited.
+    if (const FDTTTruckPollState* Seen = TruckPollStates.Find(Vehicle))
+    {
+        if (Seen->LastRoute == Vehicle->GetVehicleRoute())
+        {
+            UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("ROUTE_RESAVED_UNCHANGED Truck='%s' Waypoints=%d"),
+                *DTSVehicleName(Vehicle), Vehicle->GetVehicleRoute().Num());
+            return;
+        }
+    }
     ReleaseTruckBooking(Vehicle, TEXT("route saved"));
     ReleaseRequesterClaimsForVehicle(Vehicle, TEXT("route saved"));
     // Not removed: the player may have edited during a lap that left the own (F) out, and the route
