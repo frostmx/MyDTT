@@ -1922,7 +1922,7 @@ void UDynamicTimeTableSubsystem::CollectOpenRequesters(
 
 TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
     const FString& ResourceId, AFGWheeledVehicleIdentifier* Vehicle,
-    const FGuid& ProducerGuid, TMap<FGuid, int32>* OutPlannedItems, int32* OutNeededStacks)
+    const FGuid& ProducerGuid, TMap<FGuid, int32>* OutPlannedItems, int32* OutNeededStacks, bool bIgnoreCargo)
 {
     TArray<FGuid> Result;
     if (!IsValid(Vehicle)) return Result;
@@ -1953,6 +1953,8 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
     int32 CapacityStacks = 0, OnBoardStacks = 0, AvailableStacks = 1;
     if (EstimateTruckCargoStacks(Vehicle, ItemClass, CapacityStacks, OnBoardStacks))
     {
+        // Cargo about to go into an UNLOAD depot is not available to this lap.
+        if (bIgnoreCargo) OnBoardStacks = 0;
         // A pool truck without a producer delivers from what it carries; a legacy lap always
         // loads at Route[0].
         const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
@@ -2854,6 +2856,23 @@ void UDynamicTimeTableSubsystem::HandleTruckUndocked(AFGWheeledVehicle* Vehicle)
     {
         ProcessCurrentTruckTarget(Identifier, TEXT("undocked"));
     }
+
+    // The last requester of a pool lap is where the next lap can start. The dispatcher gets a look
+    // at this truck now, from here, instead of after the drive back to the depot; a request that
+    // opens while it is still driving back finds it on the timer the same way.
+    if (FDTTPoolTruckState* PoolState = PoolTrucks.Find(Identifier))
+    {
+        const AFGDockingStationIdentifier* Dock = IsValid(Station) ? Station->GetStationIdentifier() : nullptr;
+        const FGuid StationGuid = IsValid(Dock) ? Dock->GetPathNodeGUID() : FGuid();
+        if (PoolState->Phase == EDTTTruckPhase::Assigned && StationGuid.IsValid() &&
+            PoolState->Requesters.Num() > 0 && PoolState->Requesters.Last() == StationGuid)
+        {
+            PoolState->ChainFromGuid = StationGuid;
+            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_LAP_DONE Truck='%s' LastRequester='%s' Depot='%s'"),
+                *DTSVehicleName(Identifier), *DockDisplayName(StationGuid), *DockDisplayName(PoolState->DepotGuid));
+            RunPoolDispatch(TEXT("lap end"));
+        }
+    }
 }
 
 void UDynamicTimeTableSubsystem::HandleHeldStationEvicted(AFGBuildableDockingStation* Station, AActor* NewActor)
@@ -3238,6 +3257,14 @@ bool UDynamicTimeTableSubsystem::IsLastPlannedRequester(AFGWheeledVehicleIdentif
     return false;
 }
 
+bool UDynamicTimeTableSubsystem::IsCargoDrainedAtDepot(const FDTTPoolTruckState& State) const
+{
+    if (State.Phase != EDTTTruckPhase::Parked || !Settings.bUnloadAtDepot) return false;
+    const AFGDockingStationIdentifier* Dock = FindDockByPathNode(State.DepotGuid);
+    const AFGBuildableDockingStation* Station = IsValid(Dock) ? Dock->GetStation() : nullptr;
+    return IsValid(Station) && !Station->GetIsInLoadMode();
+}
+
 int32 UDynamicTimeTableSubsystem::OnBoardStacksOf(AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<UFGItemDescriptor> ItemClass) const
 {
     int32 Capacity = 0, OnBoard = 0;
@@ -3554,6 +3581,7 @@ void UDynamicTimeTableSubsystem::ParkTruck(
     State.bParked = true;
     State.PlannedItems.Reset();
     State.bCargoWaitLogged = false;
+    State.ChainFromGuid.Invalidate();
     // The lap is over: whatever it still claimed is free for the next one.
     ReleaseRequesterClaimsForVehicle(Vehicle, TEXT("parked"));
     ReleaseTruckBooking(Vehicle, TEXT("parked"));
@@ -3736,12 +3764,21 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     AFGWheeledVehicleIdentifier* Vehicle, FDTTPoolTruckState& State, const FString& ResourceId,
     TSubclassOf<UFGItemDescriptor> ItemClass, const FGuid& ProducerGuid, const TCHAR* Trigger)
 {
-    if (!IsValid(Vehicle) || State.Phase != EDTTTruckPhase::Parked) return false;
+    if (!IsValid(Vehicle)) return false;
+    // A truck that has just left the last requester of its lap (ChainFromGuid) starts the next lap
+    // from there; the depot it was driving back to only shapes the route (see below).
+    const bool bChained = State.Phase == EDTTTruckPhase::Assigned && State.ChainFromGuid.IsValid();
+    if (State.Phase != EDTTTruckPhase::Parked && !bChained) return false;
     const FGuid StartDepot = State.DepotGuid;
+    const FGuid From = bChained ? State.ChainFromGuid : StartDepot;
     // Claims first, like a legacy lap: two trucks must not plan the same requester in one pass.
     TMap<FGuid, int32> Planned;
     int32 NeededStacks = 0;
-    const TArray<FGuid> Requesters = SelectRequestersForResource(ResourceId, Vehicle, ProducerGuid, &Planned, &NeededStacks);
+    // At a depot in UNLOAD mode the cargo goes into the depot at the end of this very docking
+    // cycle (measured: a lap planned as "cargo covers" left with an empty truck), so the lap is
+    // planned as if the truck were empty.
+    const bool bCargoDrained = IsCargoDrainedAtDepot(State);
+    const TArray<FGuid> Requesters = SelectRequestersForResource(ResourceId, Vehicle, ProducerGuid, &Planned, &NeededStacks, bCargoDrained);
     if (Requesters.Num() == 0)
     {
         ReleaseTruckBooking(Vehicle, TEXT("no requesters"));
@@ -3751,7 +3788,7 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     }
     // What is already on board may cover the whole plan; then the producer is a detour. No
     // producer at all (none has stock) means the cargo is all there is.
-    const int32 OnBoardStacks = OnBoardStacksOf(Vehicle, ItemClass);
+    const int32 OnBoardStacks = bCargoDrained ? 0 : OnBoardStacksOf(Vehicle, ItemClass);
     FGuid Producer = ProducerGuid;
     const TCHAR* ProducerNote = TEXT("stock");
     if (!Producer.IsValid())
@@ -3773,7 +3810,10 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     // drove straight to the requester with an empty truck). SetCurrentTargetWaypoint is a status
     // setter, not a command (1.0.7), so the route is shaped to the index instead: as many copies
     // of the depot in front as the index says, and the producer lands exactly on the target.
-    const int32 TargetIndex = FMath::Clamp(Vehicle->GetCurrentTargetWaypointIndex(), 0, 3);
+    // A chained lap starts with the index pointing at the old lap's return depot, which can sit
+    // anywhere in a route of up to eight stops; the depot copies in front are never driven to
+    // unless the loop wraps, and then the truck only parks.
+    const int32 TargetIndex = FMath::Clamp(Vehicle->GetCurrentTargetWaypointIndex(), 0, bChained ? 8 : 3);
     TArray<FGuid> NewRoute;
     for (int32 Copy = 0; Copy < TargetIndex && StartDepot.IsValid(); ++Copy) NewRoute.Add(StartDepot);
     // Without a producer the first requester lands on the target instead.
@@ -3815,7 +3855,11 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     const UWorld* World = GetWorld();
     State.AssignedAtSeconds = IsValid(World) ? World->GetTimeSeconds() : 0.0;
 
-    if (!ReleaseParkedTruck(Vehicle, State, NewRoute, EDTTTruckPhase::Assigned, TEXT("assigned")))
+    // Chained: no hold to lift and nothing to undock, the truck is already on the road.
+    const bool bWritten = bChained
+        ? ReplaceRoute(Vehicle, NewRoute)
+        : ReleaseParkedTruck(Vehicle, State, NewRoute, EDTTTruckPhase::Assigned, TEXT("assigned"));
+    if (!bWritten)
     {
         ReleaseRequesterClaimsForVehicle(Vehicle, TEXT("assignment failed"));
         ReleaseTruckBooking(Vehicle, TEXT("assignment failed"));
@@ -3833,6 +3877,7 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
         ClaimDepot(ReturnDepot, Vehicle);
         State.DepotGuid = ReturnDepot;
     }
+    State.ChainFromGuid.Invalidate();
     int32 PlannedItems = 0;
     for (const auto& Pair : State.PlannedItems) PlannedItems += Pair.Value;
     UE_LOG(LogDynamicTimeTableSubsystem, Display,
@@ -3840,7 +3885,7 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
         *DTSVehicleName(Vehicle), *ResourceId, Producer.IsValid() ? *DockDisplayName(Producer) : TEXT("-"), ProducerIndex, ProducerNote,
         OnBoardStacks, NeededStacks, Requesters.Num(), PlannedItems,
         FuelGuid.IsValid() ? *DockDisplayName(FuelGuid) : TEXT("-"), FuelIndex,
-        *DockDisplayName(StartDepot), *DockDisplayName(ReturnDepot), NewRoute.Num(), Trigger);
+        *DockDisplayName(From), *DockDisplayName(ReturnDepot), NewRoute.Num(), Trigger);
     UpdatePoolVehicleName(Vehicle, State);
     return true;
 }
@@ -3855,7 +3900,12 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
     for (auto& Pair : PoolTrucks)
     {
         AFGWheeledVehicleIdentifier* Vehicle = Pair.Key.Get();
-        if (!IsValid(Vehicle) || Pair.Value.Phase != EDTTTruckPhase::Parked) continue;
+        if (!IsValid(Vehicle)) continue;
+        // Parked, or on the way back from the last requester of a lap: that truck is as free as a
+        // parked one and closer to the next request than its depot is.
+        const bool bIdle = Pair.Value.Phase == EDTTTruckPhase::Parked ||
+            (Pair.Value.Phase == EDTTTruckPhase::Assigned && Pair.Value.ChainFromGuid.IsValid());
+        if (!bIdle) continue;
         if (!Vehicle->IsAutopilotEnabled() || !IsValid(Vehicle->GetOwnerVehicle())) continue;
         Idle.Emplace(Vehicle, &Pair.Value);
     }
@@ -3928,8 +3978,9 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
                     *DTSVehicleName(Vehicle), *Demand.ResourceId, Trigger);
                 continue;
             }
+            const bool bCargoDrained = IsCargoDrainedAtDepot(State);
             bool bForeignCargo = false;
-            if (UFGInventoryComponent* Storage = WheeledVehicle->GetStorageInventory())
+            if (UFGInventoryComponent* Storage = bCargoDrained ? nullptr : WheeledVehicle->GetStorageInventory())
             {
                 TArray<FInventoryStack> Stacks;
                 Storage->GetInventoryStacks(Stacks);
@@ -3944,13 +3995,14 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
                     *DTSVehicleName(Vehicle), *Demand.ResourceId, Trigger);
                 continue;
             }
-            if (bFromCargo && OnBoardStacksOf(Vehicle, ItemClass) <= 0)
+            if (bFromCargo && (bCargoDrained || OnBoardStacksOf(Vehicle, ItemClass) <= 0))
             {
                 UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_SKIP Truck='%s' Resource='%s' Reason=no-cargo Trigger=%s"),
                     *DTSVehicleName(Vehicle), *Demand.ResourceId, Trigger);
                 continue;
             }
-            const FGuid From = State.DepotGuid.IsValid() ? State.DepotGuid
+            const FGuid From = State.ChainFromGuid.IsValid() ? State.ChainFromGuid
+                : State.DepotGuid.IsValid() ? State.DepotGuid
                 : (Vehicle->GetVehicleRoute().Num() > 0 ? Vehicle->GetVehicleRoute()[0] : FGuid());
             AFGVehicleSubsystem* VehicleSubsystem = AFGVehicleSubsystem::Get(WheeledVehicle->GetWorld());
             const UFGVehiclePathPreset* Preset = WheeledVehicle->GetVehiclePathPreset();
@@ -4007,7 +4059,7 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
     for (const auto& Entry : Idle)
     {
         FDTTPoolTruckState& Mutable = *Entry.Value;
-        if (Mutable.bCargoWaitLogged) continue;
+        if (Mutable.Phase != EDTTTruckPhase::Parked || Mutable.bCargoWaitLogged || IsCargoDrainedAtDepot(Mutable)) continue;
         TSubclassOf<UFGItemDescriptor> Single;
         const FString Cargo = DescribeCargo(Entry.Key, &Single);
         if (Cargo.IsEmpty()) continue;

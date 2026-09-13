@@ -9,6 +9,9 @@
 - A parked pool truck that still carries the requested resource is sent even when no loading
   station has stock, and skips the loading station whenever its cargo already covers the
   planned deliveries.
+- A pool truck that leaves the last requester of its lap while another request is open takes
+  it from there (`POOL_LAP_DONE`, then `POOL_ASSIGNED … Trigger=lap end`) instead of driving
+  back to the depot first; the depot is only for a truck nobody needs.
 - The Trucks tab shows what each truck carries and why a parked truck is waiting (its cargo
   matches no request, or is mixed); the log says so once per parking (`POOL_CARGO_WAIT`).
 - New Settings tab in `/dtt`: leftover hold and top-up interval, depot unloading, the

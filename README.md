@@ -31,8 +31,9 @@ free depot (one truck per depot) and parks there, held docked, until some `(Reso
 station is below its threshold. The dispatcher then sends the nearest parked truck of the right
 kind (solid or fluid, not carrying anything else) to the loading station with the most stock, on
 to the requesting stations - as many as its cargo covers - and back to the nearest free depot,
-where it parks again. Stations move exactly what the lap planned: the loading station gives the
-truck the requesters' shortfall, a requester is filled to its threshold.
+where it parks again - unless another request is open when it leaves its last requester, in
+which case the next lap starts right there. Stations move exactly what the lap planned: the
+loading station gives the truck the requesters' shortfall, a requester is filled to its threshold.
 
 Leftovers: the last requesting station of a lap takes everything it can, threshold or not, and
 the truck stays docked there, unloading again every second, until it is empty or the *Leftover

@@ -245,6 +245,12 @@ struct FDTTPoolTruckState
     double AssignedAtSeconds = 0.0;
     /** POOL_CARGO_WAIT was logged for this parking. Runtime only, cleared by ParkTruck. */
     bool bCargoWaitLogged = false;
+    /**
+     * The last requester of the current lap, once the truck has left it: while valid and the phase
+     * is Assigned, the dispatcher may start the next lap from there instead of the depot the truck
+     * is driving back to. Runtime only, cleared by ParkTruck and by the next assignment.
+     */
+    FGuid ChainFromGuid;
 };
 
 /** One pool truck as stored by ADTTSaveDataActor. */

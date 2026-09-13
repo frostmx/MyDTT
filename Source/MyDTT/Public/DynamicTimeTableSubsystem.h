@@ -241,6 +241,12 @@ private:
     bool IsLastPlannedRequester(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& StationGuid) const;
     /** Stacks of ItemClass on board; 0 when unreadable. */
     int32 OnBoardStacksOf(AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<class UFGItemDescriptor> ItemClass) const;
+    /**
+     * True while a parked truck's cargo is on its way into the depot: the depot is in UNLOAD mode
+     * and depot unloading is on. The docking cycle drains it at its end, after the dispatch that
+     * runs at parking, so that dispatch must not count it.
+     */
+    bool IsCargoDrainedAtDepot(const FDTTPoolTruckState& State) const;
     /** "Plastic x3, Screws x1" for what the truck carries. */
     FString DescribeCargo(AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<class UFGItemDescriptor>* OutSingleClass = nullptr) const;
     // Built once from UFGBlueprintFunctionLibrary::GetAllDescriptorsSorted, not per poll tick.
@@ -407,7 +413,8 @@ private:
      * the legacy anchors when that is null.
      */
     TArray<FGuid> SelectRequestersForResource(const FString& ResourceId, AFGWheeledVehicleIdentifier* Vehicle,
-        const FGuid& ProducerGuid = FGuid(), TMap<FGuid, int32>* OutPlannedItems = nullptr, int32* OutNeededStacks = nullptr);
+        const FGuid& ProducerGuid = FGuid(), TMap<FGuid, int32>* OutPlannedItems = nullptr, int32* OutNeededStacks = nullptr,
+        bool bIgnoreCargo = false);
     /**
      * The LOAD producer of the resource a pool truck should load at: the one with the most stock,
      * ties by path cost from FromGuid. Pure; the group rule (ChooseProducerFromGroup) is applied
