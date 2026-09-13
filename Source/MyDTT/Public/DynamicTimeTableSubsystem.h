@@ -207,6 +207,11 @@ private:
     // despawn/retag - see PruneStaleRequesterClaims and the cleanup in RebuildGroupsFromNames.
     TMap<FGuid, TWeakObjectPtr<AFGWheeledVehicleIdentifier>> RequesterClaims;
     TMap<FGuid, double> RequesterClaimedAtWorldSeconds;
+    // When a requester was first seen open with nobody claiming it, so the window can show how
+    // long it has been waiting. Kept by the 1 Hz poll, not saved: a load restarts the clock.
+    TMap<FGuid, double> RequesterOpenSinceWorldSeconds;
+    /** Requesters already reported as DISPATCH_REQUEST_OVERDUE in the current waiting episode. */
+    TSet<FGuid> OverdueRequestsLogged;
 
     // The tunables (FDTTSettings), saved by ADTTSaveDataActor since DataVersion 7.
     UPROPERTY()
@@ -469,6 +474,10 @@ private:
     void ReleaseRequesterClaimIfDocked(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& DockGuid = FGuid());
     /** Drops claims whose truck disappeared or whose safety timeout elapsed. */
     void PruneStaleRequesterClaims();
+    /** Open (below its trigger, in UNLOAD) as the window and the dispatcher both define it. */
+    bool IsRequesterOpen(const FDTTDispatchStation& Station, TSubclassOf<class UFGItemDescriptor> ItemClass) const;
+    /** Starts or stops the waiting clock of every requester; logs the first crossing of OverdueRequestMinutes. */
+    void UpdateRequesterWaitTimes();
     /** Drops every claim owned by a vehicle that no longer follows its dispatched route. */
     void ReleaseRequesterClaimsForVehicle(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason);
     /** Resolves an exact localized display name to an item class. Cached after the first call. */

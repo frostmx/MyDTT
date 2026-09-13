@@ -77,6 +77,7 @@ private:
     UPROPERTY() TObjectPtr<USpinBox> SettingDispatchInterval;
     UPROPERTY() TObjectPtr<USpinBox> SettingMaxRequesters;
     UPROPERTY() TObjectPtr<USpinBox> SettingClaimTimeout;
+    UPROPERTY() TObjectPtr<USpinBox> SettingOverdueMinutes;
     UPROPERTY() TObjectPtr<USpinBox> SettingIdleRecheck;
     UPROPERTY() TObjectPtr<USpinBox> SettingFuelCritical;
     UPROPERTY() TObjectPtr<USpinBox> SettingFuelSkip;

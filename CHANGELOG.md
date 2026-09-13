@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.3.0
+
+- Request colours in the Dispatch tab swapped to match their meaning: yellow is an open request
+  nobody has taken yet, green is one a truck has claimed.
+- A request nobody claims for too long turns red, together with its resource card, and the
+  status line shows how long it has waited. New setting *Overdue after, minutes*
+  (`OverdueRequestMinutes`, default 5, 0 turns it off); the server logs
+  `DISPATCH_REQUEST_OVERDUE` once per such episode and `/dtt dispatch` prints `waiting=Nm`.
+- The *Recalculate bookings* button is shown on the Groups tab only: it rebuilds the group
+  bookings of the balancer and has no effect on the other tabs.
+- Window protocol 9 (the rows carry the waiting time and the settings the new field); server and
+  clients must run the same version. Save data is unchanged.
+
 ## 2.2.2
 
 - Item icons in the window: each resource card in the Dispatch tab and each truck card in the

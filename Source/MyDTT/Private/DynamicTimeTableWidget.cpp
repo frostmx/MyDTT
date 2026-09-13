@@ -109,7 +109,7 @@ void UDynamicTimeTableWidget::NativeConstruct()
     SettingsDefaultsButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsDefaultsClicked);
     for (USpinBox* Spin : { SettingSolidRequest.Get(), SettingFluidRequest.Get(), SettingRequestBuffer.Get(),
         SettingLeftoverHold.Get(), SettingTopUpInterval.Get(), SettingDispatchInterval.Get(), SettingMaxRequesters.Get(),
-        SettingClaimTimeout.Get(), SettingIdleRecheck.Get(), SettingFuelCritical.Get(), SettingFuelSkip.Get() })
+        SettingClaimTimeout.Get(), SettingOverdueMinutes.Get(), SettingIdleRecheck.Get(), SettingFuelCritical.Get(), SettingFuelSkip.Get() })
     {
         if (Spin) Spin->OnValueChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingSpinChanged);
     }
@@ -383,6 +383,7 @@ void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
     SettingFluidFullLoad = Check(TEXT("Fluid trucks always carry a full load"), TEXT("A fluid lap serves one station: the producer fills the tank completely and the truck drains it there, topping up while the station drinks."));
     SettingMaxRequesters = Spin(TEXT("Requesters per lap"), TEXT("Upper bound on stops planned into one lap."), 1, 8, 1);
     SettingClaimTimeout = Spin(TEXT("Requester claim timeout, seconds"), TEXT("An unserved claim on a requester is dropped after this long."), 30, 3600, 30);
+    SettingOverdueMinutes = Spin(TEXT("Overdue after, minutes"), TEXT("A request nobody has claimed for this long is shown in red in the Dispatch tab and logged once. 0 turns it off."), 0, 120, 1);
     Section(TEXT("Leftovers"));
     SettingDrainLeftovers = Check(TEXT("Drain leftovers at the last stop"), TEXT("The last requester of a lap takes everything it can and holds the truck for the time below. Off: the truck keeps its leftovers for the next lap."));
     SettingLeftoverHold = Spin(TEXT("Leftover hold, seconds"), TEXT("How long a truck stays at the last stop of its lap unloading what is left on board. 0 turns it off."), 0, 600, 5);
@@ -426,6 +427,7 @@ void UDynamicTimeTableWidget::RefreshSettingsControls(bool bForce)
     SettingDispatchInterval->SetValue(V.PoolDispatchIntervalSeconds);
     SettingMaxRequesters->SetValue(float(V.MaxRequestersPerLap));
     SettingClaimTimeout->SetValue(V.RequesterClaimTimeoutSeconds);
+    SettingOverdueMinutes->SetValue(float(V.OverdueRequestMinutes));
     SettingIdleRecheck->SetValue(V.IdleDispatchRecheckSeconds);
     SettingFuelCritical->SetValue(V.FuelCriticalMarginLaps);
     SettingFuelSkip->SetValue(V.FuelSkipMarginLaps);
@@ -449,6 +451,7 @@ FDTTSettings UDynamicTimeTableWidget::ReadSettingsControls() const
     V.PoolDispatchIntervalSeconds = SettingDispatchInterval->GetValue();
     V.MaxRequestersPerLap = FMath::RoundToInt(SettingMaxRequesters->GetValue());
     V.RequesterClaimTimeoutSeconds = SettingClaimTimeout->GetValue();
+    V.OverdueRequestMinutes = FMath::RoundToInt(SettingOverdueMinutes->GetValue());
     V.IdleDispatchRecheckSeconds = SettingIdleRecheck->GetValue();
     V.FuelCriticalMarginLaps = SettingFuelCritical->GetValue();
     V.FuelSkipMarginLaps = SettingFuelSkip->GetValue();
@@ -491,6 +494,7 @@ void UDynamicTimeTableWidget::HandleSettingsDefaultsClicked()
     SettingDispatchInterval->SetValue(Defaults.PoolDispatchIntervalSeconds);
     SettingMaxRequesters->SetValue(float(Defaults.MaxRequestersPerLap));
     SettingClaimTimeout->SetValue(Defaults.RequesterClaimTimeoutSeconds);
+    SettingOverdueMinutes->SetValue(float(Defaults.OverdueRequestMinutes));
     SettingIdleRecheck->SetValue(Defaults.IdleDispatchRecheckSeconds);
     SettingFuelCritical->SetValue(Defaults.FuelCriticalMarginLaps);
     SettingFuelSkip->SetValue(Defaults.FuelSkipMarginLaps);
@@ -763,6 +767,8 @@ void UDynamicTimeTableWidget::SetActiveTab(int32 Tab)
     if (DispatchTabButton) DispatchTabButton->SetBackgroundColor(ActiveTab == 1 ? Active : Inactive);
     if (TrucksTabButton) TrucksTabButton->SetBackgroundColor(ActiveTab == 2 ? Active : Inactive);
     if (SettingsTabButton) SettingsTabButton->SetBackgroundColor(ActiveTab == 3 ? Active : Inactive);
+    // Recalculate rebuilds the group bookings of the balancer, which only the Groups tab shows.
+    if (RecalculateButton) RecalculateButton->SetVisibility(ActiveTab == 0 ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
     // A remote client shows the last snapshot of this section until the next one arrives; ask now
     // rather than at the next 1.5 s tick.
     if (IsRemoteClient() && RemoteCallObject) RemoteCallObject->RequestSnapshot(GetRequestedSections());
@@ -968,6 +974,7 @@ namespace
 {
     const FLinearColor DTTCardTint(0.08f, 0.12f, 0.15f, 1.0f);
     const FLinearColor DTTCardTintOpen(0.09f, 0.16f, 0.13f, 1.0f);
+const FLinearColor DTTCardTintWait(0.16f, 0.14f, 0.07f, 1.0f);
     const FLinearColor DTTCardTintWarn(0.17f, 0.11f, 0.08f, 1.0f);
     const FLinearColor DTTCyan(0.2f, 0.8f, 1.0f);
     const FLinearColor DTTGreen(0.3f, 1.0f, 0.5f);
@@ -1137,19 +1144,23 @@ void UDynamicTimeTableWidget::RefreshDispatchDisplay()
 
 void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, const TArray<const FDTTDispatchRow*>& List, FDTTCardSink& Sink)
 {
-    int32 Producers = 0, Requesters = 0, Open = 0, Claimed = 0, Inactive = 0;
+    // Yellow: open and nobody has taken it; green: taken into work; red: waiting past the limit.
+    const int32 OverdueMinutes = ViewSettings().OverdueRequestMinutes;
+    auto IsOverdue = [&](const FDTTDispatchRow* Row) { return OverdueMinutes > 0 && Row->bOpen && Row->ClaimOwner.IsEmpty() && Row->WaitingSeconds >= OverdueMinutes * 60; };
+    int32 Producers = 0, Requesters = 0, Open = 0, Claimed = 0, Overdue = 0, Inactive = 0;
     for (const FDTTDispatchRow* Row : List)
     {
         if (!Row->bModeMatches) ++Inactive;
         if (Row->Role == EDTTDispatchRole::Producer) ++Producers;
-        else { ++Requesters; if (Row->bOpen) { ++Open; if (!Row->ClaimOwner.IsEmpty()) ++Claimed; } }
+        else { ++Requesters; if (Row->bOpen) { ++Open; if (!Row->ClaimOwner.IsEmpty()) ++Claimed; if (IsOverdue(Row)) ++Overdue; } }
     }
     FString Summary = FString::Printf(TEXT("%d producer%s, %d requester%s"), Producers, Producers == 1 ? TEXT("") : TEXT("s"), Requesters, Requesters == 1 ? TEXT("") : TEXT("s"));
     if (Open > 0) Summary += FString::Printf(TEXT("  ·  %d open, %d claimed"), Open, Claimed);
+    if (Overdue > 0) Summary += FString::Printf(TEXT("  ·  %d overdue"), Overdue);
     if (Inactive > 0) Summary += FString::Printf(TEXT("  ·  %d inactive"), Inactive);
     const bool bWaiting = Open > Claimed;
-    UVerticalBox* Body = Sink.Root(bWaiting ? DTTCardTintOpen : DTTCardTint);
-    DTTCardHeader(Sink, Body, Resource, bWaiting ? DTTGreen : (Open > 0 ? DTTYellow : DTTCyan), Summary, List.Num() > 0 ? IconFor(List[0]->ItemClass) : nullptr);
+    UVerticalBox* Body = Sink.Root(Overdue > 0 ? DTTCardTintWarn : (bWaiting ? DTTCardTintWait : (Open > 0 ? DTTCardTintOpen : DTTCardTint)));
+    DTTCardHeader(Sink, Body, Resource, Overdue > 0 ? DTTRed : (bWaiting ? DTTYellow : (Open > 0 ? DTTGreen : DTTCyan)), Summary, List.Num() > 0 ? IconFor(List[0]->ItemClass) : nullptr);
 
     UHorizontalBox* Columns = Sink.HBox(Body, FMargin(0, 4, 0, 0));
     UVerticalBox* Left = Sink.Column(Columns);
@@ -1175,10 +1186,15 @@ void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, cons
         FLinearColor Status = DTTDim;
         FString StatusLine = TEXT("not open");
         if (!Row->bModeMatches) { Status = DTTRed; StatusLine = TEXT("inactive: a requester must be in UNLOAD mode"); }
-        else if (Row->bOpen && Row->ClaimOwner.IsEmpty()) { Status = DTTGreen; StatusLine = TEXT("open, waiting for a truck"); }
+        else if (Row->bOpen && Row->ClaimOwner.IsEmpty())
+        {
+            Status = IsOverdue(Row) ? DTTRed : DTTYellow;
+            StatusLine = TEXT("open, waiting for a truck");
+            if (Row->WaitingSeconds >= 60) StatusLine += FString::Printf(TEXT("  ·  %d min"), Row->WaitingSeconds / 60);
+        }
         else if (Row->bOpen)
         {
-            Status = DTTYellow;
+            Status = DTTGreen;
             StatusLine = FString::Printf(TEXT("open, claimed by %s"), *Row->ClaimOwner);
             if (Row->PlannedStacks > 0) StatusLine += FString::Printf(TEXT("  ·  %d stacks planned"), Row->PlannedStacks);
         }

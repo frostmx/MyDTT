@@ -296,6 +296,8 @@ struct FDTTDispatchRow
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString ClaimOwner;
     /** Requester: stacks the claiming truck's lap plans to leave here. */
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 PlannedStacks = 0;
+    /** Requester: how long it has been open with nobody claiming it; 0 when closed or claimed. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 WaitingSeconds = 0;
     /** Depot: docked truck and hold; fuel stop: the guid. */
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString Note;
 };
@@ -358,6 +360,8 @@ struct FDTTSettings
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 MaxRequestersPerLap = 4;
     /** Seconds after which an unserved requester claim is dropped. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float RequesterClaimTimeoutSeconds = 600.0f;
+    /** An open request nobody has claimed for this many minutes is shown in red; 0 turns it off. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 OverdueRequestMinutes = 5;
     /** Seconds between re-evaluations of a dispatch truck idling on a one-stop route. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float IdleDispatchRecheckSeconds = 10.0f;
     /** A truck borrows a fuel stop below this many estimated lap costs of fuel. */
@@ -375,6 +379,7 @@ struct FDTTSettings
         PoolDispatchIntervalSeconds = FMath::Clamp(PoolDispatchIntervalSeconds, 1.0f, 60.0f);
         MaxRequestersPerLap = FMath::Clamp(MaxRequestersPerLap, 1, 8);
         RequesterClaimTimeoutSeconds = FMath::Clamp(RequesterClaimTimeoutSeconds, 30.0f, 3600.0f);
+        OverdueRequestMinutes = FMath::Clamp(OverdueRequestMinutes, 0, 120);
         IdleDispatchRecheckSeconds = FMath::Clamp(IdleDispatchRecheckSeconds, 1.0f, 120.0f);
         FuelCriticalMarginLaps = FMath::Clamp(FuelCriticalMarginLaps, 1.0f, 10.0f);
         // Keep the dead zone between "borrow" and "safe to skip" (see the 1.0.2 story).
@@ -388,7 +393,8 @@ struct FDTTSettings
             LeftoverHoldSeconds == Other.LeftoverHoldSeconds && TopUpIntervalSeconds == Other.TopUpIntervalSeconds &&
             bUnloadAtDepot == Other.bUnloadAtDepot && bSkipProducerWhenCargoCovers == Other.bSkipProducerWhenCargoCovers &&
             PoolDispatchIntervalSeconds == Other.PoolDispatchIntervalSeconds && MaxRequestersPerLap == Other.MaxRequestersPerLap &&
-            RequesterClaimTimeoutSeconds == Other.RequesterClaimTimeoutSeconds && IdleDispatchRecheckSeconds == Other.IdleDispatchRecheckSeconds &&
+            RequesterClaimTimeoutSeconds == Other.RequesterClaimTimeoutSeconds && OverdueRequestMinutes == Other.OverdueRequestMinutes &&
+            IdleDispatchRecheckSeconds == Other.IdleDispatchRecheckSeconds &&
             FuelCriticalMarginLaps == Other.FuelCriticalMarginLaps && FuelSkipMarginLaps == Other.FuelSkipMarginLaps;
     }
     bool operator!=(const FDTTSettings& Other) const { return !(*this == Other); }
@@ -396,13 +402,13 @@ struct FDTTSettings
     {
         return FString::Printf(TEXT("SolidRequestStacks=%d FluidRequestStacks=%d RequestBufferStacks=%d FluidFullLoad=%s DrainLeftovers=%s "
             "LeftoverHoldSeconds=%.0f TopUpIntervalSeconds=%.0f UnloadAtDepot=%s SkipProducerWhenCargoCovers=%s "
-            "PoolDispatchIntervalSeconds=%.0f MaxRequestersPerLap=%d RequesterClaimTimeoutSeconds=%.0f IdleDispatchRecheckSeconds=%.0f "
-            "FuelCriticalMarginLaps=%.2f FuelSkipMarginLaps=%.2f"),
+            "PoolDispatchIntervalSeconds=%.0f MaxRequestersPerLap=%d RequesterClaimTimeoutSeconds=%.0f OverdueRequestMinutes=%d "
+            "IdleDispatchRecheckSeconds=%.0f FuelCriticalMarginLaps=%.2f FuelSkipMarginLaps=%.2f"),
             SolidRequestStacks, FluidRequestStacks, RequestBufferStacks, bFluidFullLoad ? TEXT("true") : TEXT("false"),
             bDrainLeftovers ? TEXT("true") : TEXT("false"),
             LeftoverHoldSeconds, TopUpIntervalSeconds, bUnloadAtDepot ? TEXT("true") : TEXT("false"),
             bSkipProducerWhenCargoCovers ? TEXT("true") : TEXT("false"), PoolDispatchIntervalSeconds, MaxRequestersPerLap,
-            RequesterClaimTimeoutSeconds, IdleDispatchRecheckSeconds, FuelCriticalMarginLaps, FuelSkipMarginLaps);
+            RequesterClaimTimeoutSeconds, OverdueRequestMinutes, IdleDispatchRecheckSeconds, FuelCriticalMarginLaps, FuelSkipMarginLaps);
     }
     /** "/dtt set <field> <value>": true when the field exists and parsed. */
     bool SetByName(const FString& Field, const FString& Value)
@@ -428,6 +434,7 @@ struct FDTTSettings
         if (F == TEXT("pooldispatchintervalseconds")) return AsFloat(PoolDispatchIntervalSeconds);
         if (F == TEXT("maxrequestersperlap")) return AsInt(MaxRequestersPerLap);
         if (F == TEXT("requesterclaimtimeoutseconds")) return AsFloat(RequesterClaimTimeoutSeconds);
+        if (F == TEXT("overduerequestminutes")) return AsInt(OverdueRequestMinutes);
         if (F == TEXT("idledispatchrecheckseconds")) return AsFloat(IdleDispatchRecheckSeconds);
         if (F == TEXT("fuelcriticalmarginlaps")) return AsFloat(FuelCriticalMarginLaps);
         if (F == TEXT("fuelskipmarginlaps")) return AsFloat(FuelSkipMarginLaps);

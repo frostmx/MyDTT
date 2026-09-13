@@ -1086,6 +1086,12 @@ void UDynamicTimeTableSubsystem::RebuildGroupsFromNames()
             { return GetEffectiveDispatchRole(S) == EDTTDispatchRole::Requester && S.DockingPathNodeGuid == It.Key(); });
         if (!bStillRequester) { RequesterClaimedAtWorldSeconds.Remove(It.Key()); It.RemoveCurrent(); }
     }
+    for (auto It = RequesterOpenSinceWorldSeconds.CreateIterator(); It; ++It)
+    {
+        const bool bStillRequester = DispatchStations.ContainsByPredicate([&](const FDTTDispatchStation& S)
+            { return GetEffectiveDispatchRole(S) == EDTTDispatchRole::Requester && S.DockingPathNodeGuid == It.Key(); });
+        if (!bStillRequester) { OverdueRequestsLogged.Remove(It.Key()); It.RemoveCurrent(); }
+    }
 
     if (!bChanged) return;
 
@@ -2627,6 +2633,7 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
     // its own, so both kinds are checked here.
     RebuildGroupsIfStationsChanged(TEXT("poll"));
     PruneStaleRequesterClaims();
+    UpdateRequesterWaitTimes();
 
     for (auto It = TruckPollStates.CreateIterator(); It; ++It)
         if (!It.Key().IsValid()) It.RemoveCurrent();
@@ -4380,6 +4387,39 @@ FString UDynamicTimeTableSubsystem::PhaseLabel(EDTTTruckPhase Phase)
     }
 }
 
+bool UDynamicTimeTableSubsystem::IsRequesterOpen(const FDTTDispatchStation& Station, TSubclassOf<UFGItemDescriptor> ItemClass) const
+{
+    if (!ItemClass || GetEffectiveDispatchRole(Station) != EDTTDispatchRole::Requester || !DoesDispatchStationMatchMode(Station)) return false;
+    const int32 Stock = ReadDockStockInStacks(Station.DockingStationIdentifier.Get(), ItemClass);
+    FDTTRequestLevels Levels;
+    return Stock >= 0 && GetRequestLevels(Station, ItemClass, Levels) && Levels.Trigger > 0 && Stock < Levels.Trigger;
+}
+
+void UDynamicTimeTableSubsystem::UpdateRequesterWaitTimes()
+{
+    UWorld* World = GetWorld();
+    const double Now = IsValid(World) ? World->GetTimeSeconds() : 0.0;
+    TSet<FGuid> Waiting;
+    for (const FDTTDispatchStation& Station : DispatchStations)
+    {
+        if (!Station.DockingPathNodeGuid.IsValid() || RequesterClaims.Contains(Station.DockingPathNodeGuid)) continue;
+        if (!IsRequesterOpen(Station, ResolveItemClassForResource(Station.ResourceId))) continue;
+        Waiting.Add(Station.DockingPathNodeGuid);
+        const double Since = RequesterOpenSinceWorldSeconds.FindOrAdd(Station.DockingPathNodeGuid, Now);
+        const int32 WaitingSeconds = FMath::Max(0, FMath::RoundToInt(Now - Since));
+        if (Settings.OverdueRequestMinutes > 0 && WaitingSeconds >= Settings.OverdueRequestMinutes * 60 &&
+            !OverdueRequestsLogged.Contains(Station.DockingPathNodeGuid))
+        {
+            OverdueRequestsLogged.Add(Station.DockingPathNodeGuid);
+            UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("DISPATCH_REQUEST_OVERDUE Station=\"%s\" Resource=\"%s\" WaitingSeconds=%d Limit=%dm"),
+                *Station.DisplayName, *Station.ResourceId, WaitingSeconds, Settings.OverdueRequestMinutes);
+        }
+    }
+    // Closed or claimed: the episode is over, the next one starts from zero and may be logged again.
+    for (auto It = RequesterOpenSinceWorldSeconds.CreateIterator(); It; ++It)
+        if (!Waiting.Contains(It.Key())) { OverdueRequestsLogged.Remove(It.Key()); It.RemoveCurrent(); }
+}
+
 void UDynamicTimeTableSubsystem::BuildDispatchRows(TArray<FDTTDispatchRow>& OutRows, const FString& ResourceFilter) const
 {
     OutRows.Reset();
@@ -4426,6 +4466,11 @@ void UDynamicTimeTableSubsystem::BuildDispatchRows(TArray<FDTTDispatchRow>& OutR
         if (Row.Role == EDTTDispatchRole::Producer) continue;
 
         Row.bOpen = Row.bModeMatches && Row.StockStacks >= 0 && Row.TriggerStacks > 0 && Row.StockStacks < Row.TriggerStacks;
+        if (const double* Since = RequesterOpenSinceWorldSeconds.Find(Station.DockingPathNodeGuid))
+        {
+            const UWorld* World = GetWorld();
+            if (IsValid(World)) Row.WaitingSeconds = FMath::Max(0, FMath::RoundToInt(World->GetTimeSeconds() - *Since));
+        }
         if (const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Owner = RequesterClaims.Find(Station.DockingPathNodeGuid))
         {
             AFGWheeledVehicleIdentifier* Vehicle = Owner->Get();
@@ -4507,13 +4552,15 @@ FString UDynamicTimeTableSubsystem::FormatDispatchRow(const FDTTDispatchRow& Row
             ? FString::Printf(TEXT("%d (%d%%)"), Row.TriggerStacks, FMath::RoundToInt(100.0f * Row.TriggerStacks / Row.CapacityStacks))
             : FString::FromInt(Row.TriggerStacks))
         : TEXT("?");
-    return FString::Printf(TEXT("%s | Requester | %s | mode=%s active=%s | stock=%s call<%s fill=%s cap=%s open=%s | claim=%s%s"),
+    // waiting=Nm: open with nobody claiming it for N minutes (the window colours it by the setting).
+    const FString Waiting = Row.WaitingSeconds >= 60 ? FString::Printf(TEXT(" waiting=%dm"), Row.WaitingSeconds / 60) : FString();
+    return FString::Printf(TEXT("%s | Requester | %s | mode=%s active=%s | stock=%s call<%s fill=%s cap=%s open=%s%s | claim=%s%s"),
         *Row.ResourceId, *Row.StationName, ActualMode, Row.bModeMatches ? TEXT("yes") : TEXT("no"),
         Row.StockStacks >= 0 ? *FString::FromInt(Row.StockStacks) : TEXT("unknown"),
         *Trigger,
         Row.ThresholdStacks >= 0 ? *FString::FromInt(Row.ThresholdStacks) : TEXT("?"),
         Row.CapacityStacks >= 0 ? *FString::FromInt(Row.CapacityStacks) : TEXT("?"),
-        Row.bOpen ? TEXT("yes") : TEXT("no"),
+        Row.bOpen ? TEXT("yes") : TEXT("no"), *Waiting,
         Row.ClaimOwner.IsEmpty() ? TEXT("free") : *Row.ClaimOwner,
         Row.PlannedStacks > 0 ? *FString::Printf(TEXT(" planned=%d"), Row.PlannedStacks) : TEXT(""));
 }
