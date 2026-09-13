@@ -24,7 +24,8 @@ struct FDTTTransferPlan
     {
         PassThrough, // the game's own transfer runs
         Block,       // nothing moves (a depot, or an unplanned stop of a managed truck)
-        FillTo       // move ItemClass until the destination holds TargetItems
+        FillTo,      // move ItemClass until the destination holds TargetItems
+        Drain        // move ItemClass (every class when null) as far as the destination takes
     };
 
     EMode Mode = EMode::PassThrough;
@@ -62,9 +63,16 @@ public:
     /** A held station keeps its docked actor: the game's deferred undock is cancelled. */
     static void SetHeld(AFGBuildableDockingStation* Station, bool bHeld, const TCHAR* Reason);
     static bool IsHeld(const AFGBuildableDockingStation* Station);
+    /**
+     * Runs the transfer now, on the game thread, outside any docking cycle: the top-ups of a held
+     * truck (a requester draining a leftover, a depot taking it). Quiet logs only when something
+     * moved, since it runs once a second.
+     */
+    static int32 TransferNow(const AFGBuildableDockingStation* Station, UFGInventoryComponent* Docked, const FDTTTransferPlan& Plan, bool bQuiet);
 
 private:
     static bool FindTransferPlan(const AFGBuildableDockingStation* Station, FDTTTransferPlan& OutPlan);
     /** The game's transfer loop with a cap. Same inventory calls, same partial-add semantics. */
-    static int32 CappedLoadUnload(const AFGBuildableDockingStation* Self, UFGInventoryComponent* Docked, const FDTTTransferPlan& Plan);
+    static int32 CappedLoadUnload(const AFGBuildableDockingStation* Self, UFGInventoryComponent* Docked, const FDTTTransferPlan& Plan,
+        const TCHAR* LogTag = TEXT("XFER_CAPPED"), bool bQuiet = false);
 };

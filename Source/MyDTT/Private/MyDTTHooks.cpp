@@ -52,6 +52,7 @@ namespace
         {
         case FDTTTransferPlan::EMode::Block: return TEXT("Block");
         case FDTTTransferPlan::EMode::FillTo: return TEXT("FillTo");
+        case FDTTTransferPlan::EMode::Drain: return TEXT("Drain");
         default: return TEXT("PassThrough");
         }
     }
@@ -102,7 +103,14 @@ bool FMyDTTHooks::IsHeld(const AFGBuildableDockingStation* Station)
     return Station && GHeld.Contains(Station);
 }
 
-int32 FMyDTTHooks::CappedLoadUnload(const AFGBuildableDockingStation* Self, UFGInventoryComponent* Docked, const FDTTTransferPlan& Plan)
+int32 FMyDTTHooks::TransferNow(const AFGBuildableDockingStation* Station, UFGInventoryComponent* Docked, const FDTTTransferPlan& Plan, bool bQuiet)
+{
+    if (!IsInGameThread() || !IsValid(Station) || Station->IsLoadUnloading()) return 0;
+    return CappedLoadUnload(Station, Docked, Plan, TEXT("XFER_TOPUP"), bQuiet);
+}
+
+int32 FMyDTTHooks::CappedLoadUnload(const AFGBuildableDockingStation* Self, UFGInventoryComponent* Docked, const FDTTTransferPlan& Plan,
+    const TCHAR* LogTag, bool bQuiet)
 {
     UFGInventoryComponent* Station = IsValid(Self) ? Self->GetInventory() : nullptr;
     if (!IsValid(Station) || !IsValid(Docked)) return 0;
@@ -115,6 +123,11 @@ int32 FMyDTTHooks::CappedLoadUnload(const AFGBuildableDockingStation* Self, UFGI
     if (Plan.Mode == FDTTTransferPlan::EMode::FillTo && Plan.ItemClass)
     {
         Cap = FMath::Max(0, Plan.TargetItems - Dst->GetNumItems(Plan.ItemClass));
+    }
+    else if (Plan.Mode == FDTTTransferPlan::EMode::Drain)
+    {
+        // As much as fits: the destination's partial adds are the only limit.
+        Cap = TNumericLimits<int32>::Max();
     }
 
     // The game moves fluids slot to slot and solids by AddStack; both with partial adds, and both
@@ -143,9 +156,12 @@ int32 FMyDTTHooks::CappedLoadUnload(const AFGBuildableDockingStation* Self, UFGI
         Moved += Added;
     }
 
-    UE_LOG(LogMyDTTHooks, Log, TEXT("XFER_CAPPED Station='%s' Mode=%s Plan=%s Item=%s Target=%d Cap=%d Moved=%d"),
-        *StationName(Self), bLoad ? TEXT("LOAD") : TEXT("UNLOAD"), ModeName(Plan.Mode),
-        Plan.ItemClass ? *Plan.ItemClass->GetName() : TEXT("<any>"), Plan.TargetItems, Cap, Moved);
+    if (!bQuiet || Moved > 0)
+    {
+        UE_LOG(LogMyDTTHooks, Log, TEXT("%s Station='%s' Mode=%s Plan=%s Item=%s Target=%d Cap=%d Moved=%d"),
+            LogTag, *StationName(Self), bLoad ? TEXT("LOAD") : TEXT("UNLOAD"), ModeName(Plan.Mode),
+            Plan.ItemClass ? *Plan.ItemClass->GetName() : TEXT("<any>"), Plan.TargetItems, Cap, Moved);
+    }
     return Moved;
 }
 
@@ -195,7 +211,7 @@ void FMyDTTHooks::Install()
             SetHeld(Self, false, TEXT("evicted by DockActor"));
             if (UWorld* World = Self->GetWorld())
                 if (auto* S = World->GetSubsystem<UDynamicTimeTableSubsystem>())
-                    S->HandleParkedTruckEvicted(Self, Actor);
+                    S->HandleHeldStationEvicted(Self, Actor);
         });
     GUndockHoldInstalled = true;
 
