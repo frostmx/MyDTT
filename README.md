@@ -49,9 +49,14 @@ A truck whose first stop is a `(Resource)` LOAD station and whose route has no d
 dispatch laps bound to that producer. Saving a route without a depot takes a truck out of the
 pool; switching its autopilot off hands it back to you until it next docks at a depot.
 
-`/dtt` opens the window (Groups, Dispatch, Trucks and Settings tabs); `/dtt dispatch`, `/dtt trucks`
-and `/dtt depots` print the same in chat; `/dtt park <truck>` and `/dtt release <truck>` move one
-truck by hand.
+`/dtt` opens the window: Groups, Dispatch (a card per resource with its icon, producers and
+requesters with stock, call level, fill target and the claiming truck; depots and fuel stops
+below), Trucks (a card per truck: status badge, route with the current stop lit, cargo bar with
+the icon of what is on board, planned deliveries) and Settings; both card tabs have a filter line.
+`/dtt dispatch`, `/dtt trucks` and `/dtt depots` print the same in chat; `/dtt park <truck>` and
+`/dtt release <truck>` move one truck by hand. The window talks to the server over a versioned
+protocol, so the server and the clients that have the mod must run the same version; a client
+without the mod plays on such a server without the window.
 
 ## Settings
 
