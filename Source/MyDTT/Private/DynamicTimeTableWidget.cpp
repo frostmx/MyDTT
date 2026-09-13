@@ -253,10 +253,10 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     UVerticalBoxSlot* ScrollSlot = GroupsPage->AddChildToVerticalBox(GroupScrollBox);
     ScrollSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill)); ScrollSlot->SetPadding(FMargin(5,8));
 
-    DispatchScrollBox = WidgetTree->ConstructWidget<UScrollBox>();
-    Pages->AddChild(DispatchScrollBox);
-    TruckScrollBox = WidgetTree->ConstructWidget<UScrollBox>();
-    Pages->AddChild(TruckScrollBox);
+    Pages->AddChild(BuildCardPage(DispatchScrollBox, DispatchFilter));
+    DispatchFilter->OnTextChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleDispatchFilterChanged);
+    Pages->AddChild(BuildCardPage(TruckScrollBox, TruckFilter));
+    TruckFilter->OnTextChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleTruckFilterChanged);
     UVerticalBox* SettingsPage = WidgetTree->ConstructWidget<UVerticalBox>();
     Pages->AddChild(SettingsPage);
     BuildSettingsPanel(SettingsPage);
@@ -268,6 +268,26 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     UButton* FooterClose = MakeButton(WidgetTree,TEXT("Close"));
     FooterClose->OnClicked.AddDynamic(this,&UDynamicTimeTableWidget::HandleCloseClicked); AddRowItem(Footer,FooterClose);
 }
+
+UVerticalBox* UDynamicTimeTableWidget::BuildCardPage(TObjectPtr<UScrollBox>& OutScroll, TObjectPtr<UEditableTextBox>& OutFilter)
+{
+    UVerticalBox* Page = WidgetTree->ConstructWidget<UVerticalBox>();
+    UHorizontalBox* FilterRow = WidgetTree->ConstructWidget<UHorizontalBox>();
+    Page->AddChildToVerticalBox(FilterRow)->SetPadding(FMargin(4, 2, 4, 4));
+    AddRowItem(FilterRow, MakeText(WidgetTree, TEXT("Filter"), 13, FLinearColor(0.6f, 0.68f, 0.74f)), 4);
+    OutFilter = WidgetTree->ConstructWidget<UEditableTextBox>();
+    OutFilter->SetHintText(FText::FromString(TEXT("name or resource, any case")));
+    FSlateFontInfo FilterFont = OutFilter->WidgetStyle.TextStyle.Font;
+    FilterFont.Size = 13;
+    OutFilter->WidgetStyle.SetFont(FilterFont).SetPadding(FMargin(8, 4));
+    AddRowItem(FilterRow, OutFilter, 4, true);
+    OutScroll = WidgetTree->ConstructWidget<UScrollBox>();
+    Page->AddChildToVerticalBox(OutScroll)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+    return Page;
+}
+
+void UDynamicTimeTableWidget::HandleDispatchFilterChanged(const FText&) { RefreshDispatchDisplay(); }
+void UDynamicTimeTableWidget::HandleTruckFilterChanged(const FText&) { RefreshTruckDisplay(); }
 
 void UDynamicTimeTableWidget::BuildEditorPanel(UVerticalBox* Main)
 {
@@ -750,25 +770,22 @@ void UDynamicTimeTableWidget::HandleGroupsTabClicked() { SetActiveTab(0); }
 void UDynamicTimeTableWidget::HandleDispatchTabClicked() { SetActiveTab(1); }
 void UDynamicTimeTableWidget::HandleTrucksTabClicked() { SetActiveTab(2); }
 
-// A card is built once and then updated in place every refresh: the sink hands out the stored
-// widgets in creation order, so a walk over the rows must produce the same shape for a build
-// and for an update. The layout key (which rows, in which order) guards that; any difference
-// rebuilds the page.
+// A card is built once and then updated in place on every refresh: the sink hands out the card's
+// stored widgets in creation order, so the walk that fills a card must produce the same shape
+// for a build and for an update. The card key covers what decides the widget count; a key
+// change rebuilds that one card, the rest of the page stays as it is (no flicker, no scroll
+// jump). Text that is empty collapses, so optional lines are always emitted.
 struct FDTTCardSink
 {
     UWidgetTree* Tree = nullptr;
     bool bBuild = true;
-    TArray<TObjectPtr<UTextBlock>>& Texts;
-    TArray<TObjectPtr<UBorder>>& Borders;
-    TArray<TObjectPtr<UProgressBar>>& Bars;
+    FDTTCardWidgets& Card;
     int32 TextIndex = 0, BorderIndex = 0, BarIndex = 0;
 
-    FDTTCardSink(UWidgetTree* InTree, bool bInBuild, TArray<TObjectPtr<UTextBlock>>& InTexts,
-        TArray<TObjectPtr<UBorder>>& InBorders, TArray<TObjectPtr<UProgressBar>>& InBars)
-        : Tree(InTree), bBuild(bInBuild), Texts(InTexts), Borders(InBorders), Bars(InBars) {}
+    FDTTCardSink(UWidgetTree* InTree, bool bInBuild, FDTTCardWidgets& InCard) : Tree(InTree), bBuild(bInBuild), Card(InCard) {}
 
     /** True when an update walked past what the build stored: the shape changed without the key noticing. */
-    bool Overran() const { return TextIndex != Texts.Num() || BorderIndex != Borders.Num() || BarIndex != Bars.Num(); }
+    bool Overran() const { return TextIndex != Card.Texts.Num() || BorderIndex != Card.Borders.Num() || BarIndex != Card.Bars.Num(); }
 
     template <typename TSlot>
     static void Pad(UWidget* Widget, const FMargin& Margin)
@@ -780,7 +797,7 @@ struct FDTTCardSink
     {
         if (!bBuild) return nullptr;
         UVerticalBox* Box = Tree->ConstructWidget<UVerticalBox>();
-        if (Parent) { Parent->AddChild(Box); Pad<UVerticalBoxSlot>(Box, Margin); Pad<UScrollBoxSlot>(Box, Margin); }
+        if (Parent) { Parent->AddChild(Box); Pad<UVerticalBoxSlot>(Box, Margin); }
         return Box;
     }
 
@@ -830,26 +847,27 @@ struct FDTTCardSink
             if (Parent)
             {
                 Parent->AddChild(T);
-                Pad<UVerticalBoxSlot>(T, Margin); Pad<UScrollBoxSlot>(T, Margin); Pad<UWrapBoxSlot>(T, Margin);
+                Pad<UVerticalBoxSlot>(T, Margin); Pad<UWrapBoxSlot>(T, Margin);
                 if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(T->Slot))
                 {
                     S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center);
                     if (bFill) S->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
                 }
             }
-            Texts.Add(T);
+            Card.Texts.Add(T);
         }
-        else if (Texts.IsValidIndex(TextIndex))
+        else if (Card.Texts.IsValidIndex(TextIndex))
         {
-            T = Texts[TextIndex].Get();
+            T = Card.Texts[TextIndex].Get();
             if (T) { T->SetText(FText::FromString(Value)); T->SetColorAndOpacity(FSlateColor(Color)); }
         }
+        if (T) T->SetVisibility(Value.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::SelfHitTestInvisible);
         ++TextIndex;
         return T;
     }
 
-    /** A card: a tinted border with a vertical body. Returns the body (null on an update). */
-    UVerticalBox* Card(UPanelWidget* Parent, const FLinearColor& Tint)
+    /** The card itself: a tinted border with a vertical body, stored as the card's root. Returns the body (null on an update). */
+    UVerticalBox* Root(const FLinearColor& Tint)
     {
         UVerticalBox* Body = nullptr;
         if (bBuild)
@@ -857,19 +875,19 @@ struct FDTTCardSink
             UBorder* Border = Tree->ConstructWidget<UBorder>();
             Border->SetBrushColor(Tint); Border->SetPadding(FMargin(12, 8));
             Body = Tree->ConstructWidget<UVerticalBox>(); Border->SetContent(Body);
-            if (Parent) { Parent->AddChild(Border); Pad<UScrollBoxSlot>(Border, FMargin(4, 3)); Pad<UVerticalBoxSlot>(Border, FMargin(4, 3)); }
-            Borders.Add(Border);
+            Card.Root = Border;
+            Card.Borders.Add(Border);
         }
-        else if (Borders.IsValidIndex(BorderIndex))
+        else if (Card.Borders.IsValidIndex(BorderIndex))
         {
-            if (UBorder* Border = Borders[BorderIndex].Get()) Border->SetBrushColor(Tint);
+            if (UBorder* Border = Card.Borders[BorderIndex].Get()) Border->SetBrushColor(Tint);
         }
         ++BorderIndex;
         return Body;
     }
 
-    /** A small coloured label: "Pool · Parked", "Autopilot off". */
-    void Badge(UPanelWidget* Parent, const FString& Label, const FLinearColor& Background, const FLinearColor& Foreground = FLinearColor::White)
+    /** A small coloured label: "Pool · Parked", "Autopilot off". Hidden ones keep their place. */
+    void Badge(UPanelWidget* Parent, const FString& Label, const FLinearColor& Background, bool bVisible = true, const FLinearColor& Foreground = FLinearColor::White)
     {
         UBorder* Border = nullptr;
         if (bBuild)
@@ -880,18 +898,18 @@ struct FDTTCardSink
             {
                 Parent->AddChild(Border);
                 if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Border->Slot)) { S->SetPadding(FMargin(0, 0, 6, 0)); S->SetVerticalAlignment(VAlign_Center); }
-                Pad<UWrapBoxSlot>(Border, FMargin(0, 0, 6, 0));
             }
-            Borders.Add(Border);
+            Card.Borders.Add(Border);
         }
-        else if (Borders.IsValidIndex(BorderIndex))
+        else if (Card.Borders.IsValidIndex(BorderIndex))
         {
-            Border = Borders[BorderIndex].Get();
+            Border = Card.Borders[BorderIndex].Get();
             if (Border) Border->SetBrushColor(Background);
         }
         ++BorderIndex;
         UTextBlock* T = Text(nullptr, Label, 12, Foreground);
         if (bBuild && Border && T) Border->SetContent(T);
+        if (Border) Border->SetVisibility(bVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
     }
 
     /** A thin fill bar; Percent 0..1. */
@@ -904,11 +922,11 @@ struct FDTTCardSink
             B->SetPercent(Percent); B->SetFillColorAndOpacity(Color);
             USizeBox* Size = Tree->ConstructWidget<USizeBox>(); Size->SetHeightOverride(7); Size->SetContent(B);
             if (Parent) { Parent->AddChild(Size); Pad<UVerticalBoxSlot>(Size, Margin); }
-            Bars.Add(B);
+            Card.Bars.Add(B);
         }
-        else if (Bars.IsValidIndex(BarIndex))
+        else if (Card.Bars.IsValidIndex(BarIndex))
         {
-            if (UProgressBar* B = Bars[BarIndex].Get()) { B->SetPercent(Percent); B->SetFillColorAndOpacity(Color); }
+            if (UProgressBar* B = Card.Bars[BarIndex].Get()) { B->SetPercent(Percent); B->SetFillColorAndOpacity(Color); }
         }
         ++BarIndex;
     }
@@ -931,209 +949,67 @@ namespace
     FString DTTStacks(int32 Stacks) { return Stacks >= 0 ? FString::Printf(TEXT("%d stacks"), Stacks) : FString(TEXT("unknown")); }
     /** A station named by its tag alone ("(Coal)") has an empty base name. */
     FString DTTStationName(const FString& Name) { return Name.IsEmpty() ? FString(TEXT("(no name)")) : Name; }
-}
-
-void UDynamicTimeTableWidget::PopulateDispatchCards(const TArray<FDTTDispatchRow>& Rows, FDTTCardSink& Sink)
-{
-    UScrollBox* Page = DispatchScrollBox;
-    TArray<FString> Order;
-    TMap<FString, TArray<const FDTTDispatchRow*>> ByResource;
-    TArray<const FDTTDispatchRow*> Depots, FuelStops;
-    for (const FDTTDispatchRow& Row : Rows)
+    /** The identifier number the subsystem appends to a truck's display name ("Ore -> Smelter#2147123023"): the display part changes with every target. */
+    FString DTTTruckKey(const FString& Name)
     {
-        if (Row.bDepot) Depots.Add(&Row);
-        else if (Row.bFuelStop) FuelStops.Add(&Row);
-        else
-        {
-            if (!ByResource.Contains(Row.ResourceId)) Order.Add(Row.ResourceId);
-            ByResource.FindOrAdd(Row.ResourceId).Add(&Row);
-        }
+        int32 Hash = INDEX_NONE;
+        return Name.FindLastChar(TEXT('#'), Hash) ? Name.Mid(Hash + 1) : Name;
+    }
+    /** Runs of the same stop (a pool lap starts with copies of its depot that only carry the target index) collapse into one chip. */
+    int32 DTTRouteChips(const TArray<FString>& Stops)
+    {
+        int32 Chips = 0;
+        for (int32 Index = 0; Index < Stops.Num(); ++Index) if (Index == 0 || Stops[Index] != Stops[Index - 1]) ++Chips;
+        return Chips;
     }
 
-    // Card header: title on the left, a one-line summary on the right.
-    auto Header = [&](UVerticalBox* Body, const FString& Title, const FLinearColor& TitleColor, const FString& Summary)
+    /** Card header: title on the left, a one-line summary on the right. */
+    void DTTCardHeader(FDTTCardSink& Sink, UVerticalBox* Body, const FString& Title, const FLinearColor& TitleColor, const FString& Summary)
     {
         UHorizontalBox* Row = Sink.HBox(Body, FMargin(0, 0, 0, 2));
         Sink.Text(Row, Title, 17, TitleColor, false, FMargin(0), true);
         Sink.Text(Row, Summary, 12, DTTGrey);
-    };
-
-    for (const FString& Resource : Order)
-    {
-        const TArray<const FDTTDispatchRow*>& List = ByResource[Resource];
-        int32 Producers = 0, Requesters = 0, Open = 0, Claimed = 0, Inactive = 0;
-        for (const FDTTDispatchRow* Row : List)
-        {
-            if (!Row->bModeMatches) ++Inactive;
-            if (Row->Role == EDTTDispatchRole::Producer) ++Producers;
-            else { ++Requesters; if (Row->bOpen) { ++Open; if (!Row->ClaimOwner.IsEmpty()) ++Claimed; } }
-        }
-        FString Summary = FString::Printf(TEXT("%d producer%s, %d requester%s"), Producers, Producers == 1 ? TEXT("") : TEXT("s"), Requesters, Requesters == 1 ? TEXT("") : TEXT("s"));
-        if (Open > 0) Summary += FString::Printf(TEXT("  ·  %d open, %d claimed"), Open, Claimed);
-        if (Inactive > 0) Summary += FString::Printf(TEXT("  ·  %d inactive"), Inactive);
-        const bool bWaiting = Open > Claimed;
-        UVerticalBox* Body = Sink.Card(Page, bWaiting ? DTTCardTintOpen : DTTCardTint);
-        Header(Body, Resource, bWaiting ? DTTGreen : (Open > 0 ? DTTYellow : DTTCyan), Summary);
-
-        UHorizontalBox* Columns = Sink.HBox(Body, FMargin(0, 4, 0, 0));
-        UVerticalBox* Left = Sink.Column(Columns);
-        UVerticalBox* Right = Sink.Column(Columns);
-        Sink.Text(Left, TEXT("Producers"), 12, DTTDim, false, FMargin(0, 0, 0, 2));
-        Sink.Text(Right, TEXT("Requesters"), 12, DTTDim, false, FMargin(0, 0, 0, 2));
-        if (Producers == 0) Sink.Text(Left, TEXT("none"), 13, DTTDim);
-        if (Requesters == 0) Sink.Text(Right, TEXT("none"), 13, DTTDim);
-
-        for (const FDTTDispatchRow* Row : List)
-        {
-            const TCHAR* Mode = !Row->bModeKnown ? TEXT("mode unavailable") : (Row->bLoadMode ? TEXT("LOAD") : TEXT("UNLOAD"));
-            if (Row->Role == EDTTDispatchRole::Producer)
-            {
-                UVerticalBox* Item = Sink.VBox(Left, FMargin(0, 2, 0, 4));
-                Sink.Text(Item, DTTStationName(Row->StationName), 14, Row->bModeMatches ? FLinearColor::White : DTTRed, true);
-                FString Detail = FString::Printf(TEXT("stock %s  ·  %s"), *DTTStacks(Row->StockStacks), Mode);
-                if (!Row->bModeMatches) Detail += TEXT("  ·  inactive: a producer must be in LOAD mode");
-                Sink.Text(Item, Detail, 12, Row->bModeMatches ? DTTGrey : DTTRed, true);
-                continue;
-            }
-
-            UVerticalBox* Item = Sink.VBox(Right, FMargin(0, 2, 0, 4));
-            FLinearColor Status = DTTDim;
-            FString StatusLine = TEXT("not open");
-            if (!Row->bModeMatches) { Status = DTTRed; StatusLine = TEXT("inactive: a requester must be in UNLOAD mode"); }
-            else if (Row->bOpen && Row->ClaimOwner.IsEmpty()) { Status = DTTGreen; StatusLine = TEXT("open, waiting for a truck"); }
-            else if (Row->bOpen)
-            {
-                Status = DTTYellow;
-                StatusLine = FString::Printf(TEXT("open, claimed by %s"), *Row->ClaimOwner);
-                if (Row->PlannedStacks > 0) StatusLine += FString::Printf(TEXT("  ·  %d stacks planned"), Row->PlannedStacks);
-            }
-            else if (!Row->ClaimOwner.IsEmpty()) StatusLine = FString::Printf(TEXT("claimed by %s"), *Row->ClaimOwner);
-
-            Sink.Text(Item, DTTStationName(Row->StationName), 14, Row->bModeMatches ? FLinearColor::White : DTTRed, true);
-            FString Detail = Row->StockStacks >= 0
-                ? (Row->CapacityStacks > 0 ? FString::Printf(TEXT("stock %d / %d stacks"), Row->StockStacks, Row->CapacityStacks) : FString::Printf(TEXT("stock %d stacks"), Row->StockStacks))
-                : FString(TEXT("stock unknown"));
-            if (Row->TriggerStacks >= 0)
-            {
-                Detail += Row->bFluid && Row->CapacityStacks > 0
-                    ? FString::Printf(TEXT("  ·  call below %d (%d%%)"), Row->TriggerStacks, FMath::RoundToInt(100.0f * Row->TriggerStacks / Row->CapacityStacks))
-                    : FString::Printf(TEXT("  ·  call below %d"), Row->TriggerStacks);
-            }
-            if (Row->ThresholdStacks >= 0) Detail += FString::Printf(TEXT("  ·  fill to %d"), Row->ThresholdStacks);
-            Sink.Text(Item, Detail, 12, DTTGrey, true);
-            const float Percent = (Row->StockStacks >= 0 && Row->CapacityStacks > 0) ? float(Row->StockStacks) / float(Row->CapacityStacks) : 0.0f;
-            Sink.Bar(Item, Percent, Status);
-            Sink.Text(Item, StatusLine, 12, Status, true);
-        }
-    }
-
-    if (Depots.Num() > 0)
-    {
-        UVerticalBox* Body = Sink.Card(Page, DTTCardTint);
-        int32 Busy = 0;
-        for (const FDTTDispatchRow* Row : Depots) if (!Row->ClaimOwner.IsEmpty()) ++Busy;
-        Header(Body, TEXT("Depots (D)"), DTTSteel, FString::Printf(TEXT("%d depot%s, %d claimed"), Depots.Num(), Depots.Num() == 1 ? TEXT("") : TEXT("s"), Busy));
-        for (const FDTTDispatchRow* Row : Depots)
-        {
-            UVerticalBox* Item = Sink.VBox(Body, FMargin(0, 2, 0, 4));
-            Sink.Text(Item, DTTStationName(Row->StationName), 14, FLinearColor::White, true);
-            FString Detail = Row->ClaimOwner.IsEmpty() ? TEXT("free") : FString::Printf(TEXT("claimed by %s"), *Row->ClaimOwner);
-            // The note is "docked=<truck|-> held=<yes|no>" for the chat; say it in words here.
-            const int32 DockedAt = Row->Note.Find(TEXT("docked=")), HeldAt = Row->Note.Find(TEXT(" held="));
-            const FString Docked = DockedAt >= 0 ? Row->Note.Mid(DockedAt + 7, HeldAt > DockedAt ? HeldAt - (DockedAt + 7) : MAX_int32) : FString();
-            if (!Docked.IsEmpty() && Docked != TEXT("-")) Detail += FString::Printf(TEXT("  ·  %s docked"), *Docked);
-            if (HeldAt >= 0 && Row->Note.Mid(HeldAt + 6) == TEXT("yes")) Detail += TEXT("  ·  held");
-            Sink.Text(Item, Detail, 12, Row->ClaimOwner.IsEmpty() ? DTTGreen : DTTGrey, true);
-        }
-    }
-
-    if (FuelStops.Num() > 0)
-    {
-        UVerticalBox* Body = Sink.Card(Page, DTTCardTint);
-        Header(Body, TEXT("Fuel stops (F)"), DTTOrange, FString::Printf(TEXT("%d stop%s"), FuelStops.Num(), FuelStops.Num() == 1 ? TEXT("") : TEXT("s")));
-        for (const FDTTDispatchRow* Row : FuelStops)
-        {
-            UVerticalBox* Item = Sink.VBox(Body, FMargin(0, 2, 0, 4));
-            Sink.Text(Item, DTTStationName(Row->StationName), 14, FLinearColor::White, true);
-        }
-    }
-
-    if (Rows.Num() == 0)
-    {
-        UVerticalBox* Body = Sink.Card(Page, DTTCardTint);
-        Header(Body, TEXT("No dispatch tags"), DTTGrey, FString());
-        Sink.Text(Body, TEXT("Put (Resource) into a station name: LOAD stations produce it, UNLOAD stations request it. (Resource-N) sets the limit: "
-            "a solid station is called below N stacks, a fluid one below N %. (F) marks a fuel stop, (D) a depot for the truck pool."), 13, DTTGrey, true, FMargin(0, 4, 0, 0));
     }
 }
 
-void UDynamicTimeTableWidget::PopulateTruckCards(const TArray<FDTTTruckRow>& Rows, FDTTCardSink& Sink)
+void UDynamicTimeTableWidget::SyncCards(UScrollBox* Page, TArray<FDTTCardWidgets>& Cards, const TArray<FString>& Keys,
+    TFunctionRef<void(int32, FDTTCardSink&)> Fill)
 {
-    UScrollBox* Page = TruckScrollBox;
-    for (const FDTTTruckRow& Row : Rows)
+    if (!Page) return;
+    for (int32 Index = 0; Index < Keys.Num(); ++Index)
     {
-        FLinearColor PhaseColor(0.25f, 0.45f, 0.35f);
-        FString PhaseLabel = TEXT("Dispatch");
-        if (Row.bPool)
+        if (Cards.IsValidIndex(Index) && Cards[Index].Root && Cards[Index].Key == Keys[Index])
         {
-            PhaseLabel = TEXT("Pool · ") + UDynamicTimeTableSubsystem::PhaseLabel(Row.Phase);
-            switch (Row.Phase)
-            {
-            case EDTTTruckPhase::Parked: PhaseColor = FLinearColor(0.3f, 0.32f, 0.36f); break;
-            case EDTTTruckPhase::Assigned: PhaseColor = FLinearColor(0.1f, 0.4f, 0.55f); break;
-            case EDTTTruckPhase::ToDepot: PhaseColor = FLinearColor(0.28f, 0.34f, 0.5f); break;
-            case EDTTTruckPhase::Manual: PhaseColor = FLinearColor(0.55f, 0.3f, 0.08f); break;
-            default: break;
-            }
+            FDTTCardSink Sink(WidgetTree, false, Cards[Index]);
+            Fill(Index, Sink);
+            // The shape changed without the key noticing: rebuild this card on the next refresh.
+            if (Sink.Overran()) Cards[Index].Key.Reset();
+            continue;
         }
-        const bool bWarn = !Row.bAutopilot || (Row.bPool && Row.Phase == EDTTTruckPhase::Manual);
-        UVerticalBox* Body = Sink.Card(Page, bWarn ? DTTCardTintWarn : DTTCardTint);
-
-        UHorizontalBox* Head = Sink.HBox(Body, FMargin(0, 0, 0, 2));
-        Sink.Text(Head, Row.Name, 17, FLinearColor::White, false, FMargin(0, 0, 10, 0));
-        Sink.Text(Head, Row.ResourceId.IsEmpty() ? TEXT("no resource") : Row.ResourceId, 14, Row.ResourceId.IsEmpty() ? DTTDim : DTTCyan, false, FMargin(0, 0, 10, 0), true);
-        Sink.Badge(Head, PhaseLabel, PhaseColor);
-        if (!Row.bAutopilot) Sink.Badge(Head, TEXT("Autopilot off"), FLinearColor(0.6f, 0.3f, 0.05f));
-        if (Row.bDocking) Sink.Badge(Head, TEXT("Docked"), FLinearColor(0.2f, 0.35f, 0.45f));
-
-        // Where it is going: the stops in order, the current target lit.
-        UHorizontalBox* RouteRow = Sink.HBox(Body, FMargin(0, 2, 0, 0));
-        Sink.Text(RouteRow, TEXT("Route"), 12, DTTDim, false, FMargin(0, 0, 8, 0));
-        UWrapBox* Stops = Sink.Wrap(RouteRow);
-        if (Row.RouteStops.Num() == 0) Sink.Text(Stops, TEXT("no route"), 13, DTTDim);
-        // A pool lap starts with copies of the depot that only carry the target index; one chip
-        // stands for a run of the same stop, lit when the target is anywhere in the run.
-        int32 Chips = 0;
-        for (int32 Index = 0; Index < Row.RouteStops.Num(); ++Index)
+        FDTTCardWidgets Fresh;
+        Fresh.Key = Keys[Index];
+        FDTTCardSink Sink(WidgetTree, true, Fresh);
+        Fill(Index, Sink);
+        UE_LOG(LogDynamicTimeTableWidget, Verbose, TEXT("CARD_BUILT Index=%d Key=%s"), Index, *Keys[Index]);
+        if (Cards.IsValidIndex(Index))
         {
-            if (Index > 0 && Row.RouteStops[Index] == Row.RouteStops[Index - 1]) continue;
-            int32 End = Index;
-            while (End + 1 < Row.RouteStops.Num() && Row.RouteStops[End + 1] == Row.RouteStops[Index]) ++End;
-            if (Chips++ > 0) Sink.Text(Stops, TEXT("›"), 13, DTTDim);
-            const bool bTarget = Row.TargetIndex >= Index && Row.TargetIndex <= End;
-            Sink.Text(Stops, Row.RouteStops[Index], 13, bTarget ? DTTCyan : FLinearColor(0.75f, 0.8f, 0.85f));
+            if (Cards[Index].Root) Page->RemoveChild(Cards[Index].Root);
+            Cards[Index] = MoveTemp(Fresh);
         }
-
-        if (Row.bPool) Sink.Text(Body, FString::Printf(TEXT("depot %s"), Row.DepotName.IsEmpty() ? TEXT("-") : *Row.DepotName), 12, DTTGrey, true, FMargin(0, 2, 0, 0));
-
-        // Cargo: the bar shows how full the truck is, the note says what it carries and why it waits.
-        const FString Cargo = Row.CargoCapacityStacks >= 0
-            ? FString::Printf(TEXT("Cargo %d / %d stacks"), Row.CargoStacks, Row.CargoCapacityStacks)
-            : FString(TEXT("Cargo unknown"));
-        const float Percent = Row.CargoCapacityStacks > 0 ? float(FMath::Max(Row.CargoStacks, 0)) / float(Row.CargoCapacityStacks) : 0.0f;
-        Sink.Text(Body, Cargo, 13, FLinearColor::White, false, FMargin(0, 6, 0, 0));
-        Sink.Bar(Body, Percent, Row.CargoStacks > 0 ? DTTCyan : DTTDim);
-        if (!Row.CargoNote.IsEmpty()) Sink.Text(Body, Row.CargoNote, 12, DTTGrey, true);
-        if (!Row.PlannedSummary.IsEmpty()) Sink.Text(Body, TEXT("Planned: ") + Row.PlannedSummary, 12, FLinearColor(0.7f, 0.8f, 0.85f), true, FMargin(0, 2, 0, 0));
+        else
+        {
+            Cards.Add(MoveTemp(Fresh));
+        }
+        if (Cards[Index].Root)
+        {
+            Page->InsertChildAt(Index, Cards[Index].Root);
+            FDTTCardSink::Pad<UScrollBoxSlot>(Cards[Index].Root, FMargin(4, 3));
+        }
     }
-
-    if (Rows.Num() == 0)
+    while (Cards.Num() > Keys.Num())
     {
-        UVerticalBox* Body = Sink.Card(Page, DTTCardTint);
-        UHorizontalBox* Head = Sink.HBox(Body);
-        Sink.Text(Head, TEXT("No managed trucks"), 17, DTTGrey);
-        Sink.Text(Body, TEXT("A truck whose first stop is a (Resource) LOAD station runs dispatch laps; one whose route contains a (D) depot joins the pool "
-            "(or /dtt park <truck>)."), 13, DTTGrey, true, FMargin(0, 4, 0, 0));
+        if (Cards.Last().Root) Page->RemoveChild(Cards.Last().Root);
+        Cards.Pop();
     }
 }
 
@@ -1149,30 +1025,223 @@ void UDynamicTimeTableWidget::RefreshDispatchDisplay()
         Subsystem->BuildDispatchRows(Rows);
     }
 
-    TArray<FString> Keys;
-    int32 Open = 0, Depots = 0;
+    // Cards: one per resource in order of first appearance, then depots, then fuel stops.
+    // The filter keeps a row whose resource or station name contains the text, any case.
+    const FString Filter = DispatchFilter ? DispatchFilter->GetText().ToString().TrimStartAndEnd() : FString();
+    struct FCardSpec { int32 Kind = 0; FString Resource; TArray<const FDTTDispatchRow*> Rows; };
+    TArray<FCardSpec> Specs;
+    TMap<FString, int32> ResourceCard;
+    FCardSpec Depots; Depots.Kind = 1;
+    FCardSpec FuelStops; FuelStops.Kind = 2;
+    int32 Open = 0, Shown = 0;
     for (const FDTTDispatchRow& Row : Rows)
     {
-        Keys.Add(FString::Printf(TEXT("%s|%s|%d%d%d"), *Row.ResourceId, *Row.DockingPathNodeGuid.ToString(), int32(Row.Role), Row.bDepot ? 1 : 0, Row.bFuelStop ? 1 : 0));
-        if (Row.bDepot) ++Depots;
-        else if (!Row.bFuelStop && Row.Role != EDTTDispatchRole::Producer && Row.bOpen) ++Open;
+        if (Row.Role != EDTTDispatchRole::Producer && !Row.bDepot && !Row.bFuelStop && Row.bOpen) ++Open;
+        if (!Filter.IsEmpty() && !Row.ResourceId.Contains(Filter) && !Row.StationName.Contains(Filter)) continue;
+        ++Shown;
+        if (Row.bDepot) { Depots.Rows.Add(&Row); continue; }
+        if (Row.bFuelStop) { FuelStops.Rows.Add(&Row); continue; }
+        int32* Found = ResourceCard.Find(Row.ResourceId);
+        if (!Found) { Found = &ResourceCard.Add(Row.ResourceId, Specs.Num()); Specs.AddDefaulted_GetRef().Resource = Row.ResourceId; }
+        Specs[*Found].Rows.Add(&Row);
+    }
+    const int32 DepotCount = Depots.Rows.Num();
+    if (Depots.Rows.Num() > 0) Specs.Add(MoveTemp(Depots));
+    if (FuelStops.Rows.Num() > 0) Specs.Add(MoveTemp(FuelStops));
+    if (Rows.Num() == 0) { FCardSpec Empty; Empty.Kind = 3; Specs.Add(Empty); }
+    else if (Shown == 0) { FCardSpec Empty; Empty.Kind = 4; Specs.Add(Empty); }
+
+    TArray<FString> Keys;
+    for (const FCardSpec& Spec : Specs)
+    {
+        FString Key = FString::Printf(TEXT("%d|%s"), Spec.Kind, *Spec.Resource);
+        for (const FDTTDispatchRow* Row : Spec.Rows) Key += FString::Printf(TEXT("|%s:%d"), *Row->DockingPathNodeGuid.ToString(EGuidFormats::Short), int32(Row->Role));
+        Keys.Add(Key);
     }
     if (SummaryText)
     {
         SummaryText->SetText(FText::FromString(FString::Printf(TEXT("%d dispatch row(s), %d open, %d depot(s) - %s"),
-            Rows.Num(), Open, Depots, IsRemoteClient() ? TEXT("server snapshot") : TEXT("live"))));
+            Rows.Num(), Open, DepotCount, IsRemoteClient() ? TEXT("server snapshot") : TEXT("live"))));
     }
-    if (!DispatchScrollBox) return;
-    const bool bBuild = Keys != DispatchCardKeys;
-    if (bBuild)
+
+    SyncCards(DispatchScrollBox, DispatchCards, Keys, [&](int32 Index, FDTTCardSink& Sink)
     {
-        DispatchScrollBox->ClearChildren();
-        DispatchCardTexts.Reset(); DispatchCardBorders.Reset(); DispatchCardBars.Reset();
-        DispatchCardKeys = Keys;
+        const FCardSpec& Spec = Specs[Index];
+        switch (Spec.Kind)
+        {
+        case 0: PopulateResourceCard(Spec.Resource, Spec.Rows, Sink); break;
+        case 1: PopulateDepotCard(Spec.Rows, Sink); break;
+        case 2: PopulateFuelCard(Spec.Rows, Sink); break;
+        case 4:
+        {
+            UVerticalBox* Body = Sink.Root(DTTCardTint);
+            DTTCardHeader(Sink, Body, TEXT("Nothing matches the filter"), DTTGrey, FString());
+            break;
+        }
+        default:
+        {
+            UVerticalBox* Body = Sink.Root(DTTCardTint);
+            DTTCardHeader(Sink, Body, TEXT("No dispatch tags"), DTTGrey, FString());
+            Sink.Text(Body, TEXT("Put (Resource) into a station name: LOAD stations produce it, UNLOAD stations request it. (Resource-N) sets the limit: "
+                "a solid station is called below N stacks, a fluid one below N %. (F) marks a fuel stop, (D) a depot for the truck pool."), 13, DTTGrey, true, FMargin(0, 4, 0, 0));
+            break;
+        }
+        }
+    });
+}
+
+void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, const TArray<const FDTTDispatchRow*>& List, FDTTCardSink& Sink)
+{
+    int32 Producers = 0, Requesters = 0, Open = 0, Claimed = 0, Inactive = 0;
+    for (const FDTTDispatchRow* Row : List)
+    {
+        if (!Row->bModeMatches) ++Inactive;
+        if (Row->Role == EDTTDispatchRole::Producer) ++Producers;
+        else { ++Requesters; if (Row->bOpen) { ++Open; if (!Row->ClaimOwner.IsEmpty()) ++Claimed; } }
     }
-    FDTTCardSink Sink(WidgetTree, bBuild, DispatchCardTexts, DispatchCardBorders, DispatchCardBars);
-    PopulateDispatchCards(Rows, Sink);
-    if (Sink.Overran()) DispatchCardKeys.Reset();
+    FString Summary = FString::Printf(TEXT("%d producer%s, %d requester%s"), Producers, Producers == 1 ? TEXT("") : TEXT("s"), Requesters, Requesters == 1 ? TEXT("") : TEXT("s"));
+    if (Open > 0) Summary += FString::Printf(TEXT("  ·  %d open, %d claimed"), Open, Claimed);
+    if (Inactive > 0) Summary += FString::Printf(TEXT("  ·  %d inactive"), Inactive);
+    const bool bWaiting = Open > Claimed;
+    UVerticalBox* Body = Sink.Root(bWaiting ? DTTCardTintOpen : DTTCardTint);
+    DTTCardHeader(Sink, Body, Resource, bWaiting ? DTTGreen : (Open > 0 ? DTTYellow : DTTCyan), Summary);
+
+    UHorizontalBox* Columns = Sink.HBox(Body, FMargin(0, 4, 0, 0));
+    UVerticalBox* Left = Sink.Column(Columns);
+    UVerticalBox* Right = Sink.Column(Columns);
+    Sink.Text(Left, TEXT("Producers"), 12, DTTDim, false, FMargin(0, 0, 0, 2));
+    Sink.Text(Right, TEXT("Requesters"), 12, DTTDim, false, FMargin(0, 0, 0, 2));
+    Sink.Text(Left, Producers == 0 ? TEXT("none") : TEXT(""), 13, DTTDim);
+    Sink.Text(Right, Requesters == 0 ? TEXT("none") : TEXT(""), 13, DTTDim);
+
+    for (const FDTTDispatchRow* Row : List)
+    {
+        const TCHAR* Mode = !Row->bModeKnown ? TEXT("mode unavailable") : (Row->bLoadMode ? TEXT("LOAD") : TEXT("UNLOAD"));
+        if (Row->Role == EDTTDispatchRole::Producer)
+        {
+            UVerticalBox* Item = Sink.VBox(Left, FMargin(0, 2, 0, 4));
+            Sink.Text(Item, DTTStationName(Row->StationName), 14, Row->bModeMatches ? FLinearColor::White : DTTRed, true);
+            FString Detail = FString::Printf(TEXT("stock %s  ·  %s"), *DTTStacks(Row->StockStacks), Mode);
+            if (!Row->bModeMatches) Detail += TEXT("  ·  inactive: a producer must be in LOAD mode");
+            Sink.Text(Item, Detail, 12, Row->bModeMatches ? DTTGrey : DTTRed, true);
+            continue;
+        }
+
+        FLinearColor Status = DTTDim;
+        FString StatusLine = TEXT("not open");
+        if (!Row->bModeMatches) { Status = DTTRed; StatusLine = TEXT("inactive: a requester must be in UNLOAD mode"); }
+        else if (Row->bOpen && Row->ClaimOwner.IsEmpty()) { Status = DTTGreen; StatusLine = TEXT("open, waiting for a truck"); }
+        else if (Row->bOpen)
+        {
+            Status = DTTYellow;
+            StatusLine = FString::Printf(TEXT("open, claimed by %s"), *Row->ClaimOwner);
+            if (Row->PlannedStacks > 0) StatusLine += FString::Printf(TEXT("  ·  %d stacks planned"), Row->PlannedStacks);
+        }
+        else if (!Row->ClaimOwner.IsEmpty()) StatusLine = FString::Printf(TEXT("claimed by %s"), *Row->ClaimOwner);
+
+        UVerticalBox* Item = Sink.VBox(Right, FMargin(0, 2, 0, 4));
+        Sink.Text(Item, DTTStationName(Row->StationName), 14, Row->bModeMatches ? FLinearColor::White : DTTRed, true);
+        FString Detail = Row->StockStacks >= 0
+            ? (Row->CapacityStacks > 0 ? FString::Printf(TEXT("stock %d / %d stacks"), Row->StockStacks, Row->CapacityStacks) : FString::Printf(TEXT("stock %d stacks"), Row->StockStacks))
+            : FString(TEXT("stock unknown"));
+        if (Row->TriggerStacks >= 0)
+        {
+            Detail += Row->bFluid && Row->CapacityStacks > 0
+                ? FString::Printf(TEXT("  ·  call below %d (%d%%)"), Row->TriggerStacks, FMath::RoundToInt(100.0f * Row->TriggerStacks / Row->CapacityStacks))
+                : FString::Printf(TEXT("  ·  call below %d"), Row->TriggerStacks);
+        }
+        if (Row->ThresholdStacks >= 0) Detail += FString::Printf(TEXT("  ·  fill to %d"), Row->ThresholdStacks);
+        Sink.Text(Item, Detail, 12, DTTGrey, true);
+        const float Percent = (Row->StockStacks >= 0 && Row->CapacityStacks > 0) ? float(Row->StockStacks) / float(Row->CapacityStacks) : 0.0f;
+        Sink.Bar(Item, Percent, Status);
+        Sink.Text(Item, StatusLine, 12, Status, true);
+    }
+}
+
+void UDynamicTimeTableWidget::PopulateDepotCard(const TArray<const FDTTDispatchRow*>& Depots, FDTTCardSink& Sink)
+{
+    UVerticalBox* Body = Sink.Root(DTTCardTint);
+    int32 Busy = 0;
+    for (const FDTTDispatchRow* Row : Depots) if (!Row->ClaimOwner.IsEmpty()) ++Busy;
+    DTTCardHeader(Sink, Body, TEXT("Depots (D)"), DTTSteel, FString::Printf(TEXT("%d depot%s, %d claimed"), Depots.Num(), Depots.Num() == 1 ? TEXT("") : TEXT("s"), Busy));
+    for (const FDTTDispatchRow* Row : Depots)
+    {
+        UVerticalBox* Item = Sink.VBox(Body, FMargin(0, 2, 0, 4));
+        Sink.Text(Item, DTTStationName(Row->StationName), 14, FLinearColor::White, true);
+        FString Detail = Row->ClaimOwner.IsEmpty() ? TEXT("free") : FString::Printf(TEXT("claimed by %s"), *Row->ClaimOwner);
+        // The note is "docked=<truck|-> held=<yes|no>" for the chat; say it in words here.
+        const int32 DockedAt = Row->Note.Find(TEXT("docked=")), HeldAt = Row->Note.Find(TEXT(" held="));
+        const FString Docked = DockedAt >= 0 ? Row->Note.Mid(DockedAt + 7, HeldAt > DockedAt ? HeldAt - (DockedAt + 7) : MAX_int32) : FString();
+        if (!Docked.IsEmpty() && Docked != TEXT("-")) Detail += FString::Printf(TEXT("  ·  %s docked"), *Docked);
+        if (HeldAt >= 0 && Row->Note.Mid(HeldAt + 6) == TEXT("yes")) Detail += TEXT("  ·  held");
+        Sink.Text(Item, Detail, 12, Row->ClaimOwner.IsEmpty() ? DTTGreen : DTTGrey, true);
+    }
+}
+
+void UDynamicTimeTableWidget::PopulateFuelCard(const TArray<const FDTTDispatchRow*>& FuelStops, FDTTCardSink& Sink)
+{
+    UVerticalBox* Body = Sink.Root(DTTCardTint);
+    DTTCardHeader(Sink, Body, TEXT("Fuel stops (F)"), DTTOrange, FString::Printf(TEXT("%d stop%s"), FuelStops.Num(), FuelStops.Num() == 1 ? TEXT("") : TEXT("s")));
+    for (const FDTTDispatchRow* Row : FuelStops)
+    {
+        UVerticalBox* Item = Sink.VBox(Body, FMargin(0, 2, 0, 4));
+        Sink.Text(Item, DTTStationName(Row->StationName), 14, FLinearColor::White, true);
+    }
+}
+
+void UDynamicTimeTableWidget::PopulateTruckCard(const FDTTTruckRow& Row, FDTTCardSink& Sink)
+{
+    FLinearColor PhaseColor(0.25f, 0.45f, 0.35f);
+    FString PhaseLabel = TEXT("Dispatch");
+    if (Row.bPool)
+    {
+        PhaseLabel = TEXT("Pool · ") + UDynamicTimeTableSubsystem::PhaseLabel(Row.Phase);
+        switch (Row.Phase)
+        {
+        case EDTTTruckPhase::Parked: PhaseColor = FLinearColor(0.3f, 0.32f, 0.36f); break;
+        case EDTTTruckPhase::Assigned: PhaseColor = FLinearColor(0.1f, 0.4f, 0.55f); break;
+        case EDTTTruckPhase::ToDepot: PhaseColor = FLinearColor(0.28f, 0.34f, 0.5f); break;
+        case EDTTTruckPhase::Manual: PhaseColor = FLinearColor(0.55f, 0.3f, 0.08f); break;
+        default: break;
+        }
+    }
+    const bool bWarn = !Row.bAutopilot || (Row.bPool && Row.Phase == EDTTTruckPhase::Manual);
+    UVerticalBox* Body = Sink.Root(bWarn ? DTTCardTintWarn : DTTCardTint);
+
+    UHorizontalBox* Head = Sink.HBox(Body, FMargin(0, 0, 0, 2));
+    Sink.Text(Head, Row.Name, 17, FLinearColor::White, false, FMargin(0, 0, 10, 0));
+    Sink.Text(Head, Row.ResourceId.IsEmpty() ? TEXT("no resource") : Row.ResourceId, 14, Row.ResourceId.IsEmpty() ? DTTDim : DTTCyan, false, FMargin(0, 0, 10, 0), true);
+    Sink.Badge(Head, PhaseLabel, PhaseColor);
+    Sink.Badge(Head, TEXT("Autopilot off"), FLinearColor(0.6f, 0.3f, 0.05f), !Row.bAutopilot);
+    Sink.Badge(Head, TEXT("Docked"), FLinearColor(0.2f, 0.35f, 0.45f), Row.bDocking);
+
+    // Where it is going: the stops in order, the current target lit, runs of one stop as one chip.
+    UHorizontalBox* RouteRow = Sink.HBox(Body, FMargin(0, 2, 0, 0));
+    Sink.Text(RouteRow, TEXT("Route"), 12, DTTDim, false, FMargin(0, 0, 8, 0));
+    UWrapBox* Stops = Sink.Wrap(RouteRow);
+    if (Row.RouteStops.Num() == 0) Sink.Text(Stops, TEXT("no route"), 13, DTTDim);
+    int32 Chips = 0;
+    for (int32 Index = 0; Index < Row.RouteStops.Num(); ++Index)
+    {
+        if (Index > 0 && Row.RouteStops[Index] == Row.RouteStops[Index - 1]) continue;
+        int32 End = Index;
+        while (End + 1 < Row.RouteStops.Num() && Row.RouteStops[End + 1] == Row.RouteStops[Index]) ++End;
+        if (Chips++ > 0) Sink.Text(Stops, TEXT("›"), 13, DTTDim);
+        const bool bTarget = Row.TargetIndex >= Index && Row.TargetIndex <= End;
+        Sink.Text(Stops, Row.RouteStops[Index], 13, bTarget ? DTTCyan : FLinearColor(0.75f, 0.8f, 0.85f));
+    }
+
+    Sink.Text(Body, Row.bPool ? FString::Printf(TEXT("depot %s"), Row.DepotName.IsEmpty() ? TEXT("-") : *Row.DepotName) : FString(), 12, DTTGrey, true, FMargin(0, 2, 0, 0));
+
+    // Cargo: the bar shows how full the truck is, the note says what it carries and why it waits.
+    const FString Cargo = Row.CargoCapacityStacks >= 0
+        ? FString::Printf(TEXT("Cargo %d / %d stacks"), Row.CargoStacks, Row.CargoCapacityStacks)
+        : FString(TEXT("Cargo unknown"));
+    const float Percent = Row.CargoCapacityStacks > 0 ? float(FMath::Max(Row.CargoStacks, 0)) / float(Row.CargoCapacityStacks) : 0.0f;
+    Sink.Text(Body, Cargo, 13, FLinearColor::White, false, FMargin(0, 6, 0, 0));
+    Sink.Bar(Body, Percent, Row.CargoStacks > 0 ? DTTCyan : DTTDim);
+    Sink.Text(Body, Row.CargoNote, 12, DTTGrey, true);
+    Sink.Text(Body, Row.PlannedSummary.IsEmpty() ? FString() : TEXT("Planned: ") + Row.PlannedSummary, 12, FLinearColor(0.7f, 0.8f, 0.85f), true, FMargin(0, 2, 0, 0));
 }
 
 void UDynamicTimeTableWidget::RefreshTruckDisplay()
@@ -1187,32 +1256,33 @@ void UDynamicTimeTableWidget::RefreshTruckDisplay()
         Subsystem->BuildTruckRows(Rows);
     }
 
+    // The key is the truck, not its display name (that changes with every target), plus what
+    // decides the number of route chips; badges and optional lines are always present.
+    const FString Filter = TruckFilter ? TruckFilter->GetText().ToString().TrimStartAndEnd() : FString();
+    TArray<const FDTTTruckRow*> Shown;
     TArray<FString> Keys;
     int32 Pool = 0, Parked = 0;
     for (const FDTTTruckRow& Row : Rows)
     {
-        // Badges and route chips are widgets of their own, so what decides their number is part of the key.
-        int32 Chips = 0;
-        for (int32 Index = 0; Index < Row.RouteStops.Num(); ++Index)
-            if (Index == 0 || Row.RouteStops[Index] != Row.RouteStops[Index - 1]) ++Chips;
-        Keys.Add(FString::Printf(TEXT("%s|%d|%d|%d|%d|%d"), *Row.Name, Row.bPool ? 1 : 0, Chips,
-            Row.bAutopilot ? 1 : 0, Row.bDocking ? 1 : 0, Row.bPool ? int32(Row.Phase) : -1));
         if (Row.bPool) { ++Pool; if (Row.Phase == EDTTTruckPhase::Parked) ++Parked; }
+        if (!Filter.IsEmpty() && !Row.Name.Contains(Filter) && !Row.ResourceId.Contains(Filter)) continue;
+        Shown.Add(&Row);
+        Keys.Add(FString::Printf(TEXT("%s|%d|%d"), *DTTTruckKey(Row.Name), Row.bPool ? 1 : 0, DTTRouteChips(Row.RouteStops)));
     }
+    if (Shown.Num() == 0) Keys.Add(Rows.Num() == 0 ? TEXT("empty") : TEXT("nomatch"));
     if (SummaryText)
     {
         SummaryText->SetText(FText::FromString(FString::Printf(TEXT("%d truck(s), %d in the pool, %d parked - %s"),
             Rows.Num(), Pool, Parked, IsRemoteClient() ? TEXT("server snapshot") : TEXT("live"))));
     }
-    if (!TruckScrollBox) return;
-    const bool bBuild = Keys != TruckCardKeys;
-    if (bBuild)
+
+    SyncCards(TruckScrollBox, TruckCards, Keys, [&](int32 Index, FDTTCardSink& Sink)
     {
-        TruckScrollBox->ClearChildren();
-        TruckCardTexts.Reset(); TruckCardBorders.Reset(); TruckCardBars.Reset();
-        TruckCardKeys = Keys;
-    }
-    FDTTCardSink Sink(WidgetTree, bBuild, TruckCardTexts, TruckCardBorders, TruckCardBars);
-    PopulateTruckCards(Rows, Sink);
-    if (Sink.Overran()) TruckCardKeys.Reset();
+        if (Shown.IsValidIndex(Index)) { PopulateTruckCard(*Shown[Index], Sink); return; }
+        UVerticalBox* Body = Sink.Root(DTTCardTint);
+        const bool bNoTrucks = Rows.Num() == 0;
+        DTTCardHeader(Sink, Body, bNoTrucks ? TEXT("No managed trucks") : TEXT("Nothing matches the filter"), DTTGrey, FString());
+        Sink.Text(Body, bNoTrucks ? TEXT("A truck whose first stop is a (Resource) LOAD station runs dispatch laps; one whose route contains a (D) depot joins the pool "
+            "(or /dtt park <truck>).") : TEXT(""), 13, DTTGrey, true, FMargin(0, 4, 0, 0));
+    });
 }

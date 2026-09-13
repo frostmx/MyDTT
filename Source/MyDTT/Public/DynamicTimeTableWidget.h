@@ -11,7 +11,23 @@ class UComboBoxString;
 class UEditableTextBox;
 class UScrollBox;
 class UProgressBar;
+class UTextBlock;
+class UBorder;
+class UWidget;
 struct FDTTCardSink;
+
+/** One card of the Dispatch or Trucks page: its root in the scroll box and its widgets in creation order. */
+USTRUCT()
+struct FDTTCardWidgets
+{
+    GENERATED_BODY()
+
+    FString Key;
+    UPROPERTY() TObjectPtr<UWidget> Root;
+    UPROPERTY() TArray<TObjectPtr<UTextBlock>> Texts;
+    UPROPERTY() TArray<TObjectPtr<UBorder>> Borders;
+    UPROPERTY() TArray<TObjectPtr<UProgressBar>> Bars;
+};
 class USpinBox;
 class UTextBlock;
 class UWidgetSwitcher;
@@ -67,16 +83,12 @@ private:
     bool bSettingsEdited = false;
     UPROPERTY() TObjectPtr<UScrollBox> DispatchScrollBox;
     UPROPERTY() TObjectPtr<UScrollBox> TruckScrollBox;
-    // The Dispatch and Trucks pages are cards, built when the set of rows changes and updated in
-    // place otherwise; the arrays hold the widgets in creation order, the keys say what was built.
-    UPROPERTY() TArray<TObjectPtr<UTextBlock>> DispatchCardTexts;
-    UPROPERTY() TArray<TObjectPtr<UBorder>> DispatchCardBorders;
-    UPROPERTY() TArray<TObjectPtr<UProgressBar>> DispatchCardBars;
-    TArray<FString> DispatchCardKeys;
-    UPROPERTY() TArray<TObjectPtr<UTextBlock>> TruckCardTexts;
-    UPROPERTY() TArray<TObjectPtr<UBorder>> TruckCardBorders;
-    UPROPERTY() TArray<TObjectPtr<UProgressBar>> TruckCardBars;
-    TArray<FString> TruckCardKeys;
+    UPROPERTY() TObjectPtr<UEditableTextBox> DispatchFilter;
+    UPROPERTY() TObjectPtr<UEditableTextBox> TruckFilter;
+    // The Dispatch and Trucks pages are cards; a card is rebuilt only when its own key changes
+    // and updated in place otherwise, so the page never repaints as a whole.
+    UPROPERTY() TArray<FDTTCardWidgets> DispatchCards;
+    UPROPERTY() TArray<FDTTCardWidgets> TruckCards;
     int32 ActiveTab = 0;
 
     UPROPERTY() TObjectPtr<UScrollBox> GroupScrollBox;
@@ -131,8 +143,12 @@ private:
     void SetActiveTab(int32 Tab);
     void RefreshDispatchDisplay();
     void RefreshTruckDisplay();
-    void PopulateDispatchCards(const TArray<FDTTDispatchRow>& Rows, FDTTCardSink& Sink);
-    void PopulateTruckCards(const TArray<FDTTTruckRow>& Rows, FDTTCardSink& Sink);
+    void SyncCards(UScrollBox* Page, TArray<FDTTCardWidgets>& Cards, const TArray<FString>& Keys,
+        TFunctionRef<void(int32, FDTTCardSink&)> Fill);
+    void PopulateResourceCard(const FString& Resource, const TArray<const FDTTDispatchRow*>& Rows, FDTTCardSink& Sink);
+    void PopulateDepotCard(const TArray<const FDTTDispatchRow*>& Depots, FDTTCardSink& Sink);
+    void PopulateFuelCard(const TArray<const FDTTDispatchRow*>& FuelStops, FDTTCardSink& Sink);
+    void PopulateTruckCard(const FDTTTruckRow& Row, FDTTCardSink& Sink);
     void RebuildRuntimeDisplay();
     void UpdateRuntimeDisplayInPlace();
     bool RuntimeLayoutMatches() const;
@@ -148,6 +164,10 @@ private:
     UFUNCTION() void HandleCloseClicked();
     UFUNCTION() void HandleGroupsTabClicked();
     UFUNCTION() void HandleDispatchTabClicked();
+    UFUNCTION() void HandleDispatchFilterChanged(const FText& Text);
+    UFUNCTION() void HandleTruckFilterChanged(const FText& Text);
+    /** A page of cards: the filter line above a scroll box that fills the rest. */
+    class UVerticalBox* BuildCardPage(TObjectPtr<UScrollBox>& OutScroll, TObjectPtr<UEditableTextBox>& OutFilter);
     UFUNCTION() void HandleTrucksTabClicked();
     UFUNCTION() void HandleSettingsTabClicked();
     UFUNCTION() void HandleSettingsSaveClicked();
