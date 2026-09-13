@@ -3222,8 +3222,10 @@ FString UDynamicTimeTableSubsystem::DescribeCargo(AFGWheeledVehicleIdentifier* V
     TArray<FString> Parts;
     for (const auto& Pair : Items)
     {
+        // Whole stacks, rounded down like EstimateTruckCargoStacks, so the note and the dispatcher's
+        // OnBoard agree; the item count says what the rounding dropped.
         const int64 StackSize = FMath::Max(1, UFGItemDescriptor::GetStackSize(Pair.Key));
-        Parts.Add(FString::Printf(TEXT("%s x%lld"), *UFGItemDescriptor::GetItemName(Pair.Key).ToString(), (Pair.Value + StackSize - 1) / StackSize));
+        Parts.Add(FString::Printf(TEXT("%s %lld (%lld stacks)"), *UFGItemDescriptor::GetItemName(Pair.Key).ToString(), Pair.Value, Pair.Value / StackSize));
     }
     Parts.Sort();
     return FString::Join(Parts, TEXT(", "));
@@ -3901,15 +3903,6 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
             {
                 UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_SKIP Truck='%s' Resource='%s' Reason=cargo Trigger=%s"),
                     *DTSVehicleName(Vehicle), *Demand.ResourceId, Trigger);
-                FDTTPoolTruckState& Mutable = *Idle[IdleIndex].Value;
-                if (!Mutable.bCargoWaitLogged)
-                {
-                    // Once per parking: the truck sits with something nobody asked for. It waits for
-                    // a request of that very item, or for a depot in UNLOAD mode to take it.
-                    Mutable.bCargoWaitLogged = true;
-                    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_CARGO_WAIT Truck='%s' Cargo='%s' Depot='%s' Reason=cargo does not match '%s'"),
-                        *DTSVehicleName(Vehicle), *DescribeCargo(Vehicle), *DockDisplayName(State.DepotGuid), *Demand.ResourceId);
-                }
                 continue;
             }
             if (bFromCargo && OnBoardStacksOf(Vehicle, ItemClass) <= 0)
@@ -3967,6 +3960,22 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
             ++Assigned;
             Idle.RemoveAt(BestIdle);
         }
+    }
+    // Once per parking: a truck still parked with cargo after every demand was tried sits with
+    // something nobody asked for. It waits for a request of that very item, or for a depot in
+    // UNLOAD mode to take it. Logged here, not per demand, so a truck the same round dispatches
+    // for its own cargo is not reported as waiting.
+    for (const auto& Entry : Idle)
+    {
+        FDTTPoolTruckState& Mutable = *Entry.Value;
+        if (Mutable.bCargoWaitLogged) continue;
+        TSubclassOf<UFGItemDescriptor> Single;
+        const FString Cargo = DescribeCargo(Entry.Key, &Single);
+        if (Cargo.IsEmpty()) continue;
+        Mutable.bCargoWaitLogged = true;
+        UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_CARGO_WAIT Truck='%s' Cargo='%s' Depot='%s' Reason=%s"),
+            *DTSVehicleName(Entry.Key), *Cargo, *DockDisplayName(Mutable.DepotGuid),
+            Single ? TEXT("no open request for this item") : TEXT("mixed cargo"));
     }
     if (Assigned > 0)
     {

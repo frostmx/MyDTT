@@ -139,8 +139,9 @@ struct FDTTDispatchTruckAnchors
 
     // Requester dock GUID -> items this lap plans to leave there (deficit at planning time).
     // Diagnostic: the transfer cap itself is recomputed from the live stock when the truck docks.
-    // Runtime only.
-    UPROPERTY()
+    // Saved with the lap: after a reload the last requester of a lap planned before the save
+    // still drains (IsLastPlannedRequester), instead of one lap of leftovers riding on.
+    UPROPERTY(SaveGame)
     TMap<FGuid, int32> PlannedItems;
 };
 
@@ -236,8 +237,8 @@ struct FDTTPoolTruckState
     UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Dynamic Time Table")
     bool bParked = false;
 
-    /** Requester dock GUID -> items this lap planned to leave there. Runtime only. */
-    UPROPERTY()
+    /** Requester dock GUID -> items this lap planned to leave there. Saved with the lap. */
+    UPROPERTY(SaveGame)
     TMap<FGuid, int32> PlannedItems;
 
     /** World seconds of the last assignment. Runtime only. */
