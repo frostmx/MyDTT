@@ -244,6 +244,8 @@ private:
     void ReleaseLeftoverHold(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason, bool bUndock);
     /** The stop is the last requester this lap planned: pool laps by State.Requesters, legacy laps by the anchors' PlannedItems in route order. */
     bool IsLastPlannedRequester(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& StationGuid) const;
+    /** The last UNLOAD requester of the resource in route order, whatever the lap planned. */
+    bool IsLastRequesterInRoute(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& StationGuid, const FString& ResourceId) const;
     /** Stacks of ItemClass on board; 0 when unreadable. */
     int32 OnBoardStacksOf(AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<class UFGItemDescriptor> ItemClass) const;
     /**

@@ -12,6 +12,10 @@
   bookings of the balancer and has no effect on the other tabs.
 - Window protocol 9 (the rows carry the waiting time and the settings the new field); server and
   clients must run the same version. Save data is unchanged.
+- Fix: a fluid truck without a depot under *fluid trucks always carry a full load* now drains and
+  holds at its last requester on every lap. On a lap planned without an open request the producer
+  still filled the tank, but the requester was only filled to its target and the truck left at
+  once with the rest on board.
 
 ## 2.2.2
 

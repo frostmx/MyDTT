@@ -3252,8 +3252,15 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
                 // keeps the truck for a while (HandleTruckDocked opens the hold): what stays on
                 // board here rides to the depot otherwise. Off (DrainLeftovers), the truck keeps
                 // its leftovers for the next lap.
+                // A fluid truck under "fluid full load" leaves the producer with a full tank on every
+                // lap, planned or idle (the producer counts the requesters of the route, not of the
+                // plan), so its last requester in route order drains it even when the lap planned
+                // nothing - otherwise the leftover rides the loop and the consumer is topped up by
+                // one fill per lap instead of being held (seen 13.09.2026 on the water truck).
+                const bool bFullLoadLastStop = Settings.bFluidFullLoad && !PoolTrucks.Contains(Vehicle) &&
+                    IsFluidTruck(Vehicle) && IsLastRequesterInRoute(Vehicle, StationGuid, ResourceId);
                 if (bOutLeftoverHold && Settings.bDrainLeftovers && Settings.LeftoverHoldSeconds > 0.0f &&
-                    !Station->GetIsInLoadMode() && IsLastPlannedRequester(Vehicle, StationGuid))
+                    !Station->GetIsInLoadMode() && (bFullLoadLastStop || IsLastPlannedRequester(Vehicle, StationGuid)))
                 {
                     OutPlan.Mode = FDTTTransferPlan::EMode::Drain;
                     Reason = TEXT("last requester");
@@ -3291,6 +3298,23 @@ bool UDynamicTimeTableSubsystem::IsLastPlannedRequester(AFGWheeledVehicleIdentif
     for (int32 Index = Route.Num() - 1; Index >= 0; --Index)
     {
         if (Anchors->PlannedItems.Contains(Route[Index])) return Route[Index] == StationGuid;
+    }
+    return false;
+}
+
+bool UDynamicTimeTableSubsystem::IsLastRequesterInRoute(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& StationGuid, const FString& ResourceId) const
+{
+    if (!IsValid(Vehicle) || !StationGuid.IsValid()) return false;
+    const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+    for (int32 Index = Route.Num() - 1; Index >= 0; --Index)
+    {
+        const FDTTDispatchStation* Stop = FindDispatchStationByGuid(Route[Index]);
+        if (!Stop || !Stop->ResourceId.Equals(ResourceId, ESearchCase::IgnoreCase) ||
+            GetEffectiveDispatchRole(*Stop) != EDTTDispatchRole::Requester || !DoesDispatchStationMatchMode(*Stop))
+        {
+            continue;
+        }
+        return Route[Index] == StationGuid;
     }
     return false;
 }
