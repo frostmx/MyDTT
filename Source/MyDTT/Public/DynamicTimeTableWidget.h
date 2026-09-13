@@ -11,6 +11,8 @@ class UComboBoxString;
 class UEditableTextBox;
 class UScrollBox;
 class UProgressBar;
+class UImage;
+class UTexture2D;
 class UTextBlock;
 class UBorder;
 class UWidget;
@@ -27,6 +29,7 @@ struct FDTTCardWidgets
     UPROPERTY() TArray<TObjectPtr<UTextBlock>> Texts;
     UPROPERTY() TArray<TObjectPtr<UBorder>> Borders;
     UPROPERTY() TArray<TObjectPtr<UProgressBar>> Bars;
+    UPROPERTY() TArray<TObjectPtr<UImage>> Images;
 };
 class USpinBox;
 class UTextBlock;
@@ -89,6 +92,9 @@ private:
     // and updated in place otherwise, so the page never repaints as a whole.
     UPROPERTY() TArray<FDTTCardWidgets> DispatchCards;
     UPROPERTY() TArray<FDTTCardWidgets> TruckCards;
+    /** Item icons by descriptor path; a miss is cached too so an unresolvable class is not loaded again every refresh. */
+    UPROPERTY() TMap<FSoftObjectPath, TObjectPtr<UTexture2D>> IconCache;
+    UTexture2D* IconFor(const TSoftClassPtr<class UFGItemDescriptor>& ItemClass);
     int32 ActiveTab = 0;
 
     UPROPERTY() TObjectPtr<UScrollBox> GroupScrollBox;

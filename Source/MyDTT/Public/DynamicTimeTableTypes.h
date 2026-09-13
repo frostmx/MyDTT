@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "UObject/SoftObjectPtr.h"
 #include "DynamicTimeTableTypes.generated.h"
 
 class AFGTrainStationIdentifier;
@@ -273,6 +274,8 @@ struct FDTTDispatchRow
     GENERATED_BODY()
 
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString ResourceId;
+    /** The item the resource resolved to, for its icon; unset when nothing resolved. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TSoftClassPtr<class UFGItemDescriptor> ItemClass;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString StationName;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FGuid DockingPathNodeGuid;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") EDTTDispatchRole Role = EDTTDispatchRole::None;
@@ -307,6 +310,9 @@ struct FDTTTruckRow
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bPool = false;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") EDTTTruckPhase Phase = EDTTTruckPhase::Unmanaged;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString ResourceId;
+    /** The truck's resource and what is actually on board (when it is one item), for the icons. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TSoftClassPtr<class UFGItemDescriptor> ItemClass;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TSoftClassPtr<class UFGItemDescriptor> CargoItemClass;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TArray<FString> RouteStops;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 TargetIndex = -1;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 CargoStacks = -1;

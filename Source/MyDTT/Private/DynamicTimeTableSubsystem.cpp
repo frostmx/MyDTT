@@ -4407,6 +4407,7 @@ void UDynamicTimeTableSubsystem::BuildDispatchRows(TArray<FDTTDispatchRow>& OutR
 
         FDTTDispatchRow& Row = OutRows.AddDefaulted_GetRef();
         Row.ResourceId = Station.ResourceId;
+        Row.ItemClass = TSoftClassPtr<UFGItemDescriptor>(ItemClass.Get());
         Row.StationName = StripDispatchTag(Station.DisplayName);
         Row.DockingPathNodeGuid = Station.DockingPathNodeGuid;
         Row.Role = GetEffectiveDispatchRole(Station);
@@ -4523,6 +4524,10 @@ void UDynamicTimeTableSubsystem::BuildTruckRows(TArray<FDTTTruckRow>& OutRows, c
     auto FillCommon = [&](FDTTTruckRow& Row, AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<UFGItemDescriptor> ItemClass)
     {
         Row.Name = DTSVehicleName(Vehicle);
+        Row.ItemClass = TSoftClassPtr<UFGItemDescriptor>(ItemClass.Get());
+        TSubclassOf<UFGItemDescriptor> CargoClass;
+        DescribeCargo(Vehicle, &CargoClass);
+        Row.CargoItemClass = TSoftClassPtr<UFGItemDescriptor>(CargoClass.Get());
         const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
         for (const FGuid& Node : Route) Row.RouteStops.Add(DockDisplayName(Node));
         Row.TargetIndex = Vehicle->GetCurrentTargetWaypointIndex();

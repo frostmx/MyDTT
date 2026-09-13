@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.2.2
+
+- Item icons in the window: each resource card in the Dispatch tab and each truck card in the
+  Trucks tab shows the item's icon next to its name, and the cargo line shows what is actually
+  on board. Window protocol 8: the rows now carry the item class, so a remote client draws the
+  icons too. Server and clients must run the same version.
+
 ## 2.2.1
 
 - The Dispatch tab shows a card per resource: producers on the left with their stock,

@@ -3,6 +3,8 @@
 #include "DynamicTimeTableSubsystem.h"
 #include "DynamicTimeTableRemoteCallObject.h"
 #include "FGPlayerController.h"
+#include "Engine/Texture2D.h"
+#include "Resources/FGItemDescriptor.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
@@ -13,6 +15,7 @@
 #include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
+#include "Components/Image.h"
 #include "Components/PanelWidget.h"
 #include "Components/ProgressBar.h"
 #include "Components/ScrollBox.h"
@@ -780,12 +783,12 @@ struct FDTTCardSink
     UWidgetTree* Tree = nullptr;
     bool bBuild = true;
     FDTTCardWidgets& Card;
-    int32 TextIndex = 0, BorderIndex = 0, BarIndex = 0;
+    int32 TextIndex = 0, BorderIndex = 0, BarIndex = 0, ImageIndex = 0;
 
     FDTTCardSink(UWidgetTree* InTree, bool bInBuild, FDTTCardWidgets& InCard) : Tree(InTree), bBuild(bInBuild), Card(InCard) {}
 
     /** True when an update walked past what the build stored: the shape changed without the key noticing. */
-    bool Overran() const { return TextIndex != Card.Texts.Num() || BorderIndex != Card.Borders.Num() || BarIndex != Card.Bars.Num(); }
+    bool Overran() const { return TextIndex != Card.Texts.Num() || BorderIndex != Card.Borders.Num() || BarIndex != Card.Bars.Num() || ImageIndex != Card.Images.Num(); }
 
     template <typename TSlot>
     static void Pad(UWidget* Widget, const FMargin& Margin)
@@ -912,6 +915,35 @@ struct FDTTCardSink
         if (Border) Border->SetVisibility(bVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
     }
 
+    /** An item icon of Size points; collapsed when there is no texture, keeping its place. */
+    void Icon(UPanelWidget* Parent, UTexture2D* Texture, float Size, const FMargin& Margin = FMargin(0, 0, 6, 0))
+    {
+        UImage* Image = nullptr;
+        if (bBuild)
+        {
+            Image = Tree->ConstructWidget<UImage>();
+            USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+            Box->SetWidthOverride(Size); Box->SetHeightOverride(Size); Box->SetContent(Image);
+            if (Parent)
+            {
+                Parent->AddChild(Box);
+                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot)) { S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center); }
+                Pad<UVerticalBoxSlot>(Box, Margin);
+            }
+            Card.Images.Add(Image);
+        }
+        else if (Card.Images.IsValidIndex(ImageIndex))
+        {
+            Image = Card.Images[ImageIndex].Get();
+        }
+        ++ImageIndex;
+        if (!Image) return;
+        if (Texture) Image->SetBrushFromTexture(Texture, false);
+        // The size box is what takes the space, so hide that.
+        UWidget* Holder = Image->GetParent() ? static_cast<UWidget*>(Image->GetParent()) : static_cast<UWidget*>(Image);
+        Holder->SetVisibility(Texture ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+    }
+
     /** A thin fill bar; Percent 0..1. */
     void Bar(UPanelWidget* Parent, float Percent, const FLinearColor& Color, const FMargin& Margin = FMargin(0, 3, 0, 2))
     {
@@ -963,13 +995,26 @@ namespace
         return Chips;
     }
 
-    /** Card header: title on the left, a one-line summary on the right. */
-    void DTTCardHeader(FDTTCardSink& Sink, UVerticalBox* Body, const FString& Title, const FLinearColor& TitleColor, const FString& Summary)
+    /** Card header: an icon and the title on the left, a one-line summary on the right. */
+    void DTTCardHeader(FDTTCardSink& Sink, UVerticalBox* Body, const FString& Title, const FLinearColor& TitleColor, const FString& Summary, UTexture2D* Icon = nullptr)
     {
         UHorizontalBox* Row = Sink.HBox(Body, FMargin(0, 0, 0, 2));
+        Sink.Icon(Row, Icon, 28, FMargin(0, 0, 8, 0));
         Sink.Text(Row, Title, 17, TitleColor, false, FMargin(0), true);
         Sink.Text(Row, Summary, 12, DTTGrey);
     }
+}
+
+UTexture2D* UDynamicTimeTableWidget::IconFor(const TSoftClassPtr<UFGItemDescriptor>& ItemClass)
+{
+    if (ItemClass.IsNull()) return nullptr;
+    const FSoftObjectPath Path = ItemClass.ToSoftObjectPath();
+    if (const TObjectPtr<UTexture2D>* Cached = IconCache.Find(Path)) return Cached->Get();
+    // Descriptors are small and the game keeps them around; a synchronous load is a one-off per item.
+    UClass* Loaded = ItemClass.LoadSynchronous();
+    UTexture2D* Texture = Loaded ? UFGItemDescriptor::GetSmallIcon(Loaded) : nullptr;
+    IconCache.Add(Path, Texture);
+    return Texture;
 }
 
 void UDynamicTimeTableWidget::SyncCards(UScrollBox* Page, TArray<FDTTCardWidgets>& Cards, const TArray<FString>& Keys,
@@ -1104,7 +1149,7 @@ void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, cons
     if (Inactive > 0) Summary += FString::Printf(TEXT("  ·  %d inactive"), Inactive);
     const bool bWaiting = Open > Claimed;
     UVerticalBox* Body = Sink.Root(bWaiting ? DTTCardTintOpen : DTTCardTint);
-    DTTCardHeader(Sink, Body, Resource, bWaiting ? DTTGreen : (Open > 0 ? DTTYellow : DTTCyan), Summary);
+    DTTCardHeader(Sink, Body, Resource, bWaiting ? DTTGreen : (Open > 0 ? DTTYellow : DTTCyan), Summary, List.Num() > 0 ? IconFor(List[0]->ItemClass) : nullptr);
 
     UHorizontalBox* Columns = Sink.HBox(Body, FMargin(0, 4, 0, 0));
     UVerticalBox* Left = Sink.Column(Columns);
@@ -1209,6 +1254,7 @@ void UDynamicTimeTableWidget::PopulateTruckCard(const FDTTTruckRow& Row, FDTTCar
     UVerticalBox* Body = Sink.Root(bWarn ? DTTCardTintWarn : DTTCardTint);
 
     UHorizontalBox* Head = Sink.HBox(Body, FMargin(0, 0, 0, 2));
+    Sink.Icon(Head, IconFor(Row.ItemClass), 28, FMargin(0, 0, 8, 0));
     Sink.Text(Head, Row.Name, 17, FLinearColor::White, false, FMargin(0, 0, 10, 0));
     Sink.Text(Head, Row.ResourceId.IsEmpty() ? TEXT("no resource") : Row.ResourceId, 14, Row.ResourceId.IsEmpty() ? DTTDim : DTTCyan, false, FMargin(0, 0, 10, 0), true);
     Sink.Badge(Head, PhaseLabel, PhaseColor);
@@ -1238,7 +1284,12 @@ void UDynamicTimeTableWidget::PopulateTruckCard(const FDTTTruckRow& Row, FDTTCar
         ? FString::Printf(TEXT("Cargo %d / %d stacks"), Row.CargoStacks, Row.CargoCapacityStacks)
         : FString(TEXT("Cargo unknown"));
     const float Percent = Row.CargoCapacityStacks > 0 ? float(FMath::Max(Row.CargoStacks, 0)) / float(Row.CargoCapacityStacks) : 0.0f;
-    Sink.Text(Body, Cargo, 13, FLinearColor::White, false, FMargin(0, 6, 0, 0));
+    UHorizontalBox* CargoRow = Sink.HBox(Body, FMargin(0, 6, 0, 0));
+    // What is on board when it is one item; the truck's own resource when only the count is known.
+    UTexture2D* CargoIcon = IconFor(Row.CargoItemClass);
+    if (!CargoIcon && Row.CargoStacks > 0) CargoIcon = IconFor(Row.ItemClass);
+    Sink.Icon(CargoRow, CargoIcon, 20, FMargin(0, 0, 6, 0));
+    Sink.Text(CargoRow, Cargo, 13, FLinearColor::White);
     Sink.Bar(Body, Percent, Row.CargoStacks > 0 ? DTTCyan : DTTDim);
     Sink.Text(Body, Row.CargoNote, 12, DTTGrey, true);
     Sink.Text(Body, Row.PlannedSummary.IsEmpty() ? FString() : TEXT("Planned: ") + Row.PlannedSummary, 12, FLinearColor(0.7f, 0.8f, 0.85f), true, FMargin(0, 2, 0, 0));
