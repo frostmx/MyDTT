@@ -504,6 +504,8 @@ private:
     void LeavePool(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason);
     /** Nearest unclaimed depot reachable from FromGuid (a depot this truck already claims counts as free). */
     FGuid FindNearestDepot(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& FromGuid) const;
+    /** A fluid truck cannot unload at a solid depot and the other way round: the game never runs the transfer. Unknown station: true. */
+    bool DepotFitsTruck(const FGuid& DepotGuid, AFGWheeledVehicleIdentifier* Vehicle) const;
     void ClaimDepot(const FGuid& DepotGuid, AFGWheeledVehicleIdentifier* Vehicle);
     void ReleaseDepotClaim(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason);
     /** Holds the truck at the depot it just docked at. */

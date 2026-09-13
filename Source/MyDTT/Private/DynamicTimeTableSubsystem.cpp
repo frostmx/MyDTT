@@ -3546,6 +3546,7 @@ FGuid UDynamicTimeTableSubsystem::FindNearestDepot(AFGWheeledVehicleIdentifier* 
         if (!Candidate.IsValid()) continue;
         const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Claim = DepotClaims.Find(Candidate);
         if (Claim && Claim->IsValid() && Claim->Get() != Vehicle) continue;
+        if (!DepotFitsTruck(Candidate, Vehicle)) continue;
         // Standing at a free depot: that one, at no cost.
         const float Cost = Candidate == FromGuid ? 0.0f
             : EstimatePathFuelConsumptionMW(VehicleSubsystem, Preset, WheeledVehicle->GetClass(), FromGuid, Candidate);
@@ -3553,6 +3554,14 @@ FGuid UDynamicTimeTableSubsystem::FindNearestDepot(AFGWheeledVehicleIdentifier* 
         if (Cost < BestCost) { BestCost = Cost; Nearest = Candidate; }
     }
     return Nearest;
+}
+
+bool UDynamicTimeTableSubsystem::DepotFitsTruck(const FGuid& DepotGuid, AFGWheeledVehicleIdentifier* Vehicle) const
+{
+    const AFGDockingStationIdentifier* Dock = FindDockByPathNode(DepotGuid);
+    const AFGBuildableDockingStation* Station = IsValid(Dock) ? Dock->GetStation() : nullptr;
+    if (!IsValid(Station) || !IsValid(Vehicle)) return true;
+    return DTSIsFluidForm(Station->GetDockingStationResourceForm()) == IsFluidTruck(Vehicle);
 }
 
 void UDynamicTimeTableSubsystem::ClaimDepot(const FGuid& DepotGuid, AFGWheeledVehicleIdentifier* Vehicle)
@@ -3605,6 +3614,11 @@ void UDynamicTimeTableSubsystem::ParkTruck(
             UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("DEPOT_CLAIM_TAKEN Depot='%s' From='%s' By='%s'"),
                 *DockDisplayName(StationGuid), *DTSVehicleName(Other), *DTSVehicleName(Vehicle));
         }
+    }
+    if (!DepotFitsTruck(StationGuid, Vehicle))
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("DEPOT_FORM_MISMATCH Truck='%s' Depot='%s' TruckForm=%s Action=parked-no-unload"),
+            *DTSVehicleName(Vehicle), *DockDisplayName(StationGuid), IsFluidTruck(Vehicle) ? TEXT("fluid") : TEXT("solid"));
     }
     ClaimDepot(StationGuid, Vehicle);
     State.DepotGuid = StationGuid;
@@ -3719,14 +3733,23 @@ void UDynamicTimeTableSubsystem::ProcessPoolTruckTarget(
     {
         const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Claim = DepotClaims.Find(Depot);
         if (!IsDepotGuid(Depot) || (Claim && Claim->IsValid() && Claim->Get() != Vehicle)) Depot.Invalidate();
+        else if (!DepotFitsTruck(Depot, Vehicle))
+        {
+            // Claimed before the form rule existed, or the depot's station was rebuilt as the other kind.
+            UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("DEPOT_FORM_MISMATCH Truck='%s' Depot='%s' TruckForm=%s Action=released"),
+                *DTSVehicleName(Vehicle), *DockDisplayName(Depot), IsFluidTruck(Vehicle) ? TEXT("fluid") : TEXT("solid"));
+            ReleaseDepotClaim(Vehicle, TEXT("depot form"));
+            Depot.Invalidate();
+        }
     }
     if (!Depot.IsValid())
     {
         Depot = FindNearestDepot(Vehicle, From);
         if (!Depot.IsValid())
         {
-            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("DEPOT_NONE_FREE Truck='%s' From='%s' Depots=%d Claims=%d Trigger=%s"),
-                *DTSVehicleName(Vehicle), *DockDisplayName(From), DispatchDepotGuids.Num(), DepotClaims.Num(), Trigger);
+            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("DEPOT_NONE_FREE Truck='%s' From='%s' TruckForm=%s Depots=%d Claims=%d Trigger=%s"),
+                *DTSVehicleName(Vehicle), *DockDisplayName(From), IsFluidTruck(Vehicle) ? TEXT("fluid") : TEXT("solid"),
+                DispatchDepotGuids.Num(), DepotClaims.Num(), Trigger);
             State.DepotGuid.Invalidate();
             return;
         }
@@ -4122,7 +4145,16 @@ void UDynamicTimeTableSubsystem::RestoreParkedTrucks()
         FDTTPoolTruckState& State = Pair.Value;
         if (!IsValid(Vehicle)) continue;
 
-        if (State.DepotGuid.IsValid() && IsDepotGuid(State.DepotGuid)) ClaimDepot(State.DepotGuid, Vehicle);
+        if (State.DepotGuid.IsValid() && IsDepotGuid(State.DepotGuid))
+        {
+            ClaimDepot(State.DepotGuid, Vehicle);
+            if (!DepotFitsTruck(State.DepotGuid, Vehicle))
+            {
+                UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("DEPOT_FORM_MISMATCH Truck='%s' Depot='%s' TruckForm=%s Action=%s"),
+                    *DTSVehicleName(Vehicle), *DockDisplayName(State.DepotGuid), IsFluidTruck(Vehicle) ? TEXT("fluid") : TEXT("solid"),
+                    State.Phase == EDTTTruckPhase::Parked ? TEXT("kept-until-next-lap") : TEXT("re-picked-on-next-target"));
+            }
+        }
         else State.DepotGuid.Invalidate();
         if (State.Phase != EDTTTruckPhase::Parked) { State.bParked = false; continue; }
 
@@ -4290,7 +4322,12 @@ bool UDynamicTimeTableSubsystem::CommandParkTruck(const FString& TruckQuery, FSt
         const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
         const FGuid From = Route.IsValidIndex(Index) ? Route[Index] : (Route.Num() > 0 ? Route[0] : FGuid());
         const FGuid Depot = FindNearestDepot(Vehicle, From);
-        if (!Depot.IsValid()) { OutMessage = FString::Printf(TEXT("dTT: no free depot reachable from '%s'."), *DockDisplayName(From)); return false; }
+        if (!Depot.IsValid())
+        {
+            OutMessage = FString::Printf(TEXT("dTT: no free %s depot reachable from '%s' (a truck parks only at a depot of its own kind)."),
+                IsFluidTruck(Vehicle) ? TEXT("fluid") : TEXT("solid"), *DockDisplayName(From));
+            return false;
+        }
         State = &JoinPool(Vehicle, Depot, TEXT("command"));
     }
     else
