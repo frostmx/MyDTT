@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.2.0
+
+- **The number in a requester tag changed meaning.** `(Resource-N)` on a solid station now
+  means "call a truck while fewer than N stacks are in stock"; on a fluid station N is a percent
+  of the tank. A delivery fills the station up to the limit plus a buffer (new *Request buffer*
+  setting, 8 stacks), so what is consumed while the truck is on its way is covered. Until now N
+  was the number of stacks kept free. Check the tags you have: to keep the old behaviour of
+  `(Motor-40)` on a 48-stack station write `(Motor-8)`; a number the station cannot hold is
+  clamped and reported once (`DISPATCH_TAG_LEVEL_CLAMPED`).
+- A tag without a number uses the new *Solid request limit* (40 stacks) and *Fluid request
+  limit* (56 stacks of 50 000 L) settings; with the buffer both fill a station to full, so the
+  shipped behaviour matches the previous "called while not full" except that a single missing
+  stack no longer calls a truck.
+- *Fluid trucks always carry a full load* (on by default): a fluid lap serves one station, the
+  producer fills the tank completely and the truck drains it at that station, topping up while
+  the station drinks, until the leftover hold runs out.
+- *Drain leftovers at the last stop* switch: off, the last requester is filled to its target
+  like any other stop and the truck keeps its leftovers for the next lap.
+- The Settings tab scrolls and is grouped into Requests, Leftovers, Pool and Fuel; it no longer
+  runs under the window's footer.
+- Window protocol 7. Server and clients must run the same version; the save format is unchanged.
+
 ## 2.1.0
 
 - Leftovers no longer ride around. The last requesting station of a lap takes everything it can,
