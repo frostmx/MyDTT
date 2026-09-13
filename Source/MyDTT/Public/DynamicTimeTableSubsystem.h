@@ -46,7 +46,11 @@ public:
     void HandleTruckDocked(class AFGWheeledVehicle* Vehicle, class AFGBuildableDockingStation* Station);
     void HandleTruckUndocked(class AFGWheeledVehicle* Vehicle);
     /** A held (parked) truck was pushed out of its station by another actor docking there. */
-    void HandleParkedTruckEvicted(class AFGBuildableDockingStation* Station, AActor* NewActor);
+    /** The DockActor hook dropped a hold on this station for another actor: a parked truck or a leftover drain lost its place. */
+    void HandleHeldStationEvicted(class AFGBuildableDockingStation* Station, AActor* NewActor);
+    const FDTTSettings& GetSettings() const { return Settings; }
+    /** Sanitizes and applies; false (with a message) when nothing changed. Server only. */
+    bool ApplySettings(const FDTTSettings& NewSettings, const TCHAR* Source, FString* OutMessage = nullptr);
 
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") FGuid CreateGroup(const FString& GroupName, EDTTGroupKind Kind = EDTTGroupKind::Train);
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") bool RemoveGroup(FGuid GroupId);
@@ -203,7 +207,38 @@ private:
     // despawn/retag - see PruneStaleRequesterClaims and the cleanup in RebuildGroupsFromNames.
     TMap<FGuid, TWeakObjectPtr<AFGWheeledVehicleIdentifier>> RequesterClaims;
     TMap<FGuid, double> RequesterClaimedAtWorldSeconds;
-    static constexpr double RequesterClaimTimeoutSeconds = 600.0;
+
+    // The tunables (FDTTSettings), saved by ADTTSaveDataActor since DataVersion 7.
+    UPROPERTY()
+    FDTTSettings Settings;
+
+    // A managed truck held docked at the last requester of its lap while the station drains what
+    // the threshold left on board: one entry per truck, torn down with the docking. Runtime only;
+    // after a load such a truck is simply undocked (HOLD_STALE).
+    struct FDTTLeftoverHold
+    {
+        TWeakObjectPtr<class AFGBuildableDockingStation> Station;
+        TSubclassOf<class UFGItemDescriptor> ItemClass;
+        /** Set when the docking cycle's own transfer has run; the hold timer starts here. */
+        bool bCycleDone = false;
+        double StartedSeconds = 0.0;
+        double LastTopUpSeconds = 0.0;
+        int32 MovedByTopUps = 0;
+    };
+    TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTLeftoverHold> LeftoverHolds;
+    double LastDepotTopUpSeconds = 0.0;
+    /** Once a second from the poll: top-ups, and the release on empty or timeout. */
+    void TickLeftoverHolds(double Now);
+    /** Once a second from the poll: a parked truck keeps unloading into a depot in UNLOAD mode. */
+    void TickDepotDrains(double Now);
+    /** Drops the hold; undocks when asked and the truck still stands there. Removes the entry. */
+    void ReleaseLeftoverHold(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason, bool bUndock);
+    /** The stop is the last requester this lap planned: pool laps by State.Requesters, legacy laps by the anchors' PlannedItems in route order. */
+    bool IsLastPlannedRequester(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& StationGuid) const;
+    /** Stacks of ItemClass on board; 0 when unreadable. */
+    int32 OnBoardStacksOf(AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<class UFGItemDescriptor> ItemClass) const;
+    /** "Plastic x3, Screws x1" for what the truck carries. */
+    FString DescribeCargo(AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<class UFGItemDescriptor>* OutSingleClass = nullptr) const;
     // Built once from UFGBlueprintFunctionLibrary::GetAllDescriptorsSorted, not per poll tick.
     mutable TMap<FString, TSubclassOf<class UFGItemDescriptor>> ItemClassByNameCache;
     // Producer is always Route[0]. A dedicated fuel anchor is optional and comes only from an
@@ -221,7 +256,6 @@ private:
     TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTPoolTruckState> PoolTrucks;
     bool bParkedTrucksRestored = false;
     double LastPoolDispatchSeconds = 0.0;
-    static constexpr double PoolDispatchIntervalSeconds = 5.0;
 
     void InitializePersistence();
     void ScheduleWorldStationsReady();
@@ -285,10 +319,8 @@ private:
     /** Path network the group's vehicles travel, or INDEX_NONE when nothing in the group is moving yet. Diagnostics only. */
     int32 GetGroupPathNetworkID(const FDTTStationGroup& Group) const;
 
-    // Resource dispatch.
-    // Upper bound on requesters planned into one lap. The cargo-deficit estimate is the real
-    // limit; this only caps the route length when many requesters are all nearly empty.
-    static constexpr int32 MaxRequestersPerLap = 4;
+    // Resource dispatch. The lap limit (Settings.MaxRequestersPerLap), the fuel margins, the claim
+    // timeout and the idle recheck interval live in FDTTSettings since 2.1; their stories stay here.
     // ChooseFuelInsertIndex accepts a position only if the tank can reach the (F) there using
     // at most this fraction of its current energy - the per-segment estimate is unverified.
     static constexpr float FuelReachFraction = 0.8f;
@@ -297,14 +329,12 @@ private:
     // stop lengthens the lap it is added to beyond what was checked - a bare 1x margin let a truck
     // reach exactly zero fuel mid-lap with no stop ever borrowed (see CHANGELOG 1.0.2). Raised from
     // 1.5 to 2.0 for the same reason, with more margin against that same estimate error.
-    static constexpr float FuelCriticalMarginLaps = 2.0f;
-    // ShouldSkipFuelStop only leaves a dedicated (F) out of a lap once the tank clears this many
-    // estimated lap-costs - kept above FuelCriticalMarginLaps so there is a dead zone between
-    // "borrow/warn" and "safe to skip" instead of the two thresholds meeting at the same value.
-    static constexpr float FuelSkipMarginLaps = 2.5f;
-    // How often a dispatch truck parked on a one-stop [Producer] route is re-evaluated: its target
-    // index never changes, so without this it would never notice the first request opening.
-    static constexpr double IdleDispatchRecheckSeconds = 10.0;
+    // ShouldSkipFuelStop only leaves a dedicated (F) out of a lap once the tank clears
+    // FuelSkipMarginLaps estimated lap-costs - kept above FuelCriticalMarginLaps so there is a dead
+    // zone between "borrow/warn" and "safe to skip" instead of the two thresholds meeting.
+    // IdleDispatchRecheckSeconds: how often a dispatch truck parked on a one-stop [Producer] route
+    // is re-evaluated; its target index never changes, so without this it would never notice the
+    // first request opening.
     /** Resolves a neutral tag against the station's live LOAD/UNLOAD switch. */
     EDTTDispatchRole GetEffectiveDispatchRole(const FDTTDispatchStation& Station) const;
     /** LOAD is producer, UNLOAD is requester; a contradictory tag is never actionable. */
@@ -373,7 +403,7 @@ private:
      * the legacy anchors when that is null.
      */
     TArray<FGuid> SelectRequestersForResource(const FString& ResourceId, AFGWheeledVehicleIdentifier* Vehicle,
-        const FGuid& ProducerGuid = FGuid(), TMap<FGuid, int32>* OutPlannedItems = nullptr);
+        const FGuid& ProducerGuid = FGuid(), TMap<FGuid, int32>* OutPlannedItems = nullptr, int32* OutNeededStacks = nullptr);
     /**
      * The LOAD producer of the resource a pool truck should load at: the one with the most stock,
      * ties by path cost from FromGuid. Pure; the group rule (ChooseProducerFromGroup) is applied
@@ -438,7 +468,8 @@ private:
      * threshold, any other stop moves what the game would. False for a truck this mod does not
      * manage, in which case the game's own transfer runs untouched.
      */
-    bool ComputeTransferPlan(AFGWheeledVehicleIdentifier* Vehicle, class AFGBuildableDockingStation* Station, struct FDTTTransferPlan& OutPlan) const;
+    bool ComputeTransferPlan(AFGWheeledVehicleIdentifier* Vehicle, class AFGBuildableDockingStation* Station, struct FDTTTransferPlan& OutPlan,
+        bool* bOutLeftoverHold = nullptr) const;
 
     // Shared pool.
     bool IsDepotGuid(const FGuid& PathNodeGuid) const { return DispatchDepotGuids.Contains(PathNodeGuid); }

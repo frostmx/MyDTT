@@ -30,14 +30,16 @@ public:
     void SetDataVersion(int32 InVersion) { DataVersion = InVersion; }
     const TArray<FDTTSavedTruckAnchors>& GetTruckAnchors() const { return SavedTruckAnchors; }
     const TArray<FDTTSavedPoolTruck>& GetPoolTrucks() const { return SavedPoolTrucks; }
+    const FDTTSettings& GetSettings() const { return SavedSettings; }
+    void SetSettings(const FDTTSettings& InSettings) { SavedSettings = InSettings; }
 
 private:
     // 4 and later store no groups: the configuration lives in the station names themselves. The
     // actor stays because older saves reference the class, and an empty one is cheaper than the
     // risk of pulling a class out from under a load. 5 adds dispatch trucks' fuel anchors, 6 the
-    // shared-pool trucks.
+    // shared-pool trucks, 7 the settings.
     UPROPERTY(SaveGame)
-    int32 DataVersion = 6;
+    int32 DataVersion = 7;
 
     UPROPERTY(SaveGame)
     TArray<FDTTStationGroup> SavedGroups;
@@ -51,4 +53,7 @@ private:
     // alone; the game saves the docking itself, and this is what says the hold has to come back.
     UPROPERTY(SaveGame)
     TArray<FDTTSavedPoolTruck> SavedPoolTrucks;
+    // The tunables, edited from the Settings tab. Read only when DataVersion is 7 or later.
+    UPROPERTY(SaveGame)
+    FDTTSettings SavedSettings;
 };

@@ -242,6 +242,8 @@ struct FDTTPoolTruckState
 
     /** World seconds of the last assignment. Runtime only. */
     double AssignedAtSeconds = 0.0;
+    /** POOL_CARGO_WAIT was logged for this parking. Runtime only, cleared by ParkTruck. */
+    bool bCargoWaitLogged = false;
 };
 
 /** One pool truck as stored by ADTTSaveDataActor. */
@@ -302,4 +304,91 @@ struct FDTTTruckRow
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString PlannedSummary;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bAutopilot = false;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bDocking = false;
+    /** What is on board by item, and why that matters ("waits for Plastic", "foreign cargo"). */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString CargoNote;
+};
+
+/**
+ * The tunables. Saved with the world and edited from the Settings tab of the window (or
+ * "/dtt set"); the server's copy is the one that counts, a remote client only proposes.
+ */
+USTRUCT(BlueprintType)
+struct FDTTSettings
+{
+    GENERATED_BODY()
+
+    /** Seconds a truck stays docked at the last requester of its lap, draining what is left beyond the threshold. 0 turns the hold off. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float LeftoverHoldSeconds = 60.0f;
+    /** Seconds between two top-up transfers of a held truck (at a requester or a depot). The poll runs once a second, so 1 is the floor. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float TopUpIntervalSeconds = 1.0f;
+    /** A parked truck unloads everything into its depot when the depot is in UNLOAD mode. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bUnloadAtDepot = true;
+    /** A pool lap skips the producer when the cargo already on board covers every planned deficit. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bSkipProducerWhenCargoCovers = true;
+    /** Seconds between two timer passes of the pool dispatcher. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float PoolDispatchIntervalSeconds = 5.0f;
+    /** Upper bound on requesters planned into one lap. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 MaxRequestersPerLap = 4;
+    /** Seconds after which an unserved requester claim is dropped. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float RequesterClaimTimeoutSeconds = 600.0f;
+    /** Seconds between re-evaluations of a dispatch truck idling on a one-stop route. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float IdleDispatchRecheckSeconds = 10.0f;
+    /** A truck borrows a fuel stop below this many estimated lap costs of fuel. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float FuelCriticalMarginLaps = 2.0f;
+    /** A truck leaves its own (F) out of a lap above this many estimated lap costs of fuel. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float FuelSkipMarginLaps = 2.5f;
+
+    void Sanitize()
+    {
+        LeftoverHoldSeconds = FMath::Clamp(LeftoverHoldSeconds, 0.0f, 600.0f);
+        TopUpIntervalSeconds = FMath::Clamp(TopUpIntervalSeconds, 1.0f, 30.0f);
+        PoolDispatchIntervalSeconds = FMath::Clamp(PoolDispatchIntervalSeconds, 1.0f, 60.0f);
+        MaxRequestersPerLap = FMath::Clamp(MaxRequestersPerLap, 1, 8);
+        RequesterClaimTimeoutSeconds = FMath::Clamp(RequesterClaimTimeoutSeconds, 30.0f, 3600.0f);
+        IdleDispatchRecheckSeconds = FMath::Clamp(IdleDispatchRecheckSeconds, 1.0f, 120.0f);
+        FuelCriticalMarginLaps = FMath::Clamp(FuelCriticalMarginLaps, 1.0f, 10.0f);
+        // Keep the dead zone between "borrow" and "safe to skip" (see the 1.0.2 story).
+        FuelSkipMarginLaps = FMath::Clamp(FuelSkipMarginLaps, FuelCriticalMarginLaps + 0.1f, 10.0f);
+    }
+    bool operator==(const FDTTSettings& Other) const
+    {
+        return LeftoverHoldSeconds == Other.LeftoverHoldSeconds && TopUpIntervalSeconds == Other.TopUpIntervalSeconds &&
+            bUnloadAtDepot == Other.bUnloadAtDepot && bSkipProducerWhenCargoCovers == Other.bSkipProducerWhenCargoCovers &&
+            PoolDispatchIntervalSeconds == Other.PoolDispatchIntervalSeconds && MaxRequestersPerLap == Other.MaxRequestersPerLap &&
+            RequesterClaimTimeoutSeconds == Other.RequesterClaimTimeoutSeconds && IdleDispatchRecheckSeconds == Other.IdleDispatchRecheckSeconds &&
+            FuelCriticalMarginLaps == Other.FuelCriticalMarginLaps && FuelSkipMarginLaps == Other.FuelSkipMarginLaps;
+    }
+    bool operator!=(const FDTTSettings& Other) const { return !(*this == Other); }
+    FString Describe() const
+    {
+        return FString::Printf(TEXT("LeftoverHoldSeconds=%.0f TopUpIntervalSeconds=%.0f UnloadAtDepot=%s SkipProducerWhenCargoCovers=%s "
+            "PoolDispatchIntervalSeconds=%.0f MaxRequestersPerLap=%d RequesterClaimTimeoutSeconds=%.0f IdleDispatchRecheckSeconds=%.0f "
+            "FuelCriticalMarginLaps=%.2f FuelSkipMarginLaps=%.2f"),
+            LeftoverHoldSeconds, TopUpIntervalSeconds, bUnloadAtDepot ? TEXT("true") : TEXT("false"),
+            bSkipProducerWhenCargoCovers ? TEXT("true") : TEXT("false"), PoolDispatchIntervalSeconds, MaxRequestersPerLap,
+            RequesterClaimTimeoutSeconds, IdleDispatchRecheckSeconds, FuelCriticalMarginLaps, FuelSkipMarginLaps);
+    }
+    /** "/dtt set <field> <value>": true when the field exists and parsed. */
+    bool SetByName(const FString& Field, const FString& Value)
+    {
+        auto AsFloat = [&](float& Out) { if (!Value.IsNumeric()) return false; Out = FCString::Atof(*Value); return true; };
+        auto AsBool = [&](bool& Out)
+        {
+            if (Value.Equals(TEXT("true"), ESearchCase::IgnoreCase) || Value == TEXT("1") || Value.Equals(TEXT("on"), ESearchCase::IgnoreCase)) { Out = true; return true; }
+            if (Value.Equals(TEXT("false"), ESearchCase::IgnoreCase) || Value == TEXT("0") || Value.Equals(TEXT("off"), ESearchCase::IgnoreCase)) { Out = false; return true; }
+            return false;
+        };
+        const FString F = Field.ToLower();
+        if (F == TEXT("leftoverholdseconds")) return AsFloat(LeftoverHoldSeconds);
+        if (F == TEXT("topupintervalseconds")) return AsFloat(TopUpIntervalSeconds);
+        if (F == TEXT("unloadatdepot")) return AsBool(bUnloadAtDepot);
+        if (F == TEXT("skipproducerwhencargocovers")) return AsBool(bSkipProducerWhenCargoCovers);
+        if (F == TEXT("pooldispatchintervalseconds")) return AsFloat(PoolDispatchIntervalSeconds);
+        if (F == TEXT("maxrequestersperlap")) { if (!Value.IsNumeric()) return false; MaxRequestersPerLap = FCString::Atoi(*Value); return true; }
+        if (F == TEXT("requesterclaimtimeoutseconds")) return AsFloat(RequesterClaimTimeoutSeconds);
+        if (F == TEXT("idledispatchrecheckseconds")) return AsFloat(IdleDispatchRecheckSeconds);
+        if (F == TEXT("fuelcriticalmarginlaps")) return AsFloat(FuelCriticalMarginLaps);
+        if (F == TEXT("fuelskipmarginlaps")) return AsFloat(FuelSkipMarginLaps);
+        return false;
+    }
 };

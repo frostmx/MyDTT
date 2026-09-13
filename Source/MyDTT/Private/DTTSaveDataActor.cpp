@@ -38,6 +38,7 @@ void ADTTSaveDataActor::PreSaveGame_Implementation(int32 saveVersion, int32 game
         {
             Subsystem->ExportTruckAnchors(SavedTruckAnchors);
             Subsystem->ExportPoolTrucks(SavedPoolTrucks);
+            SavedSettings = Subsystem->GetSettings();
         }
     }
     UE_LOG(LogDynamicTimeTableSaveData, Display,
