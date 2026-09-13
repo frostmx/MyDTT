@@ -1,6 +1,6 @@
 {
     "FileVersion": 3,
-    "Version": 1,
+    "Version": 2,
     "VersionName": "2.3.0",
     "FriendlyName": "MyDTT",
     "Description": "Personal DynamicTimeTable fork with demand-based train and truck routing.",
