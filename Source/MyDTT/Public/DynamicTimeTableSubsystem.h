@@ -379,23 +379,35 @@ private:
     /** Nearest (F)-tagged dock reachable from FromGuid on the same path network, or invalid if none. */
     FGuid FindNearestFuelStop(class AFGWheeledVehicle* Vehicle, const FGuid& FromGuid) const;
     /**
-     * The requester's threshold: the dock's capacity in stacks of the item minus the tag's offset
-     * (a neutral tag is offset 0), never below 0. INDEX_NONE when the capacity cannot be read -
-     * distinct from 0, which is a station whose offset is at or above its capacity and never opens.
+     * A requester's levels, in stacks of the item. Trigger: the dock is called while its stock is
+     * below it - the tag's N (solid: stacks; fluid: percent of the tank) or the settings' limit.
+     * Target: a delivery fills the dock up to it - the trigger plus the settings' buffer, never
+     * above the capacity. A trigger of 0 (tag "-0") never opens.
      */
-    int32 GetEffectiveThreshold(const FDTTDispatchStation& Station, TSubclassOf<class UFGItemDescriptor> ItemClass) const;
+    struct FDTTRequestLevels
+    {
+        int32 Capacity = 0;
+        int32 Trigger = 0;
+        int32 Target = 0;
+        bool bFluid = false;
+    };
+    /** False when the dock's inventory cannot be read (neither stock nor capacity is known). */
+    bool GetRequestLevels(const FDTTDispatchStation& Station, TSubclassOf<class UFGItemDescriptor> ItemClass, FDTTRequestLevels& Out) const;
+    /** True for a truck whose cargo inventory carries liquids or gases. */
+    bool IsFluidTruck(AFGWheeledVehicleIdentifier* Vehicle) const;
     /**
      * Truck cargo in the same "stacks" unit as ReadDockStockInStacks: capacity from the inventory's
      * slot size (a fluid truck's single slot is 64 stacks), on-board from what is loaded now.
      */
     bool EstimateTruckCargoStacks(AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<class UFGItemDescriptor> ItemClass,
         int32& OutCapacityStacks, int32& OutOnBoardStacks) const;
-    /** One requester below its threshold, as CollectOpenRequesters reports it. */
+    /** One requester below its trigger, as CollectOpenRequesters reports it. */
     struct FDTTOpenRequester
     {
         const FDTTDispatchStation* Station = nullptr;
         int32 StockStacks = 0;
-        int32 Threshold = 0;
+        int32 TriggerStacks = 0;
+        int32 TargetStacks = 0;
         double FillRatio = 0.0;
     };
     /**

@@ -2,6 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "Templates/SubclassOf.h"
+#include "Resources/FGItemDescriptor.h"
+
+/** Liquids and gases move slot to slot and count in 50 000 L stacks; everything else is a solid. */
+inline bool DTSIsFluidForm(EResourceForm Form)
+{
+    return Form == EResourceForm::RF_LIQUID || Form == EResourceForm::RF_GAS;
+}
 
 class AFGBuildableDockingStation;
 class UFGInventoryComponent;

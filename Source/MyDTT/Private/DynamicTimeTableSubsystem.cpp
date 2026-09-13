@@ -284,7 +284,7 @@ bool UDynamicTimeTableSubsystem::ParseDispatchTag(const FString& FullName, FStri
                 if (!Resource.IsEmpty())
                 {
                     Role = EDTTDispatchRole::ByStationMode;
-                    // No offset: the threshold is the dock's full capacity (GetEffectiveThreshold).
+                    // No number: the settings' limit applies (GetRequestLevels).
                     Threshold = INDEX_NONE;
                 }
             }
@@ -1041,22 +1041,22 @@ void UDynamicTimeTableSubsystem::RebuildGroupsFromNames()
         if (const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(Station.ResourceId))
         {
             const int32 Stock = ReadDockStockInStacks(Station.DockingStationIdentifier.Get(), ItemClass);
-            int32 Capacity = INDEX_NONE;
-            ReadDockCapacityInStacks(Station.DockingStationIdentifier.Get(), ItemClass, Capacity);
-            const int32 Threshold = GetEffectiveThreshold(Station, ItemClass);
+            FDTTRequestLevels Levels;
+            const bool bLevels = GetRequestLevels(Station, ItemClass, Levels);
             UE_LOG(LogDynamicTimeTableSubsystem, VeryVerbose,
-                TEXT("DISPATCH_STOCK_PROBE Name=\"%s\" Resource=\"%s\" Item=\"%s\" StockStacks=%d Capacity=%d Threshold=%d"),
+                TEXT("DISPATCH_STOCK_PROBE Name=\"%s\" Resource=\"%s\" Item=\"%s\" StockStacks=%d Capacity=%d Trigger=%d Target=%d"),
                 *Station.DisplayName, *Station.ResourceId, *UFGItemDescriptor::GetItemName(ItemClass).ToString(),
-                Stock, Capacity, Threshold);
-            // An offset that eats the whole capacity is a tag that can never open - most likely a
-            // threshold written under the pre-1.1.0 meaning ("open below N stacks"). Said once per
-            // rebuild, which only runs on a name change.
-            if (GetEffectiveDispatchRole(Station) == EDTTDispatchRole::Requester &&
-                Capacity != INDEX_NONE && Station.Threshold != INDEX_NONE && Station.Threshold >= Capacity)
+                Stock, bLevels ? Levels.Capacity : INDEX_NONE, bLevels ? Levels.Trigger : INDEX_NONE, bLevels ? Levels.Target : INDEX_NONE);
+            // A number the dock cannot hold - more stacks than its capacity, more than 100 % of a
+            // tank - is clamped to "called while not full". Most likely a tag written under the
+            // 1.1.0 meaning (N stacks kept free). Said once per rebuild, which only runs on a name change.
+            if (GetEffectiveDispatchRole(Station) == EDTTDispatchRole::Requester && bLevels && Station.Threshold != INDEX_NONE &&
+                Station.Threshold > (Levels.bFluid ? 100 : Levels.Capacity))
             {
                 UE_LOG(LogDynamicTimeTableSubsystem, Warning,
-                    TEXT("DISPATCH_TAG_OFFSET_EXCEEDS_CAPACITY Name=\"%s\" Resource=\"%s\" Offset=%d Capacity=%d Action=never-opens"),
-                    *Station.DisplayName, *Station.ResourceId, Station.Threshold, Capacity);
+                    TEXT("DISPATCH_TAG_LEVEL_CLAMPED Name=\"%s\" Resource=\"%s\" N=%d Max=%d Unit=%s Action=called-while-not-full"),
+                    *Station.DisplayName, *Station.ResourceId, Station.Threshold, Levels.bFluid ? 100 : Levels.Capacity,
+                    Levels.bFluid ? TEXT("percent") : TEXT("stacks"));
             }
         }
         else
@@ -1832,16 +1832,38 @@ FGuid UDynamicTimeTableSubsystem::FindNearestFuelStop(AFGWheeledVehicle* Vehicle
     return Nearest;
 }
 
-int32 UDynamicTimeTableSubsystem::GetEffectiveThreshold(
-    const FDTTDispatchStation& Station, TSubclassOf<UFGItemDescriptor> ItemClass) const
+bool UDynamicTimeTableSubsystem::GetRequestLevels(
+    const FDTTDispatchStation& Station, TSubclassOf<UFGItemDescriptor> ItemClass, FDTTRequestLevels& Out) const
 {
-    // An UNLOAD dock takes whatever fits, so the only demand it can express is "not full": the
-    // threshold is its capacity, and the tag's N only lowers it. Capacity, not a fixed stack count,
-    // also makes the deficit (threshold minus stock) exactly the room the truck can unload into.
-    int32 Capacity = INDEX_NONE;
-    if (!ReadDockCapacityInStacks(Station.DockingStationIdentifier.Get(), ItemClass, Capacity)) return INDEX_NONE;
-    const int32 Offset = Station.Threshold == INDEX_NONE ? 0 : Station.Threshold;
-    return FMath::Max(0, Capacity - Offset);
+    // Limit plus buffer: the dock is called once it drops below the limit, and the delivery brings
+    // it back up to the limit plus a buffer, which covers what is consumed while the truck is on
+    // its way. With the shipped limits (40 of 48, 56 of 64) and buffer (8) a dock without a number
+    // fills to full and is not called for a single missing stack.
+    Out = FDTTRequestLevels();
+    if (!ItemClass || !ReadDockCapacityInStacks(Station.DockingStationIdentifier.Get(), ItemClass, Out.Capacity)) return false;
+    Out.bFluid = DTSIsFluidForm(UFGItemDescriptor::GetForm(ItemClass));
+    if (Station.Threshold == INDEX_NONE)
+    {
+        Out.Trigger = Out.bFluid ? Settings.FluidRequestStacks : Settings.SolidRequestStacks;
+    }
+    else if (Out.bFluid)
+    {
+        // A fluid tag's N is a percent of the tank: (Oil-30) is called below 30 %.
+        Out.Trigger = FMath::CeilToInt(double(Out.Capacity) * FMath::Clamp(Station.Threshold, 0, 100) / 100.0);
+    }
+    else
+    {
+        Out.Trigger = Station.Threshold;
+    }
+    Out.Trigger = FMath::Clamp(Out.Trigger, 0, Out.Capacity);
+    Out.Target = FMath::Clamp(Out.Trigger + Settings.RequestBufferStacks, Out.Trigger, Out.Capacity);
+    return true;
+}
+
+bool UDynamicTimeTableSubsystem::IsFluidTruck(AFGWheeledVehicleIdentifier* Vehicle) const
+{
+    AFGWheeledVehicle* WheeledVehicle = IsValid(Vehicle) ? Vehicle->GetOwnerVehicle() : nullptr;
+    return IsValid(WheeledVehicle) && DTSIsFluidForm(IFGDockableInterface::Execute_GetDockInventoryResourceForm(WheeledVehicle));
 }
 
 bool UDynamicTimeTableSubsystem::EstimateTruckCargoStacks(
@@ -1888,23 +1910,23 @@ void UDynamicTimeTableSubsystem::CollectOpenRequesters(
         }
 
         const int32 StockStacks = ReadDockStockInStacks(Station.DockingStationIdentifier.Get(), ItemClass);
-        const int32 Threshold = GetEffectiveThreshold(Station, ItemClass);
+        FDTTRequestLevels Levels;
+        const bool bLevels = GetRequestLevels(Station, ItemClass, Levels);
         UE_LOG(LogDynamicTimeTableSubsystem, VeryVerbose,
-            TEXT("DISPATCH_CANDIDATE Truck='%s' Resource='%s' Station='%s' StockStacks=%d Threshold=%d Open=%s"),
-            *DTSVehicleName(ForVehicle), *ResourceId, *Station.DisplayName, StockStacks, Threshold,
-            Threshold != INDEX_NONE && StockStacks < Threshold ? TEXT("true") : TEXT("false"));
-        // INDEX_NONE: the dock's inventory could not be read, so neither stock nor capacity is known;
-        // a threshold of 0 (offset at or above capacity) simply never opens.
-        if (Threshold == INDEX_NONE) continue;
-        if (StockStacks < Threshold)
+            TEXT("DISPATCH_CANDIDATE Truck='%s' Resource='%s' Station='%s' StockStacks=%d Trigger=%d Target=%d Open=%s"),
+            *DTSVehicleName(ForVehicle), *ResourceId, *Station.DisplayName, StockStacks,
+            bLevels ? Levels.Trigger : INDEX_NONE, bLevels ? Levels.Target : INDEX_NONE,
+            bLevels && StockStacks < Levels.Trigger ? TEXT("true") : TEXT("false"));
+        // Unreadable inventory: neither stock nor capacity is known; a trigger of 0 never opens.
+        if (!bLevels) continue;
+        if (StockStacks < Levels.Trigger)
         {
             FDTTOpenRequester Candidate;
             Candidate.Station = &Station;
             Candidate.StockStacks = StockStacks;
-            Candidate.Threshold = Threshold;
-            Candidate.FillRatio = Threshold > 0
-                ? static_cast<double>(StockStacks) / static_cast<double>(Threshold)
-                : 1.0;
+            Candidate.TriggerStacks = Levels.Trigger;
+            Candidate.TargetStacks = Levels.Target;
+            Candidate.FillRatio = static_cast<double>(StockStacks) / static_cast<double>(Levels.Trigger);
             Out.Add(Candidate);
         }
     }
@@ -1975,7 +1997,10 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
     TMap<FGuid, int32>* Planned = OutPlannedItems ? OutPlannedItems : (Anchors ? &Anchors->PlannedItems : nullptr);
     if (Planned) Planned->Reset();
     const int32 StackSize = FMath::Max(1, UFGItemDescriptor::GetStackSize(ItemClass));
-    for (int32 Priority = 0; Priority < Candidates.Num() && Result.Num() < Settings.MaxRequestersPerLap; ++Priority)
+    // A fluid lap under "fluid full load" serves one requester: the tank is filled completely and
+    // drained there, so that stop must be the last of the lap.
+    const int32 MaxRequesters = Settings.bFluidFullLoad && IsFluidTruck(Vehicle) ? 1 : Settings.MaxRequestersPerLap;
+    for (int32 Priority = 0; Priority < Candidates.Num() && Result.Num() < MaxRequesters; ++Priority)
     {
         if (Priority > 0 && CoveredDeficit >= AvailableStacks) break;
         const FDTTOpenRequester& Candidate = Candidates[Priority];
@@ -1983,13 +2008,13 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
         RequesterClaims.Add(Selected->DockingPathNodeGuid, Vehicle);
         RequesterClaimedAtWorldSeconds.Add(Selected->DockingPathNodeGuid, ClaimedAt);
         Result.Add(Selected->DockingPathNodeGuid);
-        CoveredDeficit += FMath::Max(1, Candidate.Threshold - Candidate.StockStacks);
-        if (Planned) Planned->Add(Selected->DockingPathNodeGuid, FMath::Max(0, Candidate.Threshold - Candidate.StockStacks) * StackSize);
+        CoveredDeficit += FMath::Max(1, Candidate.TargetStacks - Candidate.StockStacks);
+        if (Planned) Planned->Add(Selected->DockingPathNodeGuid, FMath::Max(0, Candidate.TargetStacks - Candidate.StockStacks) * StackSize);
         UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
-            TEXT("DISPATCH_CLAIMED Truck='%s' Resource='%s' Requester='%s' Guid=%s Priority=%d StockStacks=%d Threshold=%d FillRatio=%.6f"),
+            TEXT("DISPATCH_CLAIMED Truck='%s' Resource='%s' Requester='%s' Guid=%s Priority=%d StockStacks=%d Trigger=%d Target=%d FillRatio=%.6f"),
             *DTSVehicleName(Vehicle), *ResourceId, *Selected->DisplayName,
             *Selected->DockingPathNodeGuid.ToString(), Priority, Candidate.StockStacks,
-            Candidate.Threshold, Candidate.FillRatio);
+            Candidate.TriggerStacks, Candidate.TargetStacks, Candidate.FillRatio);
     }
     UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
         TEXT("DISPATCH_LAP_PLANNED Truck='%s' Resource='%s' Open=%d Requesters=%d Deficit=%d Cargo=%d OnBoard=%d Capacity=%d"),
@@ -3171,10 +3196,10 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
             {
                 continue;
             }
-            const int32 Threshold = GetEffectiveThreshold(*Stop, ItemClass);
-            if (Threshold == INDEX_NONE) continue;
+            FDTTRequestLevels Levels;
+            if (!GetRequestLevels(*Stop, ItemClass, Levels)) continue;
             const int32 Stock = ReadDockStockInStacks(Stop->DockingStationIdentifier.Get(), ItemClass);
-            DeficitItems += int64(FMath::Max(0, Threshold - Stock)) * StackSize;
+            DeficitItems += int64(FMath::Max(0, Levels.Target - Stock)) * StackSize;
             ++Requesters;
         }
         if (Requesters > 0)
@@ -3189,8 +3214,13 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
             }
             OutPlan.Mode = FDTTTransferPlan::EMode::FillTo;
             OutPlan.ItemClass = ItemClass;
-            OutPlan.TargetItems = int32(FMath::Min<int64>(OnBoard + DeficitItems, FMath::Min<int64>(CapacityItems, TNumericLimits<int32>::Max())));
-            Reason = TEXT("producer");
+            // A fluid truck under "fluid full load" leaves with a full tank: the one requester of
+            // its lap drains it, and what the tank holds beyond the deficit is what the consumer
+            // drinks while the truck is held there.
+            const bool bFullLoad = Settings.bFluidFullLoad && IsFluidTruck(Vehicle);
+            const int64 Wanted = bFullLoad ? CapacityItems : OnBoard + DeficitItems;
+            OutPlan.TargetItems = int32(FMath::Min<int64>(Wanted, FMath::Min<int64>(CapacityItems, TNumericLimits<int32>::Max())));
+            Reason = bFullLoad ? TEXT("producer full load") : TEXT("producer");
         }
         else
         {
@@ -3202,20 +3232,21 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
         if (Stop->ResourceId.Equals(ResourceId, ESearchCase::IgnoreCase) &&
             GetEffectiveDispatchRole(*Stop) == EDTTDispatchRole::Requester && DoesDispatchStationMatchMode(*Stop))
         {
-            // A requester: fill it up to its threshold and not beyond, so "(Iron-10)" really keeps
-            // ten stacks free and the truck carries the rest on to the next stop.
-            const int32 Threshold = GetEffectiveThreshold(*Stop, ItemClass);
-            if (Threshold != INDEX_NONE)
+            // A requester: fill it up to its target (limit plus buffer) and not beyond, so the
+            // truck carries the rest on to the next stop.
+            FDTTRequestLevels Levels;
+            if (GetRequestLevels(*Stop, ItemClass, Levels))
             {
                 OutPlan.Mode = FDTTTransferPlan::EMode::FillTo;
                 OutPlan.ItemClass = ItemClass;
-                OutPlan.TargetItems = int32(FMath::Min<int64>(int64(Threshold) * StackSize, TNumericLimits<int32>::Max()));
+                OutPlan.TargetItems = int32(FMath::Min<int64>(int64(Levels.Target) * StackSize, TNumericLimits<int32>::Max()));
                 Reason = TEXT("requester");
-                // The last planned stop of the lap takes everything it can, threshold or not, and
+                // The last planned stop of the lap takes everything it can, target or not, and
                 // keeps the truck for a while (HandleTruckDocked opens the hold): what stays on
-                // board here rides to the depot otherwise.
-                if (bOutLeftoverHold && Settings.LeftoverHoldSeconds > 0.0f && !Station->GetIsInLoadMode() &&
-                    IsLastPlannedRequester(Vehicle, StationGuid))
+                // board here rides to the depot otherwise. Off (DrainLeftovers), the truck keeps
+                // its leftovers for the next lap.
+                if (bOutLeftoverHold && Settings.bDrainLeftovers && Settings.LeftoverHoldSeconds > 0.0f &&
+                    !Station->GetIsInLoadMode() && IsLastPlannedRequester(Vehicle, StationGuid))
                 {
                     OutPlan.Mode = FDTTTransferPlan::EMode::Drain;
                     Reason = TEXT("last requester");
@@ -3961,7 +3992,6 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
         const AFGBuildableDockingStation* TargetStation = IsValid(TargetDock) ? TargetDock->GetStation() : nullptr;
         if (!IsValid(TargetStation)) continue;
         const EResourceForm ProducerForm = TargetStation->GetDockingStationResourceForm();
-        auto IsFluid = [](EResourceForm Form) { return Form == EResourceForm::RF_LIQUID || Form == EResourceForm::RF_GAS; };
 
         // The cheapest truck that can carry the form and is not carrying something else.
         int32 BestIdle = INDEX_NONE;
@@ -3972,7 +4002,7 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
             const FDTTPoolTruckState& State = *Idle[IdleIndex].Value;
             AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
             const EResourceForm TruckForm = IFGDockableInterface::Execute_GetDockInventoryResourceForm(WheeledVehicle);
-            if (IsFluid(TruckForm) != IsFluid(ProducerForm))
+            if (DTSIsFluidForm(TruckForm) != DTSIsFluidForm(ProducerForm))
             {
                 UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_SKIP Truck='%s' Resource='%s' Reason=form Trigger=%s"),
                     *DTSVehicleName(Vehicle), *Demand.ResourceId, Trigger);
@@ -4347,11 +4377,17 @@ void UDynamicTimeTableSubsystem::BuildDispatchRows(TArray<FDTTDispatchRow>& OutR
         Row.bLoadMode = IsValid(Dock) && Dock->GetIsInLoadMode();
         Row.bModeMatches = DoesDispatchStationMatchMode(Station);
         Row.StockStacks = ItemClass ? ReadDockStockInStacks(Station.DockingStationIdentifier.Get(), ItemClass) : INDEX_NONE;
-        Row.ThresholdStacks = GetEffectiveThreshold(Station, ItemClass);
-        if (ItemClass) ReadDockCapacityInStacks(Station.DockingStationIdentifier.Get(), ItemClass, Row.CapacityStacks);
+        FDTTRequestLevels Levels;
+        if (GetRequestLevels(Station, ItemClass, Levels))
+        {
+            Row.TriggerStacks = Levels.Trigger;
+            Row.ThresholdStacks = Levels.Target;
+            Row.CapacityStacks = Levels.Capacity;
+            Row.bFluid = Levels.bFluid;
+        }
         if (Row.Role == EDTTDispatchRole::Producer) continue;
 
-        Row.bOpen = Row.bModeMatches && Row.StockStacks >= 0 && Row.ThresholdStacks > 0 && Row.StockStacks < Row.ThresholdStacks;
+        Row.bOpen = Row.bModeMatches && Row.StockStacks >= 0 && Row.TriggerStacks > 0 && Row.StockStacks < Row.TriggerStacks;
         if (const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Owner = RequesterClaims.Find(Station.DockingPathNodeGuid))
         {
             AFGWheeledVehicleIdentifier* Vehicle = Owner->Get();
@@ -4427,9 +4463,16 @@ FString UDynamicTimeTableSubsystem::FormatDispatchRow(const FDTTDispatchRow& Row
             *Row.ResourceId, *Row.StationName, ActualMode, Row.bModeMatches ? TEXT("yes") : TEXT("no"),
             Row.StockStacks >= 0 ? *FString::Printf(TEXT("%d stacks"), Row.StockStacks) : TEXT("unknown"));
     }
-    return FString::Printf(TEXT("%s | Requester | %s | mode=%s active=%s | stock=%s/%s cap=%s open=%s | claim=%s%s"),
+    // stock=S call<T fill=F cap=C: called while the stock is below T, filled up to F.
+    const FString Trigger = Row.TriggerStacks >= 0
+        ? (Row.bFluid && Row.CapacityStacks > 0
+            ? FString::Printf(TEXT("%d (%d%%)"), Row.TriggerStacks, FMath::RoundToInt(100.0f * Row.TriggerStacks / Row.CapacityStacks))
+            : FString::FromInt(Row.TriggerStacks))
+        : TEXT("?");
+    return FString::Printf(TEXT("%s | Requester | %s | mode=%s active=%s | stock=%s call<%s fill=%s cap=%s open=%s | claim=%s%s"),
         *Row.ResourceId, *Row.StationName, ActualMode, Row.bModeMatches ? TEXT("yes") : TEXT("no"),
         Row.StockStacks >= 0 ? *FString::FromInt(Row.StockStacks) : TEXT("unknown"),
+        *Trigger,
         Row.ThresholdStacks >= 0 ? *FString::FromInt(Row.ThresholdStacks) : TEXT("?"),
         Row.CapacityStacks >= 0 ? *FString::FromInt(Row.CapacityStacks) : TEXT("?"),
         Row.bOpen ? TEXT("yes") : TEXT("no"),

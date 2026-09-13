@@ -132,8 +132,7 @@ int32 FMyDTTHooks::CappedLoadUnload(const AFGBuildableDockingStation* Self, UFGI
 
     // The game moves fluids slot to slot and solids by AddStack; both with partial adds, and both
     // skip an item class once a stack of it failed to fit.
-    const EResourceForm Form = Self->GetDockingStationResourceForm();
-    const bool bFluid = Form == EResourceForm::RF_LIQUID || Form == EResourceForm::RF_GAS;
+    const bool bFluid = DTSIsFluidForm(Self->GetDockingStationResourceForm());
 
     int32 Moved = 0;
     TSet<TSubclassOf<UFGItemDescriptor>> Failed;

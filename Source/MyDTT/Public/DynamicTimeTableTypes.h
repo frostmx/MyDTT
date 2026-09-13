@@ -89,9 +89,9 @@ struct FDTTDispatchStation
     EDTTDispatchRole Role = EDTTDispatchRole::None;
 
     // Requester only: the N of a "(ResourceId-N)" tag, INDEX_NONE for a neutral "(ResourceId)" tag.
-    // Not a threshold by itself but an offset from the dock's capacity: the requester is open while
-    // its stock is below capacity minus N stacks (a neutral tag: below capacity, i.e. not full).
-    // The capacity is only known from the live inventory - see GetEffectiveThreshold.
+    // The request limit: a solid dock is called while its stock is below N stacks, a fluid dock
+    // while it is below N percent of its tank; without N the settings' limits apply. The delivery
+    // fills up to the limit plus the buffer (settings) - see GetRequestLevels.
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dynamic Time Table")
     int32 Threshold = INDEX_NONE;
 
@@ -282,8 +282,12 @@ struct FDTTDispatchRow
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bLoadMode = false;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bModeMatches = false;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 StockStacks = -1;
+    /** Requester: called while the stock is below this many stacks. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 TriggerStacks = -1;
+    /** Requester: a delivery fills it up to this many stacks (the limit plus the buffer). */
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 ThresholdStacks = -1;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 CapacityStacks = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bFluid = false;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bOpen = false;
     /** Requester: the truck holding the claim; depot: the truck parked or heading there. Empty when free. */
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString ClaimOwner;
@@ -324,7 +328,17 @@ struct FDTTSettings
 {
     GENERATED_BODY()
 
-    /** Seconds a truck stays docked at the last requester of its lap, draining what is left beyond the threshold. 0 turns the hold off. */
+    /** A solid requester without a number in its tag is called while its stock is below this many stacks (clamped to the dock). */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 SolidRequestStacks = 40;
+    /** A fluid requester without a number in its tag is called while its tank holds fewer than this many stacks of 50 000 L. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 FluidRequestStacks = 56;
+    /** A delivery fills a requester up to its limit plus this many stacks, so what is consumed on the way is covered. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 RequestBufferStacks = 8;
+    /** A fluid lap serves one requester and the producer fills the tank completely; the leftovers drain at that requester. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bFluidFullLoad = true;
+    /** The last requester of a lap takes everything beyond its target and holds the truck (LeftoverHoldSeconds). Off: the truck keeps its leftovers. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bDrainLeftovers = true;
+    /** Seconds a truck stays docked at the last requester of its lap, draining what is left beyond the target. 0 turns the hold off. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float LeftoverHoldSeconds = 60.0f;
     /** Seconds between two top-up transfers of a held truck (at a requester or a depot). The poll runs once a second, so 1 is the floor. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float TopUpIntervalSeconds = 1.0f;
@@ -347,6 +361,9 @@ struct FDTTSettings
 
     void Sanitize()
     {
+        SolidRequestStacks = FMath::Clamp(SolidRequestStacks, 0, 200);
+        FluidRequestStacks = FMath::Clamp(FluidRequestStacks, 0, 200);
+        RequestBufferStacks = FMath::Clamp(RequestBufferStacks, 0, 64);
         LeftoverHoldSeconds = FMath::Clamp(LeftoverHoldSeconds, 0.0f, 600.0f);
         TopUpIntervalSeconds = FMath::Clamp(TopUpIntervalSeconds, 1.0f, 30.0f);
         PoolDispatchIntervalSeconds = FMath::Clamp(PoolDispatchIntervalSeconds, 1.0f, 60.0f);
@@ -359,7 +376,10 @@ struct FDTTSettings
     }
     bool operator==(const FDTTSettings& Other) const
     {
-        return LeftoverHoldSeconds == Other.LeftoverHoldSeconds && TopUpIntervalSeconds == Other.TopUpIntervalSeconds &&
+        return SolidRequestStacks == Other.SolidRequestStacks && FluidRequestStacks == Other.FluidRequestStacks &&
+            RequestBufferStacks == Other.RequestBufferStacks && bFluidFullLoad == Other.bFluidFullLoad &&
+            bDrainLeftovers == Other.bDrainLeftovers &&
+            LeftoverHoldSeconds == Other.LeftoverHoldSeconds && TopUpIntervalSeconds == Other.TopUpIntervalSeconds &&
             bUnloadAtDepot == Other.bUnloadAtDepot && bSkipProducerWhenCargoCovers == Other.bSkipProducerWhenCargoCovers &&
             PoolDispatchIntervalSeconds == Other.PoolDispatchIntervalSeconds && MaxRequestersPerLap == Other.MaxRequestersPerLap &&
             RequesterClaimTimeoutSeconds == Other.RequesterClaimTimeoutSeconds && IdleDispatchRecheckSeconds == Other.IdleDispatchRecheckSeconds &&
@@ -368,9 +388,12 @@ struct FDTTSettings
     bool operator!=(const FDTTSettings& Other) const { return !(*this == Other); }
     FString Describe() const
     {
-        return FString::Printf(TEXT("LeftoverHoldSeconds=%.0f TopUpIntervalSeconds=%.0f UnloadAtDepot=%s SkipProducerWhenCargoCovers=%s "
+        return FString::Printf(TEXT("SolidRequestStacks=%d FluidRequestStacks=%d RequestBufferStacks=%d FluidFullLoad=%s DrainLeftovers=%s "
+            "LeftoverHoldSeconds=%.0f TopUpIntervalSeconds=%.0f UnloadAtDepot=%s SkipProducerWhenCargoCovers=%s "
             "PoolDispatchIntervalSeconds=%.0f MaxRequestersPerLap=%d RequesterClaimTimeoutSeconds=%.0f IdleDispatchRecheckSeconds=%.0f "
             "FuelCriticalMarginLaps=%.2f FuelSkipMarginLaps=%.2f"),
+            SolidRequestStacks, FluidRequestStacks, RequestBufferStacks, bFluidFullLoad ? TEXT("true") : TEXT("false"),
+            bDrainLeftovers ? TEXT("true") : TEXT("false"),
             LeftoverHoldSeconds, TopUpIntervalSeconds, bUnloadAtDepot ? TEXT("true") : TEXT("false"),
             bSkipProducerWhenCargoCovers ? TEXT("true") : TEXT("false"), PoolDispatchIntervalSeconds, MaxRequestersPerLap,
             RequesterClaimTimeoutSeconds, IdleDispatchRecheckSeconds, FuelCriticalMarginLaps, FuelSkipMarginLaps);
@@ -385,13 +408,19 @@ struct FDTTSettings
             if (Value.Equals(TEXT("false"), ESearchCase::IgnoreCase) || Value == TEXT("0") || Value.Equals(TEXT("off"), ESearchCase::IgnoreCase)) { Out = false; return true; }
             return false;
         };
+        auto AsInt = [&](int32& Out) { if (!Value.IsNumeric()) return false; Out = FCString::Atoi(*Value); return true; };
         const FString F = Field.ToLower();
+        if (F == TEXT("solidrequeststacks")) return AsInt(SolidRequestStacks);
+        if (F == TEXT("fluidrequeststacks")) return AsInt(FluidRequestStacks);
+        if (F == TEXT("requestbufferstacks")) return AsInt(RequestBufferStacks);
+        if (F == TEXT("fluidfullload")) return AsBool(bFluidFullLoad);
+        if (F == TEXT("drainleftovers")) return AsBool(bDrainLeftovers);
         if (F == TEXT("leftoverholdseconds")) return AsFloat(LeftoverHoldSeconds);
         if (F == TEXT("topupintervalseconds")) return AsFloat(TopUpIntervalSeconds);
         if (F == TEXT("unloadatdepot")) return AsBool(bUnloadAtDepot);
         if (F == TEXT("skipproducerwhencargocovers")) return AsBool(bSkipProducerWhenCargoCovers);
         if (F == TEXT("pooldispatchintervalseconds")) return AsFloat(PoolDispatchIntervalSeconds);
-        if (F == TEXT("maxrequestersperlap")) { if (!Value.IsNumeric()) return false; MaxRequestersPerLap = FCString::Atoi(*Value); return true; }
+        if (F == TEXT("maxrequestersperlap")) return AsInt(MaxRequestersPerLap);
         if (F == TEXT("requesterclaimtimeoutseconds")) return AsFloat(RequesterClaimTimeoutSeconds);
         if (F == TEXT("idledispatchrecheckseconds")) return AsFloat(IdleDispatchRecheckSeconds);
         if (F == TEXT("fuelcriticalmarginlaps")) return AsFloat(FuelCriticalMarginLaps);
