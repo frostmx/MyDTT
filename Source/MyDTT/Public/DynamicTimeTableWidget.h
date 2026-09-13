@@ -10,6 +10,8 @@ class UCheckBox;
 class UComboBoxString;
 class UEditableTextBox;
 class UScrollBox;
+class UProgressBar;
+struct FDTTCardSink;
 class USpinBox;
 class UTextBlock;
 class UWidgetSwitcher;
@@ -65,10 +67,16 @@ private:
     bool bSettingsEdited = false;
     UPROPERTY() TObjectPtr<UScrollBox> DispatchScrollBox;
     UPROPERTY() TObjectPtr<UScrollBox> TruckScrollBox;
-    UPROPERTY() TArray<TObjectPtr<UTextBlock>> DispatchRowTexts;
-    UPROPERTY() TArray<TObjectPtr<UTextBlock>> TruckRowTexts;
-    TArray<FString> DispatchRowKeys;
-    TArray<FString> TruckRowKeys;
+    // The Dispatch and Trucks pages are cards, built when the set of rows changes and updated in
+    // place otherwise; the arrays hold the widgets in creation order, the keys say what was built.
+    UPROPERTY() TArray<TObjectPtr<UTextBlock>> DispatchCardTexts;
+    UPROPERTY() TArray<TObjectPtr<UBorder>> DispatchCardBorders;
+    UPROPERTY() TArray<TObjectPtr<UProgressBar>> DispatchCardBars;
+    TArray<FString> DispatchCardKeys;
+    UPROPERTY() TArray<TObjectPtr<UTextBlock>> TruckCardTexts;
+    UPROPERTY() TArray<TObjectPtr<UBorder>> TruckCardBorders;
+    UPROPERTY() TArray<TObjectPtr<UProgressBar>> TruckCardBars;
+    TArray<FString> TruckCardKeys;
     int32 ActiveTab = 0;
 
     UPROPERTY() TObjectPtr<UScrollBox> GroupScrollBox;
@@ -123,8 +131,8 @@ private:
     void SetActiveTab(int32 Tab);
     void RefreshDispatchDisplay();
     void RefreshTruckDisplay();
-    void RefreshRowList(UScrollBox* Box, TArray<TObjectPtr<UTextBlock>>& Texts, TArray<FString>& Keys,
-        const TArray<FString>& NewKeys, const TArray<FString>& Lines, const TArray<FLinearColor>& Colors);
+    void PopulateDispatchCards(const TArray<FDTTDispatchRow>& Rows, FDTTCardSink& Sink);
+    void PopulateTruckCards(const TArray<FDTTTruckRow>& Rows, FDTTCardSink& Sink);
     void RebuildRuntimeDisplay();
     void UpdateRuntimeDisplayInPlace();
     bool RuntimeLayoutMatches() const;
