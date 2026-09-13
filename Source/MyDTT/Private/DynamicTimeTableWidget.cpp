@@ -14,6 +14,7 @@
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/ScrollBox.h"
+#include "Components/ScrollBoxSlot.h"
 #include "Components/SizeBox.h"
 #include "Components/Spacer.h"
 #include "Components/SpinBox.h"
@@ -99,12 +100,13 @@ void UDynamicTimeTableWidget::NativeConstruct()
     SettingsTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsTabClicked);
     SettingsSaveButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsSaveClicked);
     SettingsDefaultsButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsDefaultsClicked);
-    for (USpinBox* Spin : { SettingLeftoverHold.Get(), SettingTopUpInterval.Get(), SettingDispatchInterval.Get(), SettingMaxRequesters.Get(),
+    for (USpinBox* Spin : { SettingSolidRequest.Get(), SettingFluidRequest.Get(), SettingRequestBuffer.Get(),
+        SettingLeftoverHold.Get(), SettingTopUpInterval.Get(), SettingDispatchInterval.Get(), SettingMaxRequesters.Get(),
         SettingClaimTimeout.Get(), SettingIdleRecheck.Get(), SettingFuelCritical.Get(), SettingFuelSkip.Get() })
     {
         if (Spin) Spin->OnValueChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingSpinChanged);
     }
-    for (UCheckBox* Check : { SettingUnloadAtDepot.Get(), SettingSkipProducer.Get() })
+    for (UCheckBox* Check : { SettingFluidFullLoad.Get(), SettingDrainLeftovers.Get(), SettingUnloadAtDepot.Get(), SettingSkipProducer.Get() })
     {
         if (Check) Check->OnCheckStateChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingCheckChanged);
     }
@@ -300,50 +302,74 @@ void UDynamicTimeTableWidget::BuildEditorPanel(UVerticalBox* Main)
 
 void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
 {
+    // Header and the Save/Defaults row stay put; the rows scroll between them. The border fills
+    // the page and clips, so a long list can never paint over the window's footer again.
     UBorder* Border = WidgetTree->ConstructWidget<UBorder>();
     Border->SetBrushColor(FLinearColor(0.08f,0.12f,0.15f,1)); Border->SetPadding(FMargin(10));
-    Page->AddChildToVerticalBox(Border)->SetPadding(FMargin(5,5,5,8));
+    Border->SetClipping(EWidgetClipping::ClipToBounds);
+    UVerticalBoxSlot* BorderSlot = Page->AddChildToVerticalBox(Border);
+    BorderSlot->SetPadding(FMargin(5,5,5,8)); BorderSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
     UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>(); Border->SetContent(Box);
     Box->AddChildToVerticalBox(MakeText(WidgetTree,TEXT("Settings"),19,FLinearColor(0.2f,0.8f,1)));
-    Box->AddChildToVerticalBox(MakeText(WidgetTree,TEXT("Saved with the world; the server's values apply. Save writes them, Defaults restores the shipped values."),13,FLinearColor(0.6f,0.7f,0.75f)))->SetPadding(FMargin(0,0,0,6));
+    Box->AddChildToVerticalBox(MakeText(WidgetTree,TEXT("Saved with the world; the server's values apply. Save writes them, Defaults restores the shipped values."),13,FLinearColor(0.6f,0.7f,0.75f)))->SetPadding(FMargin(0,0,0,4));
+    UScrollBox* Rows = WidgetTree->ConstructWidget<UScrollBox>();
+    UVerticalBoxSlot* RowsSlot = Box->AddChildToVerticalBox(Rows);
+    RowsSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill)); RowsSlot->SetPadding(FMargin(0,2));
 
+    auto Section = [&](const TCHAR* Title)
+    {
+        UTextBlock* T = MakeText(WidgetTree,Title,16,FLinearColor(0.2f,0.8f,1));
+        Rows->AddChild(T);
+        if (UScrollBoxSlot* S = Cast<UScrollBoxSlot>(T->Slot)) S->SetPadding(FMargin(0,8,0,2));
+    };
+    auto Row = [&](const TCHAR* Label, const TCHAR* Hint, UWidget* Control)
+    {
+        UHorizontalBox* R = WidgetTree->ConstructWidget<UHorizontalBox>();
+        Rows->AddChild(R);
+        if (UScrollBoxSlot* S = Cast<UScrollBoxSlot>(R->Slot)) S->SetPadding(FMargin(0,1,8,1));
+        UVerticalBox* Text = WidgetTree->ConstructWidget<UVerticalBox>();
+        Text->AddChildToVerticalBox(MakeText(WidgetTree,Label,14,FLinearColor::White));
+        UTextBlock* H = MakeText(WidgetTree,Hint,11,FLinearColor(0.6f,0.7f,0.75f)); H->SetAutoWrapText(true);
+        Text->AddChildToVerticalBox(H);
+        AddRowItem(R,Text,3,true);
+        AddRowItem(R,Control,3);
+    };
     auto Spin = [&](const TCHAR* Label, const TCHAR* Hint, float Min, float Max, float Delta) -> USpinBox*
     {
-        UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(); Box->AddChildToVerticalBox(Row)->SetPadding(FMargin(0,2));
-        UVerticalBox* Text = WidgetTree->ConstructWidget<UVerticalBox>();
-        Text->AddChildToVerticalBox(MakeText(WidgetTree,Label,15,FLinearColor::White));
-        Text->AddChildToVerticalBox(MakeText(WidgetTree,Hint,12,FLinearColor(0.6f,0.7f,0.75f)));
-        AddRowItem(Row,Text,5,true);
         USpinBox* S = WidgetTree->ConstructWidget<USpinBox>();
         S->SetMinValue(Min); S->SetMaxValue(Max); S->SetMinSliderValue(Min); S->SetMaxSliderValue(Max);
         S->SetDelta(Delta); S->SetAlwaysUsesDeltaSnap(true); S->SetMinFractionalDigits(Delta < 1.0f ? 1 : 0); S->SetMaxFractionalDigits(Delta < 1.0f ? 2 : 0);
-        USizeBox* Size = WidgetTree->ConstructWidget<USizeBox>(); Size->SetWidthOverride(140); Size->SetContent(S);
-        AddRowItem(Row,Size);
+        USizeBox* Size = WidgetTree->ConstructWidget<USizeBox>(); Size->SetWidthOverride(120); Size->SetContent(S);
+        Row(Label, Hint, Size);
         return S;
     };
     auto Check = [&](const TCHAR* Label, const TCHAR* Hint) -> UCheckBox*
     {
-        UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(); Box->AddChildToVerticalBox(Row)->SetPadding(FMargin(0,2));
-        UVerticalBox* Text = WidgetTree->ConstructWidget<UVerticalBox>();
-        Text->AddChildToVerticalBox(MakeText(WidgetTree,Label,15,FLinearColor::White));
-        Text->AddChildToVerticalBox(MakeText(WidgetTree,Hint,12,FLinearColor(0.6f,0.7f,0.75f)));
-        AddRowItem(Row,Text,5,true);
         UCheckBox* C = WidgetTree->ConstructWidget<UCheckBox>();
-        AddRowItem(Row,C,5);
+        Row(Label, Hint, C);
         return C;
     };
-    SettingLeftoverHold = Spin(TEXT("Leftover hold, seconds"), TEXT("How long a truck stays at the last stop of its lap unloading what the threshold left on board. 0 turns it off."), 0, 600, 5);
+    Section(TEXT("Requests"));
+    SettingSolidRequest = Spin(TEXT("Solid request limit, stacks"), TEXT("A solid station without a number in its tag is called while it holds fewer stacks than this. (Res-N) in the name overrides it."), 0, 200, 1);
+    SettingFluidRequest = Spin(TEXT("Fluid request limit, stacks of 50 000 L"), TEXT("A fluid station without a number in its tag is called while its tank holds fewer stacks than this (64 = a full tank). (Res-N) in the name is a percent."), 0, 200, 1);
+    SettingRequestBuffer = Spin(TEXT("Request buffer, stacks"), TEXT("A delivery fills a station up to its limit plus this many stacks, covering what is consumed while the truck is on its way."), 0, 64, 1);
+    SettingFluidFullLoad = Check(TEXT("Fluid trucks always carry a full load"), TEXT("A fluid lap serves one station: the producer fills the tank completely and the truck drains it there, topping up while the station drinks."));
+    SettingMaxRequesters = Spin(TEXT("Requesters per lap"), TEXT("Upper bound on stops planned into one lap."), 1, 8, 1);
+    SettingClaimTimeout = Spin(TEXT("Requester claim timeout, seconds"), TEXT("An unserved claim on a requester is dropped after this long."), 30, 3600, 30);
+    Section(TEXT("Leftovers"));
+    SettingDrainLeftovers = Check(TEXT("Drain leftovers at the last stop"), TEXT("The last requester of a lap takes everything it can and holds the truck for the time below. Off: the truck keeps its leftovers for the next lap."));
+    SettingLeftoverHold = Spin(TEXT("Leftover hold, seconds"), TEXT("How long a truck stays at the last stop of its lap unloading what is left on board. 0 turns it off."), 0, 600, 5);
     SettingTopUpInterval = Spin(TEXT("Top-up interval, seconds"), TEXT("How often a held truck tries to unload again (requester or depot)."), 1, 30, 1);
     SettingUnloadAtDepot = Check(TEXT("Unload at the depot"), TEXT("A parked truck empties into its depot when the depot is in UNLOAD mode."));
     SettingSkipProducer = Check(TEXT("Skip the producer when cargo covers the lap"), TEXT("A pool truck whose cargo covers every planned deficit goes straight to the requesters."));
+    Section(TEXT("Pool"));
     SettingDispatchInterval = Spin(TEXT("Pool dispatch interval, seconds"), TEXT("How often parked trucks are matched to open requests."), 1, 60, 1);
-    SettingMaxRequesters = Spin(TEXT("Requesters per lap"), TEXT("Upper bound on stops planned into one lap."), 1, 8, 1);
-    SettingClaimTimeout = Spin(TEXT("Requester claim timeout, seconds"), TEXT("An unserved claim on a requester is dropped after this long."), 30, 3600, 30);
     SettingIdleRecheck = Spin(TEXT("Idle recheck, seconds"), TEXT("How often a dispatch truck idling on a one-stop route looks for requests."), 1, 120, 1);
-    SettingFuelCritical = Spin(TEXT("Fuel: borrow a stop below, laps"), TEXT("A truck adds a fuel stop when its tank holds less than this many estimated laps."), 1, 10, 0.1f);
-    SettingFuelSkip = Spin(TEXT("Fuel: skip own stop above, laps"), TEXT("A truck leaves its own (F) out when its tank holds more than this many laps. Kept above the borrow margin."), 1.1f, 10, 0.1f);
+    Section(TEXT("Fuel"));
+    SettingFuelCritical = Spin(TEXT("Borrow a stop below, laps"), TEXT("A truck adds a fuel stop when its tank holds less than this many estimated laps."), 1, 10, 0.1f);
+    SettingFuelSkip = Spin(TEXT("Skip own stop above, laps"), TEXT("A truck leaves its own (F) out when its tank holds more than this many laps. Kept above the borrow margin."), 1.1f, 10, 0.1f);
 
-    UHorizontalBox* Buttons = WidgetTree->ConstructWidget<UHorizontalBox>(); Box->AddChildToVerticalBox(Buttons)->SetPadding(FMargin(0,8,0,0));
+    UHorizontalBox* Buttons = WidgetTree->ConstructWidget<UHorizontalBox>(); Box->AddChildToVerticalBox(Buttons)->SetPadding(FMargin(0,6,0,0));
     SettingsSaveButton = MakeButton(WidgetTree,TEXT("Save")); AddRowItem(Buttons,SettingsSaveButton);
     SettingsDefaultsButton = MakeButton(WidgetTree,TEXT("Defaults")); AddRowItem(Buttons,SettingsDefaultsButton);
     SettingsStatusText = MakeText(WidgetTree,TEXT("Ready."),14,FLinearColor(0.7f,0.8f,0.85f)); Box->AddChildToVerticalBox(SettingsStatusText)->SetPadding(FMargin(5));
@@ -361,6 +387,11 @@ void UDynamicTimeTableWidget::RefreshSettingsControls(bool bForce)
     if (!SettingLeftoverHold || (bSettingsEdited && !bForce)) return;
     const FDTTSettings V = ViewSettings();
     bRefreshingControls = true;
+    SettingSolidRequest->SetValue(float(V.SolidRequestStacks));
+    SettingFluidRequest->SetValue(float(V.FluidRequestStacks));
+    SettingRequestBuffer->SetValue(float(V.RequestBufferStacks));
+    SettingFluidFullLoad->SetIsChecked(V.bFluidFullLoad);
+    SettingDrainLeftovers->SetIsChecked(V.bDrainLeftovers);
     SettingLeftoverHold->SetValue(V.LeftoverHoldSeconds);
     SettingTopUpInterval->SetValue(V.TopUpIntervalSeconds);
     SettingUnloadAtDepot->SetIsChecked(V.bUnloadAtDepot);
@@ -379,6 +410,11 @@ FDTTSettings UDynamicTimeTableWidget::ReadSettingsControls() const
 {
     FDTTSettings V = ViewSettings();
     if (!SettingLeftoverHold) return V;
+    V.SolidRequestStacks = FMath::RoundToInt(SettingSolidRequest->GetValue());
+    V.FluidRequestStacks = FMath::RoundToInt(SettingFluidRequest->GetValue());
+    V.RequestBufferStacks = FMath::RoundToInt(SettingRequestBuffer->GetValue());
+    V.bFluidFullLoad = SettingFluidFullLoad->IsChecked();
+    V.bDrainLeftovers = SettingDrainLeftovers->IsChecked();
     V.LeftoverHoldSeconds = SettingLeftoverHold->GetValue();
     V.TopUpIntervalSeconds = SettingTopUpInterval->GetValue();
     V.bUnloadAtDepot = SettingUnloadAtDepot->IsChecked();
@@ -416,6 +452,11 @@ void UDynamicTimeTableWidget::HandleSettingsDefaultsClicked()
 {
     const FDTTSettings Defaults;
     bRefreshingControls = true;
+    SettingSolidRequest->SetValue(float(Defaults.SolidRequestStacks));
+    SettingFluidRequest->SetValue(float(Defaults.FluidRequestStacks));
+    SettingRequestBuffer->SetValue(float(Defaults.RequestBufferStacks));
+    SettingFluidFullLoad->SetIsChecked(Defaults.bFluidFullLoad);
+    SettingDrainLeftovers->SetIsChecked(Defaults.bDrainLeftovers);
     SettingLeftoverHold->SetValue(Defaults.LeftoverHoldSeconds);
     SettingTopUpInterval->SetValue(Defaults.TopUpIntervalSeconds);
     SettingUnloadAtDepot->SetIsChecked(Defaults.bUnloadAtDepot);

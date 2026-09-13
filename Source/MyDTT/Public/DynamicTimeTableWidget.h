@@ -44,6 +44,11 @@ private:
     UPROPERTY() TObjectPtr<UButton> SettingsTabButton;
     // Settings page: one control per FDTTSettings field, filled from the server's copy on tab
     // open and after a result, never while the user is editing (bSettingsEdited).
+    UPROPERTY() TObjectPtr<USpinBox> SettingSolidRequest;
+    UPROPERTY() TObjectPtr<USpinBox> SettingFluidRequest;
+    UPROPERTY() TObjectPtr<USpinBox> SettingRequestBuffer;
+    UPROPERTY() TObjectPtr<UCheckBox> SettingFluidFullLoad;
+    UPROPERTY() TObjectPtr<UCheckBox> SettingDrainLeftovers;
     UPROPERTY() TObjectPtr<USpinBox> SettingLeftoverHold;
     UPROPERTY() TObjectPtr<USpinBox> SettingTopUpInterval;
     UPROPERTY() TObjectPtr<UCheckBox> SettingUnloadAtDepot;
