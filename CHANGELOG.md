@@ -7,6 +7,13 @@
   claim; depots and fuel stops get their own cards. The Trucks tab shows a card per truck with a
   status badge, the route with the current stop lit, a cargo bar, the cargo note and the plan.
   The wall of text lines is gone; `/dtt dispatch` and `/dtt trucks` in chat are unchanged.
+- Both tabs have a filter line: type part of a station or truck name or a resource, any case,
+  and only the matching cards stay.
+- A truck only claims a depot of its own kind: fluid trucks park at fluid truck stations, solid
+  trucks at solid ones. The game never runs a transfer between the two, so a leftover could not
+  drain there. A depot claimed before this rule is released and re-picked when the truck next
+  looks for one; a truck already parked at the wrong kind stays until its next lap
+  (`DEPOT_FORM_MISMATCH` in the log). `/dtt park` says which kind it could not find.
 
 ## 2.2.0
 
