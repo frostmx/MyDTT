@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.2.1
+
+- The Dispatch tab shows a card per resource: producers on the left with their stock,
+  requesters on the right with stock, call level, fill target, a fill bar and who holds the
+  claim; depots and fuel stops get their own cards. The Trucks tab shows a card per truck with a
+  status badge, the route with the current stop lit, a cargo bar, the cargo note and the plan.
+  The wall of text lines is gone; `/dtt dispatch` and `/dtt trucks` in chat are unchanged.
+
 ## 2.2.0
 
 - **The number in a requester tag changed meaning.** `(Resource-N)` on a solid station now
