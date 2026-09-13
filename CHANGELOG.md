@@ -15,8 +15,14 @@
   producer skip, dispatch interval, requesters per lap, claim timeout, idle recheck and the two
   fuel margins. Saved with the world; the server's values apply, remote clients edit them
   through the same window. `/dtt settings` and `/dtt set <field> <value>` in chat.
+- A pool lap now gets its fuel stop: the estimate failed on the lap's return to the depot it
+  started from, so no pool lap ever included one.
+- A truck that leaves an (F) stop with no more fuel than it arrived with is reported in the log
+  (`FUEL_STOP_EMPTY`, with the pump's stock); a refuel as `FUEL_REFUELLED`.
+- A resource named in the player's own words is resolved from the requesters' stock when no
+  tagged producer holds it, so a parked truck can be sent from its own cargo without a producer.
 - Window protocol 6, save data version 7. Server and clients must run the same version; an
-  older save keeps the shipped defaults.
+  older save keeps the shipped defaults and the first lap after it has no plan to drain by.
 
 ## 2.0.0
 
