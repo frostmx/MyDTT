@@ -1935,7 +1935,14 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
 
     TArray<FDTTOpenRequester> Candidates;
     CollectOpenRequesters(ResourceId, ItemClass, Vehicle, Candidates);
-    if (Candidates.Num() == 0) return Result;
+    if (Candidates.Num() == 0)
+    {
+        // No lap planned: the previous lap's plan must not outlive it, or the kept-last loop
+        // would treat the old last requester as still planned and drain the truck into it.
+        if (!OutPlannedItems)
+            if (FDTTDispatchTruckAnchors* Anchors = DispatchTruckAnchors.Find(Vehicle)) Anchors->PlannedItems.Reset();
+        return Result;
+    }
 
     // What this lap can deliver, in stacks: the truck's capacity, but no more than what is already
     // on board plus what the producer holds right now. Unknown (no vehicle actor, no inventory)
