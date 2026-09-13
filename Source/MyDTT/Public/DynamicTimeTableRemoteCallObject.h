@@ -18,7 +18,7 @@ USTRUCT(BlueprintType)
 struct FDTTClientSnapshot
 {
     GENERATED_BODY()
-    UPROPERTY(BlueprintReadOnly) int32 ProtocolVersion = 5;
+    UPROPERTY(BlueprintReadOnly) int32 ProtocolVersion = 6;
     UPROPERTY(BlueprintReadOnly) int32 Revision = 0;
     // EDTTSnapshotSection bits this snapshot carries; the client keeps the other sections it has.
     UPROPERTY(BlueprintReadOnly) int32 Sections = 0;
@@ -28,6 +28,8 @@ struct FDTTClientSnapshot
     UPROPERTY(BlueprintReadOnly) TArray<FDTTStationRuntimeLoad> RuntimeLoads;
     UPROPERTY(BlueprintReadOnly) TArray<FDTTDispatchRow> DispatchRows;
     UPROPERTY(BlueprintReadOnly) TArray<FDTTTruckRow> TruckRows;
+    // Sent with the Groups section: small, and it changes with the configuration revision.
+    UPROPERTY(BlueprintReadOnly) FDTTSettings Settings;
 };
 DECLARE_MULTICAST_DELEGATE(FDTTClientSnapshotChanged);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FDTTClientOperationResult, bool, const FString&);
@@ -38,7 +40,8 @@ class MYDTT_API UDynamicTimeTableRemoteCallObject : public UFGRemoteCallObject
 public:
     // 4: groups come from tags in the station names, and every edit is a rename.
     // 5: sectioned snapshots with the dispatch and truck rows.
-    static constexpr int32 ProtocolVersion = 5;
+    // 6: the settings ride with the Groups section and can be set from the window.
+    static constexpr int32 ProtocolVersion = 6;
     // A section is cut here so that the whole snapshot stays well under the 64 KB reliable bunch.
     static constexpr int32 MaxSnapshotRows = 400;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -53,6 +56,7 @@ public:
     void RequestRemoveStation(FGuid GroupId, const FString& StationName);
     void RequestSetTargetSlots(FGuid GroupId, const FString& StationName, int32 TargetSlots);
     void RequestRecalculate();
+    void RequestSetSettings(const FDTTSettings& Settings);
     UFUNCTION(Client, Reliable)
     void Client_OpenWindow();
 private:
@@ -66,6 +70,7 @@ private:
     UFUNCTION(Server, Reliable) void Server_RemoveStation(FGuid GroupId, const FString& StationName, int32 ClientProtocol);
     UFUNCTION(Server, Reliable) void Server_SetTargetSlots(FGuid GroupId, const FString& StationName, int32 TargetSlots, int32 ClientProtocol);
     UFUNCTION(Server, Reliable) void Server_Recalculate(int32 ClientProtocol);
+    UFUNCTION(Server, Reliable) void Server_SetSettings(const FDTTSettings& Settings, int32 ClientProtocol);
     UFUNCTION(Client, Reliable) void Client_ReceiveSnapshot(const FDTTClientSnapshot& Snapshot);
     UFUNCTION(Client, Reliable) void Client_OperationResult(bool bSuccess, const FString& Message);
     bool Check(int32 ClientProtocol);

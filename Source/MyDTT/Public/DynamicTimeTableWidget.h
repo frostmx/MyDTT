@@ -6,6 +6,7 @@
 
 class UBorder;
 class UButton;
+class UCheckBox;
 class UComboBoxString;
 class UEditableTextBox;
 class UScrollBox;
@@ -35,11 +36,28 @@ public:
     int32 GetRequestedSections() const;
 
 private:
-    // Tabs: 0 groups (editor + booking status), 1 dispatch stations, 2 trucks.
+    // Tabs: 0 groups (editor + booking status), 1 dispatch stations, 2 trucks, 3 settings.
     UPROPERTY() TObjectPtr<UWidgetSwitcher> Pages;
     UPROPERTY() TObjectPtr<UButton> GroupsTabButton;
     UPROPERTY() TObjectPtr<UButton> DispatchTabButton;
     UPROPERTY() TObjectPtr<UButton> TrucksTabButton;
+    UPROPERTY() TObjectPtr<UButton> SettingsTabButton;
+    // Settings page: one control per FDTTSettings field, filled from the server's copy on tab
+    // open and after a result, never while the user is editing (bSettingsEdited).
+    UPROPERTY() TObjectPtr<USpinBox> SettingLeftoverHold;
+    UPROPERTY() TObjectPtr<USpinBox> SettingTopUpInterval;
+    UPROPERTY() TObjectPtr<UCheckBox> SettingUnloadAtDepot;
+    UPROPERTY() TObjectPtr<UCheckBox> SettingSkipProducer;
+    UPROPERTY() TObjectPtr<USpinBox> SettingDispatchInterval;
+    UPROPERTY() TObjectPtr<USpinBox> SettingMaxRequesters;
+    UPROPERTY() TObjectPtr<USpinBox> SettingClaimTimeout;
+    UPROPERTY() TObjectPtr<USpinBox> SettingIdleRecheck;
+    UPROPERTY() TObjectPtr<USpinBox> SettingFuelCritical;
+    UPROPERTY() TObjectPtr<USpinBox> SettingFuelSkip;
+    UPROPERTY() TObjectPtr<UButton> SettingsSaveButton;
+    UPROPERTY() TObjectPtr<UButton> SettingsDefaultsButton;
+    UPROPERTY() TObjectPtr<UTextBlock> SettingsStatusText;
+    bool bSettingsEdited = false;
     UPROPERTY() TObjectPtr<UScrollBox> DispatchScrollBox;
     UPROPERTY() TObjectPtr<UScrollBox> TruckScrollBox;
     UPROPERTY() TArray<TObjectPtr<UTextBlock>> DispatchRowTexts;
@@ -90,6 +108,11 @@ private:
 
     void BuildWidgetTree();
     void BuildEditorPanel(class UVerticalBox* Main);
+    void BuildSettingsPanel(class UVerticalBox* Page);
+    /** The server's (or the snapshot's) settings into the controls. */
+    void RefreshSettingsControls(bool bForce);
+    FDTTSettings ReadSettingsControls() const;
+    FDTTSettings ViewSettings() const;
     void CloseWindow();
     void RefreshRuntimeDisplay();
     void SetActiveTab(int32 Tab);
@@ -113,6 +136,11 @@ private:
     UFUNCTION() void HandleGroupsTabClicked();
     UFUNCTION() void HandleDispatchTabClicked();
     UFUNCTION() void HandleTrucksTabClicked();
+    UFUNCTION() void HandleSettingsTabClicked();
+    UFUNCTION() void HandleSettingsSaveClicked();
+    UFUNCTION() void HandleSettingsDefaultsClicked();
+    UFUNCTION() void HandleSettingSpinChanged(float Value);
+    UFUNCTION() void HandleSettingCheckChanged(bool bChecked);
     UFUNCTION() void HandleRecalculateClicked();
     UFUNCTION() void HandleCreateGroupClicked();
     UFUNCTION() void HandleRenameGroupClicked();

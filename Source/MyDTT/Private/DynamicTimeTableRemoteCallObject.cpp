@@ -24,6 +24,7 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
             S->GetAllVanillaStationNames(X.AvailableStations);
             S->GetAllDockingStationNames(X.AvailableTruckStations);
             for (const auto& G : X.Groups) { TArray<FDTTStationRuntimeLoad> L; S->GetGroupRuntimeLoad(G.GroupId, L); X.RuntimeLoads.Append(L); }
+            X.Settings = S->GetSettings();
         }
         if (X.Sections & EDTTSnapshotSection::Dispatch)
         {
@@ -57,6 +58,8 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
     Client_ReceiveSnapshot(X);
 }
 void UDynamicTimeTableRemoteCallObject::RequestSnapshot(int32 Sections){Server_RequestSnapshot(ProtocolVersion,Sections);}void UDynamicTimeTableRemoteCallObject::RequestCreateGroup(const FString&N,EDTTGroupKind K){Server_CreateGroup(N,K,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestRenameGroup(FGuid G,const FString&N){Server_RenameGroup(G,N,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestDeleteGroup(FGuid G){Server_DeleteGroup(G,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestAddStation(FGuid G,const FString&N){Server_AddStation(G,N,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestRemoveStation(FGuid G,const FString&N){Server_RemoveStation(G,N,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestSetTargetSlots(FGuid G,const FString&N,int32 V){Server_SetTargetSlots(G,N,FMath::Clamp(V,1,999),ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestRecalculate(){Server_Recalculate(ProtocolVersion);}
+void UDynamicTimeTableRemoteCallObject::RequestSetSettings(const FDTTSettings& Settings){Server_SetSettings(Settings,ProtocolVersion);}
+void UDynamicTimeTableRemoteCallObject::Server_SetSettings_Implementation(const FDTTSettings& Settings,int32 V){if(!Check(V))return;auto*S=GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>();FString M(TEXT("dTT: subsystem unavailable."));const bool O=S&&S->ApplySettings(Settings,TEXT("remote client"),&M);Client_OperationResult(O,M);SendSnapshot(EDTTSnapshotSection::Groups);}
 void UDynamicTimeTableRemoteCallObject::Server_RequestSnapshot_Implementation(int32 V,int32 Sections){if(Check(V))SendSnapshot(Sections);}
 void UDynamicTimeTableRemoteCallObject::Server_CreateGroup_Implementation(const FString&N,EDTTGroupKind K,int32 V){if(!Check(V))return;auto*S=GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>();bool O=S&&S->CreateGroup(N.TrimStartAndEnd().Left(64),K).IsValid();Client_OperationResult(O,O?TEXT("Group created."):TEXT("Create failed."));SendSnapshot(EDTTSnapshotSection::Groups);}
 void UDynamicTimeTableRemoteCallObject::Server_RenameGroup_Implementation(FGuid G,const FString&N,int32 V){if(!Check(V))return;auto*S=GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>();bool O=S&&S->RenameGroup(G,N.TrimStartAndEnd().Left(64));Client_OperationResult(O,O?TEXT("Group renamed."):TEXT("Rename failed."));SendSnapshot(EDTTSnapshotSection::Groups);}
@@ -78,6 +81,7 @@ void UDynamicTimeTableRemoteCallObject::Client_ReceiveSnapshot_Implementation(co
         CachedSnapshot.AvailableStations = X.AvailableStations;
         CachedSnapshot.AvailableTruckStations = X.AvailableTruckStations;
         CachedSnapshot.RuntimeLoads = X.RuntimeLoads;
+        CachedSnapshot.Settings = X.Settings;
     }
     if (X.Sections & EDTTSnapshotSection::Dispatch) CachedSnapshot.DispatchRows = X.DispatchRows;
     if (X.Sections & EDTTSnapshotSection::Trucks) CachedSnapshot.TruckRows = X.TruckRows;

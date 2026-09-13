@@ -18,7 +18,7 @@ ADynamicTimeTableChatCommand::ADynamicTimeTableChatCommand()
     Usage = NSLOCTEXT(
         "DynamicTimeTable",
         "ChatCommand.DTT.Usage",
-        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt trucks [resource] - list dispatch and pool trucks; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt recalc - rebuild active bookings");
+        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt trucks [resource] - list dispatch and pool trucks; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt settings - show the settings; /dtt set <field> <value> - change one setting; /dtt recalc - rebuild active bookings");
     Aliases.Add(TEXT("dynamictimetable"));
 }
 
@@ -120,6 +120,32 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
             Sender->SendChatMessage(Line, FLinearColor(0.20f, 0.80f, 1.00f));
         }
         return EExecutionStatus::COMPLETED;
+    }
+
+    if (Arguments.Num() >= 1 && Arguments[0].Equals(TEXT("settings"), ESearchCase::IgnoreCase))
+    {
+        Sender->SendChatMessage(FString::Printf(TEXT("dTT settings: %s"), *Subsystem->GetSettings().Describe()), FLinearColor(0.20f, 0.80f, 1.00f));
+        Sender->SendChatMessage(TEXT("dTT: /dtt set <field> <value>, fields as listed (case-insensitive); the Settings tab of /dtt does the same."), FLinearColor(0.20f, 0.80f, 1.00f));
+        return EExecutionStatus::COMPLETED;
+    }
+
+    if (Arguments.Num() >= 1 && Arguments[0].Equals(TEXT("set"), ESearchCase::IgnoreCase))
+    {
+        if (Arguments.Num() < 3)
+        {
+            Sender->SendChatMessage(TEXT("dTT: /dtt set <field> <value> - see /dtt settings for the fields."), FLinearColor::Red);
+            return EExecutionStatus::BAD_ARGUMENTS;
+        }
+        FDTTSettings Wanted = Subsystem->GetSettings();
+        if (!Wanted.SetByName(Arguments[1], Arguments[2]))
+        {
+            Sender->SendChatMessage(FString::Printf(TEXT("dTT: unknown field or value: %s %s"), *Arguments[1], *Arguments[2]), FLinearColor::Red);
+            return EExecutionStatus::BAD_ARGUMENTS;
+        }
+        FString Message;
+        const bool bOk = Subsystem->ApplySettings(Wanted, TEXT("chat"), &Message);
+        Sender->SendChatMessage(Message, bOk ? FLinearColor(0.20f, 0.80f, 1.00f) : FLinearColor::Red);
+        return bOk ? EExecutionStatus::COMPLETED : EExecutionStatus::UNCOMPLETED;
     }
 
     if (Arguments.Num() >= 1 &&

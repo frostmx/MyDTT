@@ -6,6 +6,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/CheckBox.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Components/ComboBoxString.h"
@@ -95,6 +96,18 @@ void UDynamicTimeTableWidget::NativeConstruct()
     GroupsTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleGroupsTabClicked);
     DispatchTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleDispatchTabClicked);
     TrucksTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleTrucksTabClicked);
+    SettingsTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsTabClicked);
+    SettingsSaveButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsSaveClicked);
+    SettingsDefaultsButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsDefaultsClicked);
+    for (USpinBox* Spin : { SettingLeftoverHold.Get(), SettingTopUpInterval.Get(), SettingDispatchInterval.Get(), SettingMaxRequesters.Get(),
+        SettingClaimTimeout.Get(), SettingIdleRecheck.Get(), SettingFuelCritical.Get(), SettingFuelSkip.Get() })
+    {
+        if (Spin) Spin->OnValueChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingSpinChanged);
+    }
+    for (UCheckBox* Check : { SettingUnloadAtDepot.Get(), SettingSkipProducer.Get() })
+    {
+        if (Check) Check->OnCheckStateChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingCheckChanged);
+    }
     SetDefaultFocusWidget(CloseButton);
 
     if (UDynamicTimeTableSubsystem* Subsystem = GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())
@@ -215,12 +228,13 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     SummaryText = MakeText(WidgetTree,TEXT("Loading..."),16,FLinearColor(0.78f,0.85f,0.9f));
     Main->AddChildToVerticalBox(SummaryText)->SetPadding(FMargin(5));
 
-    // Three pages in one window; the tab row switches them, the active one is tinted.
+    // Four pages in one window; the tab row switches them, the active one is tinted.
     UHorizontalBox* Tabs = WidgetTree->ConstructWidget<UHorizontalBox>();
     Main->AddChildToVerticalBox(Tabs)->SetPadding(FMargin(5,0,5,4));
     GroupsTabButton = MakeButton(WidgetTree,TEXT("Groups")); AddRowItem(Tabs,GroupsTabButton,3);
     DispatchTabButton = MakeButton(WidgetTree,TEXT("Dispatch")); AddRowItem(Tabs,DispatchTabButton,3);
     TrucksTabButton = MakeButton(WidgetTree,TEXT("Trucks")); AddRowItem(Tabs,TrucksTabButton,3);
+    SettingsTabButton = MakeButton(WidgetTree,TEXT("Settings")); AddRowItem(Tabs,SettingsTabButton,3);
 
     Pages = WidgetTree->ConstructWidget<UWidgetSwitcher>();
     UVerticalBoxSlot* PagesSlot = Main->AddChildToVerticalBox(Pages);
@@ -237,6 +251,9 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     Pages->AddChild(DispatchScrollBox);
     TruckScrollBox = WidgetTree->ConstructWidget<UScrollBox>();
     Pages->AddChild(TruckScrollBox);
+    UVerticalBox* SettingsPage = WidgetTree->ConstructWidget<UVerticalBox>();
+    Pages->AddChild(SettingsPage);
+    BuildSettingsPanel(SettingsPage);
     Pages->SetActiveWidgetIndex(0);
 
     UHorizontalBox* Footer = WidgetTree->ConstructWidget<UHorizontalBox>();
@@ -279,6 +296,139 @@ void UDynamicTimeTableWidget::BuildEditorPanel(UVerticalBox* Main)
     RemoveStationButton=MakeButton(WidgetTree,TEXT("Remove station")); AddRowItem(StationRow,RemoveStationButton);
 
     EditorStatusText=MakeText(WidgetTree,TEXT("Ready."),14,FLinearColor(0.7f,0.8f,0.85f)); Editor->AddChildToVerticalBox(EditorStatusText)->SetPadding(FMargin(5));
+}
+
+void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
+{
+    UBorder* Border = WidgetTree->ConstructWidget<UBorder>();
+    Border->SetBrushColor(FLinearColor(0.08f,0.12f,0.15f,1)); Border->SetPadding(FMargin(10));
+    Page->AddChildToVerticalBox(Border)->SetPadding(FMargin(5,5,5,8));
+    UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>(); Border->SetContent(Box);
+    Box->AddChildToVerticalBox(MakeText(WidgetTree,TEXT("Settings"),19,FLinearColor(0.2f,0.8f,1)));
+    Box->AddChildToVerticalBox(MakeText(WidgetTree,TEXT("Saved with the world; the server's values apply. Save writes them, Defaults restores the shipped values."),13,FLinearColor(0.6f,0.7f,0.75f)))->SetPadding(FMargin(0,0,0,6));
+
+    auto Spin = [&](const TCHAR* Label, const TCHAR* Hint, float Min, float Max, float Delta) -> USpinBox*
+    {
+        UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(); Box->AddChildToVerticalBox(Row)->SetPadding(FMargin(0,2));
+        UVerticalBox* Text = WidgetTree->ConstructWidget<UVerticalBox>();
+        Text->AddChildToVerticalBox(MakeText(WidgetTree,Label,15,FLinearColor::White));
+        Text->AddChildToVerticalBox(MakeText(WidgetTree,Hint,12,FLinearColor(0.6f,0.7f,0.75f)));
+        AddRowItem(Row,Text,5,true);
+        USpinBox* S = WidgetTree->ConstructWidget<USpinBox>();
+        S->SetMinValue(Min); S->SetMaxValue(Max); S->SetMinSliderValue(Min); S->SetMaxSliderValue(Max);
+        S->SetDelta(Delta); S->SetAlwaysUsesDeltaSnap(true); S->SetMinFractionalDigits(Delta < 1.0f ? 1 : 0); S->SetMaxFractionalDigits(Delta < 1.0f ? 2 : 0);
+        USizeBox* Size = WidgetTree->ConstructWidget<USizeBox>(); Size->SetWidthOverride(140); Size->SetContent(S);
+        AddRowItem(Row,Size);
+        return S;
+    };
+    auto Check = [&](const TCHAR* Label, const TCHAR* Hint) -> UCheckBox*
+    {
+        UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>(); Box->AddChildToVerticalBox(Row)->SetPadding(FMargin(0,2));
+        UVerticalBox* Text = WidgetTree->ConstructWidget<UVerticalBox>();
+        Text->AddChildToVerticalBox(MakeText(WidgetTree,Label,15,FLinearColor::White));
+        Text->AddChildToVerticalBox(MakeText(WidgetTree,Hint,12,FLinearColor(0.6f,0.7f,0.75f)));
+        AddRowItem(Row,Text,5,true);
+        UCheckBox* C = WidgetTree->ConstructWidget<UCheckBox>();
+        AddRowItem(Row,C,5);
+        return C;
+    };
+    SettingLeftoverHold = Spin(TEXT("Leftover hold, seconds"), TEXT("How long a truck stays at the last stop of its lap unloading what the threshold left on board. 0 turns it off."), 0, 600, 5);
+    SettingTopUpInterval = Spin(TEXT("Top-up interval, seconds"), TEXT("How often a held truck tries to unload again (requester or depot)."), 1, 30, 1);
+    SettingUnloadAtDepot = Check(TEXT("Unload at the depot"), TEXT("A parked truck empties into its depot when the depot is in UNLOAD mode."));
+    SettingSkipProducer = Check(TEXT("Skip the producer when cargo covers the lap"), TEXT("A pool truck whose cargo covers every planned deficit goes straight to the requesters."));
+    SettingDispatchInterval = Spin(TEXT("Pool dispatch interval, seconds"), TEXT("How often parked trucks are matched to open requests."), 1, 60, 1);
+    SettingMaxRequesters = Spin(TEXT("Requesters per lap"), TEXT("Upper bound on stops planned into one lap."), 1, 8, 1);
+    SettingClaimTimeout = Spin(TEXT("Requester claim timeout, seconds"), TEXT("An unserved claim on a requester is dropped after this long."), 30, 3600, 30);
+    SettingIdleRecheck = Spin(TEXT("Idle recheck, seconds"), TEXT("How often a dispatch truck idling on a one-stop route looks for requests."), 1, 120, 1);
+    SettingFuelCritical = Spin(TEXT("Fuel: borrow a stop below, laps"), TEXT("A truck adds a fuel stop when its tank holds less than this many estimated laps."), 1, 10, 0.1f);
+    SettingFuelSkip = Spin(TEXT("Fuel: skip own stop above, laps"), TEXT("A truck leaves its own (F) out when its tank holds more than this many laps. Kept above the borrow margin."), 1.1f, 10, 0.1f);
+
+    UHorizontalBox* Buttons = WidgetTree->ConstructWidget<UHorizontalBox>(); Box->AddChildToVerticalBox(Buttons)->SetPadding(FMargin(0,8,0,0));
+    SettingsSaveButton = MakeButton(WidgetTree,TEXT("Save")); AddRowItem(Buttons,SettingsSaveButton);
+    SettingsDefaultsButton = MakeButton(WidgetTree,TEXT("Defaults")); AddRowItem(Buttons,SettingsDefaultsButton);
+    SettingsStatusText = MakeText(WidgetTree,TEXT("Ready."),14,FLinearColor(0.7f,0.8f,0.85f)); Box->AddChildToVerticalBox(SettingsStatusText)->SetPadding(FMargin(5));
+}
+
+FDTTSettings UDynamicTimeTableWidget::ViewSettings() const
+{
+    if (IsRemoteClient() && RemoteCallObject) return RemoteCallObject->GetSnapshot().Settings;
+    if (auto* S = GetWorld() ? GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>() : nullptr) return S->GetSettings();
+    return FDTTSettings();
+}
+
+void UDynamicTimeTableWidget::RefreshSettingsControls(bool bForce)
+{
+    if (!SettingLeftoverHold || (bSettingsEdited && !bForce)) return;
+    const FDTTSettings V = ViewSettings();
+    bRefreshingControls = true;
+    SettingLeftoverHold->SetValue(V.LeftoverHoldSeconds);
+    SettingTopUpInterval->SetValue(V.TopUpIntervalSeconds);
+    SettingUnloadAtDepot->SetIsChecked(V.bUnloadAtDepot);
+    SettingSkipProducer->SetIsChecked(V.bSkipProducerWhenCargoCovers);
+    SettingDispatchInterval->SetValue(V.PoolDispatchIntervalSeconds);
+    SettingMaxRequesters->SetValue(float(V.MaxRequestersPerLap));
+    SettingClaimTimeout->SetValue(V.RequesterClaimTimeoutSeconds);
+    SettingIdleRecheck->SetValue(V.IdleDispatchRecheckSeconds);
+    SettingFuelCritical->SetValue(V.FuelCriticalMarginLaps);
+    SettingFuelSkip->SetValue(V.FuelSkipMarginLaps);
+    bRefreshingControls = false;
+    bSettingsEdited = false;
+}
+
+FDTTSettings UDynamicTimeTableWidget::ReadSettingsControls() const
+{
+    FDTTSettings V = ViewSettings();
+    if (!SettingLeftoverHold) return V;
+    V.LeftoverHoldSeconds = SettingLeftoverHold->GetValue();
+    V.TopUpIntervalSeconds = SettingTopUpInterval->GetValue();
+    V.bUnloadAtDepot = SettingUnloadAtDepot->IsChecked();
+    V.bSkipProducerWhenCargoCovers = SettingSkipProducer->IsChecked();
+    V.PoolDispatchIntervalSeconds = SettingDispatchInterval->GetValue();
+    V.MaxRequestersPerLap = FMath::RoundToInt(SettingMaxRequesters->GetValue());
+    V.RequesterClaimTimeoutSeconds = SettingClaimTimeout->GetValue();
+    V.IdleDispatchRecheckSeconds = SettingIdleRecheck->GetValue();
+    V.FuelCriticalMarginLaps = SettingFuelCritical->GetValue();
+    V.FuelSkipMarginLaps = SettingFuelSkip->GetValue();
+    V.Sanitize();
+    return V;
+}
+
+void UDynamicTimeTableWidget::HandleSettingSpinChanged(float) { if (!bRefreshingControls) bSettingsEdited = true; }
+void UDynamicTimeTableWidget::HandleSettingCheckChanged(bool) { if (!bRefreshingControls) bSettingsEdited = true; }
+void UDynamicTimeTableWidget::HandleSettingsTabClicked() { SetActiveTab(3); RefreshSettingsControls(true); }
+void UDynamicTimeTableWidget::HandleSettingsSaveClicked()
+{
+    const FDTTSettings V = ReadSettingsControls();
+    if (IsRemoteClient())
+    {
+        if (RemoteCallObject) RemoteCallObject->RequestSetSettings(V); else SetEditorStatus(TEXT("Server connection unavailable."),true);
+        return;
+    }
+    if (auto* S = GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())
+    {
+        FString Message;
+        const bool bOk = S->ApplySettings(V, TEXT("window"), &Message);
+        SetEditorStatus(Message, !bOk);
+        RefreshSettingsControls(true);
+    }
+}
+void UDynamicTimeTableWidget::HandleSettingsDefaultsClicked()
+{
+    const FDTTSettings Defaults;
+    bRefreshingControls = true;
+    SettingLeftoverHold->SetValue(Defaults.LeftoverHoldSeconds);
+    SettingTopUpInterval->SetValue(Defaults.TopUpIntervalSeconds);
+    SettingUnloadAtDepot->SetIsChecked(Defaults.bUnloadAtDepot);
+    SettingSkipProducer->SetIsChecked(Defaults.bSkipProducerWhenCargoCovers);
+    SettingDispatchInterval->SetValue(Defaults.PoolDispatchIntervalSeconds);
+    SettingMaxRequesters->SetValue(float(Defaults.MaxRequestersPerLap));
+    SettingClaimTimeout->SetValue(Defaults.RequesterClaimTimeoutSeconds);
+    SettingIdleRecheck->SetValue(Defaults.IdleDispatchRecheckSeconds);
+    SettingFuelCritical->SetValue(Defaults.FuelCriticalMarginLaps);
+    SettingFuelSkip->SetValue(Defaults.FuelSkipMarginLaps);
+    bRefreshingControls = false;
+    bSettingsEdited = true;
+    SetEditorStatus(TEXT("Defaults loaded into the controls; Save to apply."), false);
 }
 
 bool UDynamicTimeTableWidget::IsRemoteClient() const{return GetWorld()&&GetWorld()->GetNetMode()==NM_Client;}
@@ -325,17 +475,22 @@ void UDynamicTimeTableWidget::HandleRemoteResult(bool O,const FString&M)
 {
     if (O) bForceFullRefreshOnNextSnapshot = true;
     SetEditorStatus(M,!O);
+    // The server's answer to a settings request is the snapshot that follows; a refused one
+    // (unchanged) leaves the controls as they are, an applied one refills them.
+    if (O) bSettingsEdited = false;
 }
 void UDynamicTimeTableWidget::RefreshData()
 {
     RebuildRuntimeDisplay();
     RefreshEditorControls();
+    RefreshSettingsControls(false);
     if (ActiveTab != 0) RefreshRuntimeDisplay();
 }
 void UDynamicTimeTableWidget::RefreshRuntimeDisplay()
 {
     if (ActiveTab == 1) { RefreshDispatchDisplay(); return; }
     if (ActiveTab == 2) { RefreshTruckDisplay(); return; }
+    if (ActiveTab == 3) return;
     if (!GroupScrollBox) return;
 
     if (!RuntimeLayoutMatches())
@@ -503,7 +658,7 @@ void UDynamicTimeTableWidget::UpdateRuntimeDisplayInPlace()
 }
 void UDynamicTimeTableWidget::RefreshEditorControls(){if(bRefreshingControls)return;bRefreshingControls=true;const auto&Groups=ViewGroups();if(!SelectedGroupId.IsValid()||!Groups.ContainsByPredicate([&](const FDTTStationGroup&G){return G.GroupId==SelectedGroupId;}))SelectedGroupId=Groups.Num()?Groups[0].GroupId:FGuid();GroupSelector->ClearOptions();GroupOptionIds.Reset();const FDTTStationGroup*Selected=nullptr;for(const auto&G:Groups){GroupSelector->AddOption(G.GroupName);GroupOptionIds.Add(G.GroupId);if(G.GroupId==SelectedGroupId)Selected=&G;}if(Selected){GroupSelector->SetSelectedOption(Selected->GroupName);GroupNameInput->SetText(FText::FromString(Selected->GroupName));}else GroupNameInput->SetText(FText::GetEmpty());GroupStationSelector->ClearOptions();if(Selected)for(const auto&E:Selected->Stations)GroupStationSelector->AddOption(E.DisplayName);if(GroupStationSelector->GetOptionCount()>0)GroupStationSelector->SetSelectedIndex(0);const EDTTGroupKind Kind=Selected?Selected->Kind:EDTTGroupKind::Train;const bool bTruck=Kind==EDTTGroupKind::Truck;TArray<FString>All;if(IsRemoteClient()&&RemoteCallObject)All=bTruck?RemoteCallObject->GetSnapshot().AvailableTruckStations:RemoteCallObject->GetSnapshot().AvailableStations;else if(auto*S=GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>()){if(bTruck)S->GetAllDockingStationNames(All);else S->GetAllVanillaStationNames(All);}AvailableStationSelector->ClearOptions();// A rail station and a docking station may share a name, so only groups of the same kind claim it.
 for(const FString&N:All)if(!Groups.ContainsByPredicate([&](const FDTTStationGroup&G){return G.Kind==Kind&&G.Stations.ContainsByPredicate([&](const FDTTStationEntry&E){return E.DisplayName==N;});}))AvailableStationSelector->AddOption(N);if(AvailableStationSelector->GetOptionCount()>0)AvailableStationSelector->SetSelectedIndex(0);bRefreshingControls=false;HandleGroupStationSelectionChanged(GroupStationSelector->GetSelectedOption(),ESelectInfo::Direct);}
-void UDynamicTimeTableWidget::SetEditorStatus(const FString&M,bool E){EditorStatusText->SetText(FText::FromString(M));EditorStatusText->SetColorAndOpacity(FSlateColor(E?FLinearColor::Red:FLinearColor(0.3f,1,0.5f)));}FString UDynamicTimeTableWidget::GetSelectedGroupStationName()const{return GroupStationSelector?GroupStationSelector->GetSelectedOption():FString();}
+void UDynamicTimeTableWidget::SetEditorStatus(const FString&M,bool E){const FSlateColor C(E?FLinearColor::Red:FLinearColor(0.3f,1,0.5f));EditorStatusText->SetText(FText::FromString(M));EditorStatusText->SetColorAndOpacity(C);if(SettingsStatusText){SettingsStatusText->SetText(FText::FromString(M));SettingsStatusText->SetColorAndOpacity(C);}}FString UDynamicTimeTableWidget::GetSelectedGroupStationName()const{return GroupStationSelector?GroupStationSelector->GetSelectedOption():FString();}
 void UDynamicTimeTableWidget::HandleGroupSelectionChanged(FString Item,ESelectInfo::Type){if(bRefreshingControls)return;int32 I=GroupSelector->FindOptionIndex(Item);if(GroupOptionIds.IsValidIndex(I)){SelectedGroupId=GroupOptionIds[I];RefreshEditorControls();}}
 void UDynamicTimeTableWidget::HandleGroupStationSelectionChanged(FString Item,ESelectInfo::Type){if(Item.IsEmpty())return;if(const auto*G=ViewGroups().FindByPredicate([&](const FDTTStationGroup&X){return X.GroupId==SelectedGroupId;}))if(const auto*E=G->Stations.FindByPredicate([&](const FDTTStationEntry&X){return X.DisplayName==Item;}))TargetSlotsInput->SetValue(E->TargetSlots);}
 void UDynamicTimeTableWidget::HandleCreateGroupClicked(){FString N=NewGroupNameInput->GetText().ToString().TrimStartAndEnd();if(N.IsEmpty()){SetEditorStatus(TEXT("Enter a group name."),true);return;}const EDTTGroupKind Kind=(NewGroupKindSelector&&NewGroupKindSelector->GetSelectedIndex()==1)?EDTTGroupKind::Truck:EDTTGroupKind::Train;if(IsRemoteClient()){if(RemoteCallObject)RemoteCallObject->RequestCreateGroup(N,Kind);else SetEditorStatus(TEXT("Server connection unavailable."),true);}else if(auto*S=GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>()){SelectedGroupId=S->CreateGroup(N,Kind);RefreshData();}NewGroupNameInput->SetText(FText::GetEmpty());}
@@ -532,13 +687,14 @@ int32 UDynamicTimeTableWidget::GetRequestedSections() const
 
 void UDynamicTimeTableWidget::SetActiveTab(int32 Tab)
 {
-    ActiveTab = FMath::Clamp(Tab, 0, 2);
+    ActiveTab = FMath::Clamp(Tab, 0, 3);
     if (Pages) Pages->SetActiveWidgetIndex(ActiveTab);
     const FLinearColor Active(0.2f, 0.8f, 1.0f, 1.0f);
     const FLinearColor Inactive(0.55f, 0.6f, 0.65f, 1.0f);
     if (GroupsTabButton) GroupsTabButton->SetBackgroundColor(ActiveTab == 0 ? Active : Inactive);
     if (DispatchTabButton) DispatchTabButton->SetBackgroundColor(ActiveTab == 1 ? Active : Inactive);
     if (TrucksTabButton) TrucksTabButton->SetBackgroundColor(ActiveTab == 2 ? Active : Inactive);
+    if (SettingsTabButton) SettingsTabButton->SetBackgroundColor(ActiveTab == 3 ? Active : Inactive);
     // A remote client shows the last snapshot of this section until the next one arrives; ask now
     // rather than at the next 1.5 s tick.
     if (IsRemoteClient() && RemoteCallObject) RemoteCallObject->RequestSnapshot(GetRequestedSections());
