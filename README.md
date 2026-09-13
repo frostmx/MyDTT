@@ -50,8 +50,9 @@ dispatch laps bound to that producer. Saving a route without a depot takes a tru
 pool; switching its autopilot off hands it back to you until it next docks at a depot.
 
 `/dtt` opens the window: Groups, Dispatch (a card per resource with its icon, producers and
-requesters with stock, call level, fill target and the claiming truck; depots and fuel stops
-below), Trucks (a card per truck: status badge, route with the current stop lit, cargo bar with
+requesters with stock, call level, fill target and the claiming truck - yellow while a request
+waits for a truck, green once one has claimed it, red when nobody has claimed it for the
+*overdue* minutes; depots and fuel stops below), Trucks (a card per truck: status badge, route with the current stop lit, cargo bar with
 the icon of what is on board, planned deliveries) and Settings; both card tabs have a filter line.
 `/dtt dispatch`, `/dtt trucks` and `/dtt depots` print the same in chat; `/dtt park <truck>` and
 `/dtt release <truck>` move one truck by hand. The window talks to the server over a versioned
@@ -64,6 +65,7 @@ The Settings tab (or `/dtt settings` and `/dtt set <field> <value>`) holds the t
 solid and fluid request limits and the request buffer, *fluid trucks always carry a full load*
 (a fluid lap serves one station, the tank is filled completely and drained there), *drain
 leftovers at the last stop*, leftover hold and top-up interval, depot unloading, the producer
-skip, the pool dispatch interval, requesters per lap, the requester claim timeout, the idle
-recheck interval and the two fuel margins. They are saved with the world; on a dedicated server
+skip, the pool dispatch interval, requesters per lap, the requester claim timeout, the overdue
+minutes after which an unclaimed request is shown in red (5 by default, 0 turns it off), the
+idle recheck interval and the two fuel margins. They are saved with the world; on a dedicated server
 the server's values apply and remote clients edit them through the same window.
