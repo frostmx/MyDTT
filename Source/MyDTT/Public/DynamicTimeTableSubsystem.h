@@ -226,6 +226,10 @@ private:
         int32 MovedByTopUps = 0;
     };
     TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTLeftoverHold> LeftoverHolds;
+
+    // Fuel items on board when a truck docked at an (F) stop, compared on undocking: a pump that
+    // gave nothing is the usual reason a truck strands, and it is invisible otherwise. Runtime only.
+    TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, int32> FuelItemsAtDock;
     double LastDepotTopUpSeconds = 0.0;
     /** Once a second from the poll: top-ups, and the release on empty or timeout. */
     void TickLeftoverHolds(double Now);

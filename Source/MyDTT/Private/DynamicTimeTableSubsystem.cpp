@@ -1739,6 +1739,9 @@ float UDynamicTimeTableSubsystem::EstimateLoopFuelConsumptionMW(
     {
         const FGuid& From = Loop[LegIndex];
         const FGuid& To = Loop[(LegIndex + 1) % Loop.Num()];
+        // A pool lap starts and ends at the same depot: the closing leg is not driven, and the
+        // path search has no path from a node to itself, which used to fail the whole estimate.
+        if (From == To) continue;
         const float LegCost = EstimatePathFuelConsumptionMW(VehicleSubsystem, Preset, Vehicle->GetClass(), From, To);
         if (LegCost < 0.0f) return -1.0f;
         Total += LegCost;
@@ -2722,6 +2725,13 @@ void UDynamicTimeTableSubsystem::HandleTruckDocked(AFGWheeledVehicle* Vehicle, A
         *DTSVehicleName(Identifier), IsValid(Station) ? *DTSDockName(Station->GetStationIdentifier()) : TEXT("<none>"),
         TargetIndex, Identifier->IsAutopilotEnabled() ? TEXT("on") : TEXT("off"));
 
+    if (IsValid(Station) && IsValid(Station->GetStationIdentifier()) &&
+        DispatchFuelStopGuids.Contains(Station->GetStationIdentifier()->GetPathNodeGUID()))
+    {
+        UFGInventoryComponent* FuelInventory = Vehicle->GetFuelInventory();
+        FuelItemsAtDock.Add(Identifier, IsValid(FuelInventory) ? FuelInventory->GetNumItems(Identifier->GetFuelTypeDescriptor()) : 0);
+    }
+
     FDTTTruckPollState* State = TruckPollStates.Find(Identifier);
     if (State)
     {
@@ -2792,6 +2802,27 @@ void UDynamicTimeTableSubsystem::HandleTruckUndocked(AFGWheeledVehicle* Vehicle)
         *DTSVehicleName(Identifier), IsValid(Station) ? *DTSDockName(Station->GetStationIdentifier()) : TEXT("<none>"), TargetIndex);
 
     if (Station) FMyDTTHooks::ClearTransferPlan(Station);
+    int32 FuelBefore = 0;
+    if (FuelItemsAtDock.RemoveAndCopyValue(Identifier, FuelBefore))
+    {
+        UFGInventoryComponent* FuelInventory = Vehicle->GetFuelInventory();
+        const int32 FuelAfter = IsValid(FuelInventory) ? FuelInventory->GetNumItems(Identifier->GetFuelTypeDescriptor()) : 0;
+        const FString StationName = IsValid(Station) ? DTSDockName(Station->GetStationIdentifier()) : TEXT("<none>");
+        if (FuelAfter > FuelBefore)
+        {
+            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("FUEL_REFUELLED Truck='%s' Station='%s' Fuel=%d->%d"),
+                *DTSVehicleName(Identifier), *StationName, FuelBefore, FuelAfter);
+        }
+        else
+        {
+            // The (F) stop had nothing to give (empty, unpowered, wrong fuel): the truck leaves
+            // with what it came with and will strand if this keeps up.
+            UFGInventoryComponent* StationInventory = IsValid(Station) ? Station->GetInventory() : nullptr;
+            UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("FUEL_STOP_EMPTY Truck='%s' Station='%s' Fuel=%d StationItems=%d"),
+                *DTSVehicleName(Identifier), *StationName, FuelAfter,
+                IsValid(StationInventory) ? StationInventory->GetNumItems(nullptr) : -1);
+        }
+    }
     if (LeftoverHolds.Contains(Identifier)) ReleaseLeftoverHold(Identifier, TEXT("undocked"), false);
     // A release drops the phase before it undocks, so a truck still marked parked here was
     // undocked behind this mod's back. The hold is gone with the docking; only the state is stale.
@@ -2999,31 +3030,39 @@ TSubclassOf<UFGItemDescriptor> UDynamicTimeTableSubsystem::ResolveItemClassForRe
 {
     if (const TSubclassOf<UFGItemDescriptor> ByName = ResolveItemClassByName(ResourceId)) return ByName;
 
-    TSet<TSubclassOf<UFGItemDescriptor>> ProducerCargoClasses;
-    for (const FDTTDispatchStation& Station : DispatchStations)
+    // A name the game does not know (a player's own word for the item) is resolved from what the
+    // tagged stations hold: the producers first, and when no producer of this resource holds
+    // anything - none tagged, or all empty - the requesters, so a pool truck can still be sent
+    // from its own cargo. Either way the answer counts only when it is unambiguous.
+    TSet<TSubclassOf<UFGItemDescriptor>> CargoClasses;
+    for (const EDTTDispatchRole Role : { EDTTDispatchRole::Producer, EDTTDispatchRole::Requester })
     {
-        if (GetEffectiveDispatchRole(Station) != EDTTDispatchRole::Producer ||
-            !Station.ResourceId.Equals(ResourceId, ESearchCase::IgnoreCase) ||
-            !DoesDispatchStationMatchMode(Station))
+        for (const FDTTDispatchStation& Station : DispatchStations)
         {
-            continue;
-        }
+            if (GetEffectiveDispatchRole(Station) != Role ||
+                !Station.ResourceId.Equals(ResourceId, ESearchCase::IgnoreCase) ||
+                !DoesDispatchStationMatchMode(Station))
+            {
+                continue;
+            }
 
-        AFGDockingStationIdentifier* Identifier = Station.DockingStationIdentifier.Get();
-        AFGBuildableDockingStation* Dock = IsValid(Identifier) ? Identifier->GetStation() : nullptr;
-        UFGInventoryComponent* Storage = IsValid(Dock) ? Dock->GetInventory() : nullptr;
-        if (!IsValid(Storage)) continue;
+            AFGDockingStationIdentifier* Identifier = Station.DockingStationIdentifier.Get();
+            AFGBuildableDockingStation* Dock = IsValid(Identifier) ? Identifier->GetStation() : nullptr;
+            UFGInventoryComponent* Storage = IsValid(Dock) ? Dock->GetInventory() : nullptr;
+            if (!IsValid(Storage)) continue;
 
-        TArray<FInventoryStack> Stacks;
-        Storage->GetInventoryStacks(Stacks);
-        for (const FInventoryStack& Stack : Stacks)
-        {
-            if (Stack.HasItems()) ProducerCargoClasses.Add(Stack.Item.GetItemClass());
+            TArray<FInventoryStack> Stacks;
+            Storage->GetInventoryStacks(Stacks);
+            for (const FInventoryStack& Stack : Stacks)
+            {
+                if (Stack.HasItems()) CargoClasses.Add(Stack.Item.GetItemClass());
+            }
         }
+        if (CargoClasses.Num() > 0) break;
     }
 
-    if (ProducerCargoClasses.Num() != 1) return nullptr;
-    return *ProducerCargoClasses.CreateConstIterator();
+    if (CargoClasses.Num() != 1) return nullptr;
+    return *CargoClasses.CreateConstIterator();
 }
 
 int32 UDynamicTimeTableSubsystem::ReadDockStockInStacks(AFGDockingStationIdentifier* Dock, TSubclassOf<UFGItemDescriptor> ItemClass) const
