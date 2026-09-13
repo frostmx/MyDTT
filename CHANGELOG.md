@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.1.0
+
+- Leftovers no longer ride around. The last requesting station of a lap takes everything it can,
+  threshold or not, and keeps the truck docked, unloading again every second, until the truck is
+  empty or a minute has passed (the *Leftover hold* setting). What is still on board goes into
+  the depot when the depot is in UNLOAD mode, now and for as long as the truck stays parked.
+- A parked pool truck that still carries the requested resource is sent even when no loading
+  station has stock, and skips the loading station whenever its cargo already covers the
+  planned deliveries.
+- The Trucks tab shows what each truck carries and why a parked truck is waiting (its cargo
+  matches no request, or is mixed); the log says so once per parking (`POOL_CARGO_WAIT`).
+- New Settings tab in `/dtt`: leftover hold and top-up interval, depot unloading, the
+  producer skip, dispatch interval, requesters per lap, claim timeout, idle recheck and the two
+  fuel margins. Saved with the world; the server's values apply, remote clients edit them
+  through the same window. `/dtt settings` and `/dtt set <field> <value>` in chat.
+- Window protocol 6, save data version 7. Server and clients must run the same version; an
+  older save keeps the shipped defaults.
+
 ## 2.0.0
 
 - Trucks can now share a pool instead of each being bound to one producer. Tag a truck station
