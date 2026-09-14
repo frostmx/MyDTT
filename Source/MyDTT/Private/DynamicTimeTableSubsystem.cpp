@@ -2294,14 +2294,18 @@ bool UDynamicTimeTableSubsystem::TankCoversLeg(
 }
 
 bool UDynamicTimeTableSubsystem::EnsureFuelForNextLeg(
-    AFGWheeledVehicleIdentifier* Vehicle, bool bClosedLoop, FGuid& OutEmergencyFuel, const TCHAR* Trigger)
+    AFGWheeledVehicleIdentifier* Vehicle, bool bClosedLoop, FGuid& OutEmergencyFuel, const TCHAR* Trigger,
+    const FGuid& StandingAt)
 {
     OutEmergencyFuel.Invalidate();
     if (!IsValid(Vehicle)) return false;
     const TArray<FGuid> Route = Vehicle->GetVehicleRoute();
     const int32 Num = Route.Num();
     const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
-    if (Num < 2 || Index <= 0) return false;
+    if (Num < 2 || Index < 0) return false;
+    // Index zero of a dispatch loop is the boundary, planned as a whole; a pool lap released from
+    // its depot with the target at zero is guarded from the depot the caller names.
+    if (Index == 0 && (bClosedLoop || !StandingAt.IsValid())) return false;
 
     // The index moves on at arrival (PollTruckStates), so the truck stands at the stop before its
     // target. Past the end - CutLapIfCargoEmpty just shortened the route - the autopilot wraps to
@@ -2309,7 +2313,7 @@ bool UDynamicTimeTableSubsystem::EnsureFuelForNextLeg(
     const bool bWrapped = Index >= Num;
     if (bWrapped && !bClosedLoop) return false;
     const int32 ToIndex = bWrapped ? 0 : Index;
-    const FGuid From = Route[bWrapped ? Num - 1 : Index - 1];
+    const FGuid From = StandingAt.IsValid() ? StandingAt : Route[bWrapped ? Num - 1 : Index - 1];
     const FGuid To = Route[ToIndex];
     if (!From.IsValid() || !To.IsValid() || From == To) return false;
     // Standing at a pump, or heading for one: the tank is about to be filled.
@@ -2319,19 +2323,33 @@ bool UDynamicTimeTableSubsystem::EnsureFuelForNextLeg(
     // inserted in front of index zero (it is the truck's producer, its dispatch identity): that
     // closing leg is protected one stop early, together with the leg to the last stop.
     float ClosingCost = 0.0f;
-    if (bClosedLoop && !bWrapped && ToIndex == Num - 1 && To != Route[0])
+    // And after the leg the truck must still be able to reach a pump: the detour from the target
+    // to the nearest (F) is demanded on top of the doubled leg, at the planner's reach fraction.
+    // Two short legs in a row each passed a bare 2x check and left a truck with 2.5 items.
+    float PumpAfterCost = 0.0f;
     {
         AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
         const UFGVehiclePathPreset* Preset = IsValid(WheeledVehicle) ? WheeledVehicle->GetVehiclePathPreset() : nullptr;
         AFGVehicleSubsystem* VehicleSubsystem = IsValid(WheeledVehicle) ? AFGVehicleSubsystem::Get(WheeledVehicle->GetWorld()) : nullptr;
         if (Preset && IsValid(VehicleSubsystem))
         {
-            ClosingCost = FMath::Max(0.0f, EstimatePathFuelConsumptionMW(VehicleSubsystem, Preset, WheeledVehicle->GetClass(), To, Route[0]));
+            const FGuid LastLegEnd = bClosedLoop && !bWrapped && ToIndex == Num - 1 && To != Route[0] ? Route[0] : To;
+            if (LastLegEnd != To)
+            {
+                ClosingCost = FMath::Max(0.0f, EstimatePathFuelConsumptionMW(VehicleSubsystem, Preset, WheeledVehicle->GetClass(), To, LastLegEnd));
+            }
+            const FGuid PumpAfter = FindNearestFuelStop(WheeledVehicle, LastLegEnd);
+            if (PumpAfter.IsValid())
+            {
+                PumpAfterCost = FMath::Max(0.0f, EstimatePathFuelConsumptionMW(VehicleSubsystem, Preset, WheeledVehicle->GetClass(), LastLegEnd, PumpAfter)) / FuelReachFraction;
+            }
         }
     }
 
     float Need = 0.0f, Energy = 0.0f;
-    if (TankCoversLeg(Vehicle, From, To, ClosingCost, Need, Energy)) return false;
+    // TankCoversLeg supplies the cost and the energy; the pump detour is added once, undoubled.
+    TankCoversLeg(Vehicle, From, To, ClosingCost, Need, Energy);
+    if (Need < 0.0f || Energy >= FuelLegMarginFactor * Need + PumpAfterCost) return false;
 
     const FGuid Fuel = ChooseFuelStopFromGroup(Vehicle, FindNearestFuelStop(Vehicle->GetOwnerVehicle(), From));
     if (!Fuel.IsValid())
@@ -2367,8 +2385,8 @@ bool UDynamicTimeTableSubsystem::EnsureFuelForNextLeg(
     }
     OutEmergencyFuel = Fuel;
     UE_LOG(LogDynamicTimeTableSubsystem, Display,
-        TEXT("FUEL_LEG_GUARD Truck='%s' From='%s' To='%s' LegCost=%.3f Energy=%.3f Fuel='%s' At=%d Reachable=%s Trigger=%s"),
-        *DTSVehicleName(Vehicle), *DockDisplayName(From), *DockDisplayName(To), Need, Energy,
+        TEXT("FUEL_LEG_GUARD Truck='%s' From='%s' To='%s' LegCost=%.3f PumpAfter=%.3f Energy=%.3f Fuel='%s' At=%d Reachable=%s Trigger=%s"),
+        *DTSVehicleName(Vehicle), *DockDisplayName(From), *DockDisplayName(To), Need, PumpAfterCost, Energy,
         *DockDisplayName(Fuel), bWrapped ? Num : ToIndex, bReachable ? TEXT("true") : TEXT("false"), Trigger);
     return true;
 }
@@ -4185,6 +4203,12 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
         OnBoardStacks, NeededStacks, Requesters.Num(), PlannedItems,
         FuelGuid.IsValid() ? *DockDisplayName(FuelGuid) : TEXT("-"), FuelIndex,
         *DockDisplayName(From), *DockDisplayName(ReturnDepot), NewRoute.Num(), Trigger);
+    // The first leg of the lap is driven from where the truck stands - the depot, or the requester
+    // it chained from - and no target change announces it, so the leg guard runs here.
+    {
+        FGuid Emergency;
+        if (EnsureFuelForNextLeg(Vehicle, false, Emergency, Trigger, From)) State.EmergencyFuelGuid = Emergency;
+    }
     UpdatePoolVehicleName(Vehicle, State);
     return true;
 }

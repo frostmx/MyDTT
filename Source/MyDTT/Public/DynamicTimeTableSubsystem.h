@@ -403,16 +403,20 @@ private:
     FGuid ChooseFuelStopFromGroup(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& Seed);
     /**
      * Mid-lap leg guard, run whenever a managed truck's target changes: the truck stands at the
-     * stop before its target, and if the tank holds less than FuelLegMarginFactor times the
-     * estimated cost of the leg ahead (plus the closing leg back to Route[0] when the target is
-     * the last stop of a dispatch loop), the nearest reachable (F) from here - balanced within its
-     * group - is inserted in front of the target. Only for a target index above zero: index zero
-     * is the lap boundary, where the whole lap is planned anew. Returns true when the route was
-     * rewritten; the inserted stop goes to OutEmergencyFuel, which the caller records so the stop
-     * is neither adopted as the truck's own nor counted twice.
+     * stop before its target (StandingAt names it when the route cannot - a pool truck released
+     * from its depot), and the tank must hold FuelLegMarginFactor times the estimated cost of the
+     * leg ahead (plus the closing leg back to Route[0] when the target is the last stop of a
+     * dispatch loop) and, on top of that, the detour from the target to the nearest (F) - so
+     * that no leg is ever driven after which a pump is out of reach (measured: two short legs
+     * of a lap each passed a 2x check and left a truck with 2.5 fuel items 2,300 MJ from home).
+     * Otherwise the nearest reachable (F) from here - balanced within its group - is inserted in
+     * front of the target. Index zero of a dispatch loop is the boundary, where the whole lap is
+     * planned anew; a pool lap may be guarded at index zero from its depot. Returns true when the
+     * route was rewritten; the inserted stop goes to OutEmergencyFuel, which the caller records
+     * so the stop is neither adopted as the truck's own nor counted twice.
      */
     bool EnsureFuelForNextLeg(AFGWheeledVehicleIdentifier* Vehicle, bool bClosedLoop,
-        FGuid& OutEmergencyFuel, const TCHAR* Trigger);
+        FGuid& OutEmergencyFuel, const TCHAR* Trigger, const FGuid& StandingAt = FGuid());
     /** Tank energy against FuelLegMarginFactor times the estimated cost From -> To (plus ExtraCost). */
     bool TankCoversLeg(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& From, const FGuid& To,
         float ExtraCost, float& OutNeed, float& OutEnergy) const;
