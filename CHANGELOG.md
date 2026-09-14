@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.4.0
+
+- New setting *Exact quantities* (`ExactQuantities`), **off by default**. Off, every docking moves
+  what the game would: the loading station fills the truck, each requester takes everything that
+  fits, and the request limit and buffer only decide who is called and how many stops fit in a
+  lap. On restores the 2.x behaviour: the producer gives the lap's shortfall, a requester is filled
+  to its target, the last one drains the rest. A world saved by 2.3 or earlier comes up with the
+  setting off; turn it on in the Settings tab or with `/dtt set exactquantities on`.
+- A pool truck that runs empty before its last planned stop now starts its next lap from where it
+  is when a request is open (`POOL_LAP_TRIMMED`, then the usual `POOL_LAP_DONE`), instead of
+  driving back to the depot first. Without an open request it drives to the depot as before.
+- The drain at the last requester no longer depends on the hold. *Drain leftovers at the last
+  stop* alone makes that station take everything it can during its unload; *Leftover hold* is an
+  extra stay on top and now defaults to 0 (it used to be 60, and 0 switched the drain off too).
+  Worlds keep the hold they have saved.
+- Window protocol 10 (the settings carry the new field); server and clients must run the same
+  version. Save data is unchanged.
+
 ## 2.3.0
 
 - Request colours in the Dispatch tab swapped to match their meaning: yellow is an open request

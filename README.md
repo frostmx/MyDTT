@@ -32,18 +32,27 @@ station is below its limit. The dispatcher then sends the nearest parked truck o
 kind (solid or fluid, not carrying anything else) to the loading station with the most stock, on
 to the requesting stations - as many as its cargo covers - and back to the nearest free depot,
 where it parks again - unless another request is open when it leaves its last requester, in
-which case the next lap starts right there. Stations move exactly what the lap planned: the
-loading station gives the truck the requesters' shortfall, a requester is filled to its limit plus
-the request buffer (8 stacks by default), which covers what it consumes while the truck drives.
+which case the next lap starts right there.
 
-Leftovers: the last requesting station of a lap takes everything it can, threshold or not, and
-the truck stays docked there, unloading again every second, until it is empty or the *Leftover
-hold* time is up (60 s by default; 0 turns it off). Whatever is still on board is unloaded into
-the depot if the depot is in UNLOAD mode, so a depot with a container on its output is where
-leftovers end up; a depot in LOAD mode moves nothing. A parked truck that still carries the
-requested resource is sent even when no loading station has stock, and skips the loading station
-when its cargo already covers the planned deliveries. The Trucks tab shows what each truck
-carries and why a parked one waits.
+How much moves at each stop depends on the *Exact quantities* setting, off by default:
+
+- **Off**: every docking moves what the game would. The loading station fills the truck, each
+  requester takes everything that fits, and a truck that runs empty before its last planned stop
+  drops the rest of the lap: it starts the next lap from where it is when a request is open, and
+  drives to the depot otherwise. The request limit and buffer only decide who is called and how
+  many stops fit in one lap.
+- **On**: stations move exactly what the lap planned. The loading station gives the truck the
+  requesters' shortfall, a requester is filled to its limit plus the request buffer (8 stacks by
+  default), which covers what it consumes while the truck drives, and the last requesting station
+  of the lap takes everything it can, threshold or not (*Drain leftovers at the last stop*). With
+  a *Leftover hold* (0 by default) the truck also stays docked there, unloading again every
+  second, until it is empty or the time is up.
+
+Whatever is still on board is unloaded into the depot if the depot is in UNLOAD mode, so a depot
+with a container on its output is where leftovers end up; a depot in LOAD mode moves nothing. A
+parked truck that still carries the requested resource is sent even when no loading station has
+stock, and skips the loading station when its cargo already covers the planned deliveries. The
+Trucks tab shows what each truck carries and why a parked one waits.
 
 A truck whose first stop is a `(Resource)` LOAD station and whose route has no depot runs the 1.x
 dispatch laps bound to that producer. Saving a route without a depot takes a truck out of the
@@ -61,10 +70,11 @@ without the mod plays on such a server without the window.
 
 ## Settings
 
-The Settings tab (or `/dtt settings` and `/dtt set <field> <value>`) holds the tunables: the
-solid and fluid request limits and the request buffer, *fluid trucks always carry a full load*
-(a fluid lap serves one station, the tank is filled completely and drained there), *drain
-leftovers at the last stop*, leftover hold and top-up interval, depot unloading, the producer
+The Settings tab (or `/dtt settings` and `/dtt set <field> <value>`) holds the tunables: *exact
+quantities* (off by default, see above), the solid and fluid request limits and the request
+buffer, *fluid trucks always carry a full load* (a fluid lap serves one station, the tank is
+filled completely and drained there), *drain leftovers at the last stop*, leftover hold (0 by
+default) and top-up interval, depot unloading, the producer
 skip, the pool dispatch interval, requesters per lap, the requester claim timeout, the overdue
 minutes after which an unclaimed request is shown in red (5 by default, 0 turns it off), the
 idle recheck interval and the two fuel margins. They are saved with the world; on a dedicated server
