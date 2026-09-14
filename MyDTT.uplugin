@@ -29,7 +29,7 @@
             "LoadingPhase": "Default"
         }
     ],
-    "SemVersion": "2.4.0",
+    "SemVersion": "2.4.1",
     "RequiredOnRemote": false,
     "GameVersion": ">=491125"
 }
