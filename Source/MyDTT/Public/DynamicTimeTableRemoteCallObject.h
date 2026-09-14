@@ -18,7 +18,7 @@ USTRUCT(BlueprintType)
 struct FDTTClientSnapshot
 {
     GENERATED_BODY()
-    UPROPERTY(BlueprintReadOnly) int32 ProtocolVersion = 9;
+    UPROPERTY(BlueprintReadOnly) int32 ProtocolVersion = 10;
     UPROPERTY(BlueprintReadOnly) int32 Revision = 0;
     // EDTTSnapshotSection bits this snapshot carries; the client keeps the other sections it has.
     UPROPERTY(BlueprintReadOnly) int32 Sections = 0;
@@ -44,7 +44,8 @@ public:
     // 7: request limits and buffer in the settings, dispatch rows carry trigger and target.
     // 8: dispatch and truck rows carry the item class, so the window can draw the icons.
     // 9: dispatch rows carry the waiting time, overdue minutes in the settings.
-    static constexpr int32 ProtocolVersion = 9;
+    // 10: the exact-quantities switch in the settings.
+    static constexpr int32 ProtocolVersion = 10;
     // A section is cut here so that the whole snapshot stays well under the 64 KB reliable bunch.
     static constexpr int32 MaxSnapshotRows = 400;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;

@@ -113,7 +113,7 @@ void UDynamicTimeTableWidget::NativeConstruct()
     {
         if (Spin) Spin->OnValueChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingSpinChanged);
     }
-    for (UCheckBox* Check : { SettingFluidFullLoad.Get(), SettingDrainLeftovers.Get(), SettingUnloadAtDepot.Get(), SettingSkipProducer.Get() })
+    for (UCheckBox* Check : { SettingExactQuantities.Get(), SettingFluidFullLoad.Get(), SettingDrainLeftovers.Get(), SettingUnloadAtDepot.Get(), SettingSkipProducer.Get() })
     {
         if (Check) Check->OnCheckStateChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingCheckChanged);
     }
@@ -379,15 +379,16 @@ void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
     Section(TEXT("Requests"));
     SettingSolidRequest = Spin(TEXT("Solid request limit, stacks"), TEXT("A solid station without a number in its tag is called while it holds fewer stacks than this. (Res-N) in the name overrides it."), 0, 200, 1);
     SettingFluidRequest = Spin(TEXT("Fluid request limit, stacks of 50 000 L"), TEXT("A fluid station without a number in its tag is called while its tank holds fewer stacks than this (64 = a full tank). (Res-N) in the name is a percent."), 0, 200, 1);
-    SettingRequestBuffer = Spin(TEXT("Request buffer, stacks"), TEXT("A delivery fills a station up to its limit plus this many stacks, covering what is consumed while the truck is on its way."), 0, 64, 1);
-    SettingFluidFullLoad = Check(TEXT("Fluid trucks always carry a full load"), TEXT("A fluid lap serves one station: the producer fills the tank completely and the truck drains it there, topping up while the station drinks."));
+    SettingRequestBuffer = Spin(TEXT("Request buffer, stacks"), TEXT("A delivery fills a station up to its limit plus this many stacks, covering what is consumed while the truck is on its way. The fill target only applies with exact quantities; otherwise it sizes the lap."), 0, 64, 1);
+    SettingFluidFullLoad = Check(TEXT("Fluid trucks always carry a full load"), TEXT("Exact quantities only. A fluid lap serves one station: the producer fills the tank completely and the truck drains it there."));
     SettingMaxRequesters = Spin(TEXT("Requesters per lap"), TEXT("Upper bound on stops planned into one lap."), 1, 8, 1);
     SettingClaimTimeout = Spin(TEXT("Requester claim timeout, seconds"), TEXT("An unserved claim on a requester is dropped after this long."), 30, 3600, 30);
     SettingOverdueMinutes = Spin(TEXT("Overdue after, minutes"), TEXT("A request nobody has claimed for this long is shown in red in the Dispatch tab and logged once. 0 turns it off."), 0, 120, 1);
-    Section(TEXT("Leftovers"));
-    SettingDrainLeftovers = Check(TEXT("Drain leftovers at the last stop"), TEXT("The last requester of a lap takes everything it can and holds the truck for the time below. Off: the truck keeps its leftovers for the next lap."));
-    SettingLeftoverHold = Spin(TEXT("Leftover hold, seconds"), TEXT("How long a truck stays at the last stop of its lap unloading what is left on board. 0 turns it off."), 0, 600, 5);
-    SettingTopUpInterval = Spin(TEXT("Top-up interval, seconds"), TEXT("How often a held truck tries to unload again (requester or depot)."), 1, 30, 1);
+    Section(TEXT("Transfer"));
+    SettingExactQuantities = Check(TEXT("Exact quantities"), TEXT("On: the loading station gives a lap only what its requesters lack, each requester takes only up to its target, the last one drains the rest. Off (default): a full load at the producer and everything that fits at each requester; a truck that empties early starts its next lap from where it is."));
+    SettingDrainLeftovers = Check(TEXT("Drain leftovers at the last stop"), TEXT("Exact quantities only. The last requester of a lap takes everything it can during the unload, target or not. Off: the truck keeps its leftovers for the next lap."));
+    SettingLeftoverHold = Spin(TEXT("Leftover hold, seconds"), TEXT("Extra time the drained truck stays at that last stop, topping the station up as it consumes. 0 (default): it leaves right after the unload."), 0, 600, 5);
+    SettingTopUpInterval = Spin(TEXT("Top-up interval, seconds"), TEXT("How often a held truck tries to unload again (requester hold or depot)."), 1, 30, 1);
     SettingUnloadAtDepot = Check(TEXT("Unload at the depot"), TEXT("A parked truck empties into its depot when the depot is in UNLOAD mode."));
     SettingSkipProducer = Check(TEXT("Skip the producer when cargo covers the lap"), TEXT("A pool truck whose cargo covers every planned deficit goes straight to the requesters."));
     Section(TEXT("Pool"));
@@ -415,6 +416,7 @@ void UDynamicTimeTableWidget::RefreshSettingsControls(bool bForce)
     if (!SettingLeftoverHold || (bSettingsEdited && !bForce)) return;
     const FDTTSettings V = ViewSettings();
     bRefreshingControls = true;
+    SettingExactQuantities->SetIsChecked(V.bExactQuantities);
     SettingSolidRequest->SetValue(float(V.SolidRequestStacks));
     SettingFluidRequest->SetValue(float(V.FluidRequestStacks));
     SettingRequestBuffer->SetValue(float(V.RequestBufferStacks));
@@ -439,6 +441,7 @@ FDTTSettings UDynamicTimeTableWidget::ReadSettingsControls() const
 {
     FDTTSettings V = ViewSettings();
     if (!SettingLeftoverHold) return V;
+    V.bExactQuantities = SettingExactQuantities->IsChecked();
     V.SolidRequestStacks = FMath::RoundToInt(SettingSolidRequest->GetValue());
     V.FluidRequestStacks = FMath::RoundToInt(SettingFluidRequest->GetValue());
     V.RequestBufferStacks = FMath::RoundToInt(SettingRequestBuffer->GetValue());
@@ -482,6 +485,7 @@ void UDynamicTimeTableWidget::HandleSettingsDefaultsClicked()
 {
     const FDTTSettings Defaults;
     bRefreshingControls = true;
+    SettingExactQuantities->SetIsChecked(Defaults.bExactQuantities);
     SettingSolidRequest->SetValue(float(Defaults.SolidRequestStacks));
     SettingFluidRequest->SetValue(float(Defaults.FluidRequestStacks));
     SettingRequestBuffer->SetValue(float(Defaults.RequestBufferStacks));
