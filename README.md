@@ -21,7 +21,7 @@ the save needs to bring a parked truck back parked.
 | `[name]`, `[name,3]` | train or truck station | balancing group, optionally with three slots |
 | `(Resource)` | truck station | LOAD: produces the resource; UNLOAD: requests it below the settings' limit (40 stacks solid, 56 stacks fluid) |
 | `(Resource-N)` | truck station, UNLOAD | solid: requests while fewer than N stacks are in stock; fluid: while the tank is below N % |
-| `(F)` | truck station | fuel stop a dispatch truck may borrow |
+| `(F)` | truck station | fuel stop: a truck's own when it sits in the route, borrowed by any managed truck whose tank runs low. An `(F)` that also carries a `[group]` tag stands for the whole group: the least-loaded member gets the visit. Before every leg the tank must cover it twice over, otherwise the nearest reachable `(F)` is inserted first |
 | `(D)` | truck station | depot: where pool trucks wait between deliveries |
 
 ## How the pool works
