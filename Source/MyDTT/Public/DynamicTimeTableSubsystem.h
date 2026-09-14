@@ -313,9 +313,14 @@ private:
     void ProcessCurrentTarget(AFGTrain* Train, const TCHAR* Trigger);
     void RefreshPriorityIndices(FDTTStationGroup& Group);
     void ConfigurationChanged(bool bRecalculateBookings = true);
-    FDTTStationEntry* SelectBestStation(FDTTStationGroup& Group);
+    /**
+     * Least-loaded station of the group, ties broken cyclically. Exclude leaves one truck's own
+     * bookings out of the load: at a lap boundary its old route still holds last lap's (F), and
+     * without this it would weigh against the very station it is about to choose from.
+     */
+    FDTTStationEntry* SelectBestStation(FDTTStationGroup& Group, const AFGWheeledVehicleIdentifier* Exclude = nullptr);
     int32 GetAssignedCount(AFGTrainStationIdentifier* Identifier) const;
-    int32 GetEntryAssignedCount(const FDTTStationGroup& Group, const FDTTStationEntry& Entry) const;
+    int32 GetEntryAssignedCount(const FDTTStationGroup& Group, const FDTTStationEntry& Entry, const AFGWheeledVehicleIdentifier* Exclude = nullptr) const;
     int32 CountStopsInGroup(AFGRailroadTimeTable* TimeTable, const FDTTStationGroup& Group) const;
     bool ReplaceCurrentStop(AFGRailroadTimeTable* TimeTable, int32 CurrentStop, AFGTrainStationIdentifier* NewIdentifier);
 
@@ -331,7 +336,7 @@ private:
     void SchedulePendingRouteReevaluation();
     void ProcessPendingRouteReevaluations();
     void ProcessCurrentTruckTarget(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Trigger);
-    int32 GetDockAssignedCount(AFGDockingStationIdentifier* Identifier) const;
+    int32 GetDockAssignedCount(AFGDockingStationIdentifier* Identifier, const AFGWheeledVehicleIdentifier* Exclude = nullptr) const;
     int32 CountWaypointsInGroup(AFGWheeledVehicleIdentifier* Vehicle, const FDTTStationGroup& Group) const;
     bool ReplaceCurrentWaypoint(AFGWheeledVehicleIdentifier* Vehicle, int32 WaypointIndex, const FGuid& NewPathNodeGuid);
     /** Path network the group's vehicles travel, or INDEX_NONE when nothing in the group is moving yet. Diagnostics only. */
@@ -342,6 +347,10 @@ private:
     // ChooseFuelInsertIndex accepts a position only if the tank can reach the (F) there using
     // at most this fraction of its current energy - the per-segment estimate is unverified.
     static constexpr float FuelReachFraction = 0.8f;
+    // The leg guard (EnsureFuelForNextLeg) demands this many times the estimated cost of the next
+    // leg in the tank before letting the truck drive it; below that a fuel stop goes in first.
+    // A constant, not a setting: a setting would change FDTTSettings and with it the protocol.
+    static constexpr float FuelLegMarginFactor = 2.0f;
     // IsFuelCriticallyLow triggers this many estimated lap-costs early, not at exactly 1x: the
     // engine's per-segment fuel estimate is unverified against actual consumption, and a borrowed
     // stop lengthens the lap it is added to beyond what was checked - a bare 1x margin let a truck
@@ -386,6 +395,27 @@ private:
     bool IsFuelCriticallyLow(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& LoopWithoutFuel) const;
     /** Nearest (F)-tagged dock reachable from FromGuid on the same path network, or invalid if none. */
     FGuid FindNearestFuelStop(class AFGWheeledVehicle* Vehicle, const FGuid& FromGuid) const;
+    /**
+     * The (F) a truck actually drives to: Seed itself when it stands alone, otherwise the
+     * least-loaded member of Seed's [group] (SelectBestStation, the truck's own bookings left
+     * out). One rule for an own (F), a borrowed one and a pool lap's.
+     */
+    FGuid ChooseFuelStopFromGroup(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& Seed);
+    /**
+     * Mid-lap leg guard, run whenever a managed truck's target changes: the truck stands at the
+     * stop before its target, and if the tank holds less than FuelLegMarginFactor times the
+     * estimated cost of the leg ahead (plus the closing leg back to Route[0] when the target is
+     * the last stop of a dispatch loop), the nearest reachable (F) from here - balanced within its
+     * group - is inserted in front of the target. Only for a target index above zero: index zero
+     * is the lap boundary, where the whole lap is planned anew. Returns true when the route was
+     * rewritten; the inserted stop goes to OutEmergencyFuel, which the caller records so the stop
+     * is neither adopted as the truck's own nor counted twice.
+     */
+    bool EnsureFuelForNextLeg(AFGWheeledVehicleIdentifier* Vehicle, bool bClosedLoop,
+        FGuid& OutEmergencyFuel, const TCHAR* Trigger);
+    /** Tank energy against FuelLegMarginFactor times the estimated cost From -> To (plus ExtraCost). */
+    bool TankCoversLeg(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& From, const FGuid& To,
+        float ExtraCost, float& OutNeed, float& OutEnergy) const;
     /**
      * A requester's levels, in stacks of the item. Trigger: the dock is called while its stock is
      * below it - the tag's N (solid: stacks; fluid: percent of the tank) or the settings' limit.

@@ -1278,28 +1278,39 @@ void UDynamicTimeTableSubsystem::ReleaseBookingIfReached(AFGTrain* Train,AFGTrai
 FDTTStationGroup* UDynamicTimeTableSubsystem::FindGroupByStation(AFGTrainStationIdentifier* Id){if(!IsValid(Id))return nullptr;return StationGroups.FindByPredicate([&](const FDTTStationGroup&G){return G.Stations.ContainsByPredicate([&](const FDTTStationEntry&E){return E.StationIdentifier.Get()==Id;});});}
 const FDTTStationGroup* UDynamicTimeTableSubsystem::FindGroupByStation(AFGTrainStationIdentifier* Id) const{if(!IsValid(Id))return nullptr;return StationGroups.FindByPredicate([&](const FDTTStationGroup&G){return G.Stations.ContainsByPredicate([&](const FDTTStationEntry&E){return E.StationIdentifier.Get()==Id;});});}
 int32 UDynamicTimeTableSubsystem::GetAssignedCount(AFGTrainStationIdentifier* Id) const{int32 C=0;for(const auto&P:ActiveBookings)if(P.Key.IsValid()&&P.Value.Get()==Id)++C;return C;}
-int32 UDynamicTimeTableSubsystem::GetDockAssignedCount(AFGDockingStationIdentifier* Id) const{
+int32 UDynamicTimeTableSubsystem::GetDockAssignedCount(AFGDockingStationIdentifier* Id,const AFGWheeledVehicleIdentifier* Exclude) const{
     if(!IsValid(Id))return 0;
     int32 C=0;
-    for(const auto&P:TruckBookings)if(P.Key.IsValid()&&P.Value.Get()==Id)++C;
+    for(const auto&P:TruckBookings)if(P.Key.IsValid()&&P.Key.Get()!=Exclude&&P.Value.Get()==Id)++C;
     // A dispatch truck books only its producer (ChooseProducerFromGroup), never a fuel stop, so a
-    // borrowed or dedicated (F) it currently holds has to be counted here too, or SelectBestStation
-    // would be blind to its claim on a fuel group. An own (F) counts only on laps that actually
-    // include it: the anchor outlives laps that leave it out.
+    // borrowed, emergency or dedicated (F) it currently holds has to be counted here too, or
+    // SelectBestStation would be blind to its claim on a fuel group. An own (F) counts only on laps
+    // that actually include it: the anchor outlives laps that leave it out.
     const FGuid PathNodeGuid=Id->GetPathNodeGUID();
     if(PathNodeGuid.IsValid())
+    {
         for(const auto&P:DispatchTruckAnchors)
         {
             const AFGWheeledVehicleIdentifier* Vehicle=P.Key.Get();
-            if(!IsValid(Vehicle))continue;
-            if(P.Value.BorrowedFuelGuid==PathNodeGuid||
+            if(!IsValid(Vehicle)||Vehicle==Exclude)continue;
+            if(P.Value.BorrowedFuelGuid==PathNodeGuid||P.Value.EmergencyFuelGuid==PathNodeGuid||
                (P.Value.FuelGuid==PathNodeGuid&&Vehicle->GetVehicleRoute().Contains(PathNodeGuid)))++C;
         }
+        // A pool lap's (F) is the same kind of claim; it lasts while the stop is still in the route
+        // (CutLapIfCargoEmpty may have dropped it) and the lap is running.
+        for(const auto&P:PoolTrucks)
+        {
+            const AFGWheeledVehicleIdentifier* Vehicle=P.Key.Get();
+            if(!IsValid(Vehicle)||Vehicle==Exclude||P.Value.Phase!=EDTTTruckPhase::Assigned)continue;
+            if((P.Value.FuelGuid==PathNodeGuid||P.Value.EmergencyFuelGuid==PathNodeGuid)&&
+               Vehicle->GetVehicleRoute().Contains(PathNodeGuid))++C;
+        }
+    }
     return C;
 }
-int32 UDynamicTimeTableSubsystem::GetEntryAssignedCount(const FDTTStationGroup& G,const FDTTStationEntry& E) const{return G.Kind==EDTTGroupKind::Truck?GetDockAssignedCount(E.DockingStationIdentifier.Get()):GetAssignedCount(E.StationIdentifier.Get());}
+int32 UDynamicTimeTableSubsystem::GetEntryAssignedCount(const FDTTStationGroup& G,const FDTTStationEntry& E,const AFGWheeledVehicleIdentifier* Exclude) const{return G.Kind==EDTTGroupKind::Truck?GetDockAssignedCount(E.DockingStationIdentifier.Get(),Exclude):GetAssignedCount(E.StationIdentifier.Get());}
 
-FDTTStationEntry* UDynamicTimeTableSubsystem::SelectBestStation(FDTTStationGroup& G)
+FDTTStationEntry* UDynamicTimeTableSubsystem::SelectBestStation(FDTTStationGroup& G,const AFGWheeledVehicleIdentifier* Exclude)
 {
     // Reachability is deliberately NOT part of the criterion: a dock the autopilot cannot reach
     // still competes, so the vehicle reports StationUnreachable instead of it silently never being used.
@@ -1312,7 +1323,7 @@ FDTTStationEntry* UDynamicTimeTableSubsystem::SelectBestStation(FDTTStationGroup
     {
         const bool bValid=bTruck?IsValid(E.DockingStationIdentifier.Get()):IsValid(E.StationIdentifier.Get());
         if(!bValid||E.TargetSlots<=0)continue;
-        const int32 C=GetEntryAssignedCount(G,E);
+        const int32 C=GetEntryAssignedCount(G,E,Exclude);
         const double R=double(C)/double(E.TargetSlots);
         UE_LOG(LogDynamicTimeTableSubsystem,VeryVerbose,TEXT("Candidate='%s' Assigned=%d TargetSlots=%d Ratio=%.3f"),*E.DisplayName,C,E.TargetSlots,R);
         if(R<BestRatio-RatioTolerance){BestRatio=R;Tied.Reset();Tied.Add(&E);}
@@ -1579,13 +1590,15 @@ bool UDynamicTimeTableSubsystem::UpdateRememberedAnchors(
 
     // The stop this mod borrowed last lap may still sit in the route; it is never the player's own.
     const FGuid Borrowed = Existing ? Existing->BorrowedFuelGuid : FGuid();
+    const FGuid Emergency = Existing ? Existing->EmergencyFuelGuid : FGuid();
     FGuid FuelGuid;
     int32 FuelInsertIndex = INDEX_NONE;
     int32 FuelTagsInRoute = 0;
     for (int32 Index = 1; Index < Route.Num(); ++Index)
     {
         const FGuid& Candidate = Route[Index];
-        if (!Candidate.IsValid() || Candidate == Borrowed || !DispatchFuelStopGuids.Contains(Candidate)) continue;
+        if (!Candidate.IsValid() || Candidate == Borrowed || Candidate == Emergency ||
+            !DispatchFuelStopGuids.Contains(Candidate)) continue;
         ++FuelTagsInRoute;
         if (!FuelGuid.IsValid())
         {
@@ -1836,6 +1849,23 @@ FGuid UDynamicTimeTableSubsystem::FindNearestFuelStop(AFGWheeledVehicle* Vehicle
         if (Cost < BestCost) { BestCost = Cost; Nearest = Candidate; }
     }
     return Nearest;
+}
+
+FGuid UDynamicTimeTableSubsystem::ChooseFuelStopFromGroup(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& Seed)
+{
+    if (!Seed.IsValid()) return Seed;
+    FDTTStationGroup* Group = FindGroupByDock(FindDockByPathNode(Seed));
+    if (!Group) return Seed;
+    FDTTStationEntry* Best = SelectBestStation(*Group, Vehicle);
+    if (!Best || !Best->DockingPathNodeGuid.IsValid()) return Seed;
+    if (Best->DockingPathNodeGuid != Seed)
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Display,
+            TEXT("FUEL_GROUP_PICK Truck='%s' Group='%s' Seed='%s' Chosen='%s' Load=%d/%d"),
+            *DTSVehicleName(Vehicle), *Group->GroupName, *DockDisplayName(Seed), *Best->DisplayName,
+            GetEntryAssignedCount(*Group, *Best, Vehicle), Best->TargetSlots);
+    }
+    return Best->DockingPathNodeGuid;
 }
 
 bool UDynamicTimeTableSubsystem::GetRequestLevels(
@@ -2240,6 +2270,109 @@ bool UDynamicTimeTableSubsystem::CutLapIfCargoEmpty(
     return true;
 }
 
+bool UDynamicTimeTableSubsystem::TankCoversLeg(
+    AFGWheeledVehicleIdentifier* Vehicle, const FGuid& From, const FGuid& To,
+    float ExtraCost, float& OutNeed, float& OutEnergy) const
+{
+    OutNeed = -1.0f;
+    OutEnergy = -1.0f;
+    AFGWheeledVehicle* WheeledVehicle = IsValid(Vehicle) ? Vehicle->GetOwnerVehicle() : nullptr;
+    if (!IsValid(WheeledVehicle) || !From.IsValid() || !To.IsValid() || From == To) return true;
+    const UFGVehiclePathPreset* Preset = WheeledVehicle->GetVehiclePathPreset();
+    AFGVehicleSubsystem* VehicleSubsystem = AFGVehicleSubsystem::Get(WheeledVehicle->GetWorld());
+    const TSubclassOf<UFGItemDescriptor> FuelClass = Vehicle->GetFuelTypeDescriptor();
+    UFGInventoryComponent* FuelInventory = WheeledVehicle->GetFuelInventory();
+    const float EnergyPerItem = FuelClass ? UFGItemDescriptor::GetEnergyValue(FuelClass) : 0.0f;
+    // No estimate, no verdict: an unknown leg is left alone, as the lap planner leaves it.
+    if (!Preset || !IsValid(VehicleSubsystem) || !IsValid(FuelInventory) || !FuelClass ||
+        !FMath::IsFinite(EnergyPerItem) || EnergyPerItem <= 0.0f) return true;
+    const float LegCost = EstimatePathFuelConsumptionMW(VehicleSubsystem, Preset, WheeledVehicle->GetClass(), From, To);
+    if (LegCost < 0.0f) return true;
+    OutNeed = LegCost + FMath::Max(0.0f, ExtraCost);
+    OutEnergy = FuelInventory->GetNumItems(FuelClass) * EnergyPerItem;
+    return OutEnergy >= FuelLegMarginFactor * OutNeed;
+}
+
+bool UDynamicTimeTableSubsystem::EnsureFuelForNextLeg(
+    AFGWheeledVehicleIdentifier* Vehicle, bool bClosedLoop, FGuid& OutEmergencyFuel, const TCHAR* Trigger)
+{
+    OutEmergencyFuel.Invalidate();
+    if (!IsValid(Vehicle)) return false;
+    const TArray<FGuid> Route = Vehicle->GetVehicleRoute();
+    const int32 Num = Route.Num();
+    const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
+    if (Num < 2 || Index <= 0) return false;
+
+    // The index moves on at arrival (PollTruckStates), so the truck stands at the stop before its
+    // target. Past the end - CutLapIfCargoEmpty just shortened the route - the autopilot wraps to
+    // Route[0]; a dispatch loop then drives back to its producer, a pool lap never gets here.
+    const bool bWrapped = Index >= Num;
+    if (bWrapped && !bClosedLoop) return false;
+    const int32 ToIndex = bWrapped ? 0 : Index;
+    const FGuid From = Route[bWrapped ? Num - 1 : Index - 1];
+    const FGuid To = Route[ToIndex];
+    if (!From.IsValid() || !To.IsValid() || From == To) return false;
+    // Standing at a pump, or heading for one: the tank is about to be filled.
+    if (DispatchFuelStopGuids.Contains(From) || DispatchFuelStopGuids.Contains(To)) return false;
+
+    // The last stop of a dispatch loop is followed by the leg back to Route[0], and nothing can be
+    // inserted in front of index zero (it is the truck's producer, its dispatch identity): that
+    // closing leg is protected one stop early, together with the leg to the last stop.
+    float ClosingCost = 0.0f;
+    if (bClosedLoop && !bWrapped && ToIndex == Num - 1 && To != Route[0])
+    {
+        AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
+        const UFGVehiclePathPreset* Preset = IsValid(WheeledVehicle) ? WheeledVehicle->GetVehiclePathPreset() : nullptr;
+        AFGVehicleSubsystem* VehicleSubsystem = IsValid(WheeledVehicle) ? AFGVehicleSubsystem::Get(WheeledVehicle->GetWorld()) : nullptr;
+        if (Preset && IsValid(VehicleSubsystem))
+        {
+            ClosingCost = FMath::Max(0.0f, EstimatePathFuelConsumptionMW(VehicleSubsystem, Preset, WheeledVehicle->GetClass(), To, Route[0]));
+        }
+    }
+
+    float Need = 0.0f, Energy = 0.0f;
+    if (TankCoversLeg(Vehicle, From, To, ClosingCost, Need, Energy)) return false;
+
+    const FGuid Fuel = ChooseFuelStopFromGroup(Vehicle, FindNearestFuelStop(Vehicle->GetOwnerVehicle(), From));
+    if (!Fuel.IsValid())
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Warning,
+            TEXT("FUEL_LEG_GUARD_NO_STOP Truck='%s' From='%s' To='%s' LegCost=%.3f Energy=%.3f Trigger=%s"),
+            *DTSVehicleName(Vehicle), *DockDisplayName(From), *DockDisplayName(To), Need, Energy, Trigger);
+        return false;
+    }
+    // Not a reason to skip the detour - a pump the tank may not reach still beats a leg it
+    // certainly cannot - but worth a line in the log.
+    float ToFuelNeed = 0.0f, ToFuelEnergy = 0.0f;
+    const bool bReachable = TankCoversLeg(Vehicle, From, Fuel, 0.0f, ToFuelNeed, ToFuelEnergy) ||
+        (ToFuelNeed >= 0.0f && ToFuelNeed <= Energy * FuelReachFraction);
+    if (!bReachable)
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Warning,
+            TEXT("FUEL_LEG_GUARD_FAR Truck='%s' Fuel='%s' ToFuelCost=%.3f Energy=%.3f Trigger=%s"),
+            *DTSVehicleName(Vehicle), *DockDisplayName(Fuel), ToFuelNeed, Energy, Trigger);
+    }
+
+    // In front of the target; after the last stop when the index has already wrapped, so the
+    // truck drives From -> Fuel -> Route[0] instead of straight home.
+    TArray<FGuid> NewRoute = Route;
+    if (bWrapped) NewRoute.Add(Fuel);
+    else NewRoute.Insert(Fuel, ToIndex);
+    if (!ReplaceRoute(Vehicle, NewRoute))
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Warning,
+            TEXT("FUEL_LEG_GUARD_FAILED Truck='%s' Fuel='%s' Trigger=%s"),
+            *DTSVehicleName(Vehicle), *DockDisplayName(Fuel), Trigger);
+        return false;
+    }
+    OutEmergencyFuel = Fuel;
+    UE_LOG(LogDynamicTimeTableSubsystem, Display,
+        TEXT("FUEL_LEG_GUARD Truck='%s' From='%s' To='%s' LegCost=%.3f Energy=%.3f Fuel='%s' At=%d Reachable=%s Trigger=%s"),
+        *DTSVehicleName(Vehicle), *DockDisplayName(From), *DockDisplayName(To), Need, Energy,
+        *DockDisplayName(Fuel), bWrapped ? Num : ToIndex, bReachable ? TEXT("true") : TEXT("false"), Trigger);
+    return true;
+}
+
 void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
     AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId, const TCHAR* Trigger)
 {
@@ -2257,9 +2390,16 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
         // The producer booking normally went at docking there; this closes the gap if that
         // transition was missed, so the slot is not held for a whole lap.
         ReleaseTruckBooking(Vehicle, TEXT("left producer"));
-        // The one mid-lap decision, and it only ever shortens the route: an empty truck heading for
-        // yet another requester turns back to the producer instead.
+        // Two mid-lap decisions. The cut only ever shortens the route: an empty truck heading for
+        // yet another requester turns back to the producer instead. The leg guard runs on the route
+        // the cut left behind - the cut drops an (F) that stood after the current stop, which is
+        // how a lap planned around a pump ended with the truck dry on the way back.
         CutLapIfCargoEmpty(Vehicle, ResourceId, Route, Index, Trigger);
+        if (FDTTDispatchTruckAnchors* Anchors = DispatchTruckAnchors.Find(Vehicle))
+        {
+            FGuid Emergency;
+            if (EnsureFuelForNextLeg(Vehicle, true, Emergency, Trigger)) Anchors->EmergencyFuelGuid = Emergency;
+        }
         return;
     }
     if (Index != 0 || Route.Num() < 1) return;
@@ -2296,7 +2436,8 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
         {
             const FGuid& Node = Route[RouteIndex];
             if (!Node.IsValid() || Node == Anchors->ProducerGuid ||
-                Node == Anchors->FuelGuid || Node == Anchors->BorrowedFuelGuid) continue;
+                Node == Anchors->FuelGuid || Node == Anchors->BorrowedFuelGuid ||
+                Node == Anchors->EmergencyFuelGuid) continue;
             BaseLoop.Add(Node);
             break;
         }
@@ -2317,9 +2458,12 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
     TArray<FGuid> NewRoute = BaseLoop;
     const bool bHasDedicatedFuel = Anchors->FuelGuid.IsValid();
     const FGuid PreviousBorrowed = Anchors->BorrowedFuelGuid;
+    const FGuid PreviousEmergency = Anchors->EmergencyFuelGuid;
     // Cleared before any selection so this truck's own stale borrow does not count against the
-    // fuel group it is about to choose from (GetDockAssignedCount).
+    // fuel group it is about to choose from (GetDockAssignedCount). The emergency stop of the lap
+    // that just ended goes the same way: the leg guard decides afresh on every leg.
     Anchors->BorrowedFuelGuid.Invalidate();
+    Anchors->EmergencyFuelGuid.Invalidate();
     bool bFuelIncluded = false;
     int32 FuelPlacedIndex = INDEX_NONE;
 
@@ -2337,9 +2481,16 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
         }
         else if (!ShouldSkipFuelStop(Vehicle, BaseLoop))
         {
+            // The own (F) names the group as much as the station: when it carries a [tag,N], the
+            // lap goes to whichever member is least loaded right now (measured 14.09.2026: eight
+            // trucks pinned to one member of a three-station group, 5/2 booked while its neighbours
+            // idled). A sibling rides in BorrowedFuelGuid for this lap - counted like any claim,
+            // never adopted as the truck's own - and FuelGuid stays the home anchor.
+            const FGuid Chosen = ChooseFuelStopFromGroup(Vehicle, Anchors->FuelGuid);
+            if (Chosen != Anchors->FuelGuid) Anchors->BorrowedFuelGuid = Chosen;
             FuelPlacedIndex = FMath::Clamp(
-                ChooseFuelInsertIndex(Vehicle, BaseLoop, Anchors->FuelGuid, Anchors->FuelInsertIndex), 1, NewRoute.Num());
-            NewRoute.Insert(Anchors->FuelGuid, FuelPlacedIndex);
+                ChooseFuelInsertIndex(Vehicle, BaseLoop, Chosen, Anchors->FuelInsertIndex), 1, NewRoute.Num());
+            NewRoute.Insert(Chosen, FuelPlacedIndex);
             bFuelIncluded = true;
         }
     }
@@ -2348,25 +2499,13 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
         // No (F) of this truck's own. Normally that is a deliberate choice (docs: assumed to refuel
         // at regular stations) - but if the tank is genuinely at risk this lap, borrow the nearest
         // reachable (F) instead of letting the truck strand. Decided afresh every lap: a borrowed
-        // stop is dropped again as soon as the tank no longer needs it.
+        // stop is dropped again as soon as the tank no longer needs it. The nearest (F) only names
+        // the group; within it the least-loaded member is taken (ChooseFuelStopFromGroup).
         const bool bIsCriticallyLow = IsFuelCriticallyLow(Vehicle, BaseLoop);
         FGuid ChosenGuid;
         if (bIsCriticallyLow)
         {
-            ChosenGuid = FindNearestFuelStop(Vehicle->GetOwnerVehicle(), Anchors->ProducerGuid);
-            if (ChosenGuid.IsValid())
-            {
-                // If the nearest (F) also carries its own [tag,N] balancing tag, it is a member of a
-                // real station group - reuse the existing least-loaded selection instead of always
-                // sending every low-fuel truck to the single physically nearest dock.
-                if (FDTTStationGroup* Group = FindGroupByDock(FindDockByPathNode(ChosenGuid)))
-                {
-                    if (FDTTStationEntry* Best = SelectBestStation(*Group))
-                    {
-                        if (Best->DockingPathNodeGuid.IsValid()) ChosenGuid = Best->DockingPathNodeGuid;
-                    }
-                }
-            }
+            ChosenGuid = ChooseFuelStopFromGroup(Vehicle, FindNearestFuelStop(Vehicle->GetOwnerVehicle(), Anchors->ProducerGuid));
         }
 
         if (ChosenGuid.IsValid())
@@ -2413,6 +2552,7 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
         // The old route still holds the old borrowed stop; forgetting it would let the next
         // boundary mistake it for an (F) the player put there.
         Anchors->BorrowedFuelGuid = PreviousBorrowed;
+        Anchors->EmergencyFuelGuid = PreviousEmergency;
         UE_LOG(LogDynamicTimeTableSubsystem, Warning,
             TEXT("DISPATCH_ROUTE_FAILED Truck='%s' Resource='%s' Trigger=%s"),
             *DTSVehicleName(Vehicle), *ResourceId, Trigger);
@@ -3775,6 +3915,11 @@ void UDynamicTimeTableSubsystem::ProcessPoolTruckTarget(
                     *DTSVehicleName(Vehicle), *State.ResourceId, Before, State.Requesters.Num(), Trigger);
             }
         }
+        // Every leg of the lap, the one to the depot included, on the route as the cut left it.
+        {
+            FGuid Emergency;
+            if (EnsureFuelForNextLeg(Vehicle, false, Emergency, Trigger)) State.EmergencyFuelGuid = Emergency;
+        }
         UpdatePoolVehicleName(Vehicle, State);
         return;
     }
@@ -3818,12 +3963,49 @@ void UDynamicTimeTableSubsystem::ProcessPoolTruckTarget(
         State.DepotGuid = Depot;
     }
 
+    // A pump the leg guard put in front of the depot is still ahead: keep driving to it.
+    if (State.EmergencyFuelGuid.IsValid() && Depot == State.DepotGuid &&
+        Route.IsValidIndex(Index) && Route[Index] == State.EmergencyFuelGuid)
+    {
+        UpdatePoolVehicleName(Vehicle, State);
+        return;
+    }
+    State.EmergencyFuelGuid.Invalidate();
+
     // Twice the same node is a legal route (TooFewStations is Num() < 2) and the only one that
     // keeps the truck circling back to the depot without visiting anything else.
-    const TArray<FGuid> NewRoute{ Depot, Depot };
+    TArray<FGuid> NewRoute{ Depot, Depot };
+    // The way home is a leg like any other: a tank that cannot cover it twice over goes to the
+    // nearest reachable pump first. The route is shaped to the current target index the way
+    // AssignPoolTruck shapes a lap - copies of the depot in front, the pump exactly on the target.
+    float Need = 0.0f, Energy = 0.0f;
+    if (From != Depot && !DispatchFuelStopGuids.Contains(From) && !TankCoversLeg(Vehicle, From, Depot, 0.0f, Need, Energy))
+    {
+        const FGuid Fuel = ChooseFuelStopFromGroup(Vehicle, FindNearestFuelStop(Vehicle->GetOwnerVehicle(), From));
+        if (Fuel.IsValid() && Fuel != Depot)
+        {
+            const int32 TargetIndex = FMath::Clamp(Index, 0, 3);
+            NewRoute.Reset();
+            for (int32 Copy = 0; Copy < TargetIndex; ++Copy) NewRoute.Add(Depot);
+            NewRoute.Add(Fuel);
+            NewRoute.Add(Depot);
+            State.EmergencyFuelGuid = Fuel;
+            UE_LOG(LogDynamicTimeTableSubsystem, Display,
+                TEXT("FUEL_LEG_GUARD Truck='%s' From='%s' To='%s' LegCost=%.3f Energy=%.3f Fuel='%s' At=%d Reachable=- Trigger=%s"),
+                *DTSVehicleName(Vehicle), *DockDisplayName(From), *DockDisplayName(Depot), Need, Energy,
+                *DockDisplayName(Fuel), TargetIndex, Trigger);
+        }
+        else
+        {
+            UE_LOG(LogDynamicTimeTableSubsystem, Warning,
+                TEXT("FUEL_LEG_GUARD_NO_STOP Truck='%s' From='%s' To='%s' LegCost=%.3f Energy=%.3f Trigger=%s"),
+                *DTSVehicleName(Vehicle), *DockDisplayName(From), *DockDisplayName(Depot), Need, Energy, Trigger);
+        }
+    }
     if (Route != NewRoute)
     {
         const bool bWritten = ReplaceRoute(Vehicle, NewRoute);
+        if (!bWritten) State.EmergencyFuelGuid.Invalidate();
         UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_TO_DEPOT Truck='%s' Depot='%s' Written=%s Trigger=%s"),
             *DTSVehicleName(Vehicle), *DockDisplayName(Depot), bWritten ? TEXT("true") : TEXT("false"), Trigger);
     }
@@ -3946,7 +4128,8 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     int32 FuelIndex = INDEX_NONE;
     if (IsFuelCriticallyLow(Vehicle, NewRoute))
     {
-        FuelGuid = FindNearestFuelStop(Vehicle->GetOwnerVehicle(), NewRoute[FirstStopIndex]);
+        // The nearest (F) names the group, the least-loaded member of it gets the visit.
+        FuelGuid = ChooseFuelStopFromGroup(Vehicle, FindNearestFuelStop(Vehicle->GetOwnerVehicle(), NewRoute[FirstStopIndex]));
         if (FuelGuid.IsValid() && !NewRoute.Contains(FuelGuid))
         {
             // After the first stop, before the depot.
@@ -3966,6 +4149,7 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     State.ProducerGuid = Producer;
     State.Requesters = Requesters;
     State.FuelGuid = FuelGuid;
+    State.EmergencyFuelGuid.Invalidate();
     State.PlannedItems = MoveTemp(Planned);
     const UWorld* World = GetWorld();
     State.AssignedAtSeconds = IsValid(World) ? World->GetTimeSeconds() : 0.0;

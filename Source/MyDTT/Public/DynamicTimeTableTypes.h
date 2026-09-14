@@ -132,6 +132,12 @@ struct FDTTDispatchTruckAnchors
     UPROPERTY(SaveGame)
     FGuid BorrowedFuelGuid;
 
+    // (F) inserted mid-lap by the leg guard (EnsureFuelForNextLeg) because the tank could not
+    // cover the next leg twice over. Kept apart from BorrowedFuelGuid: one lap can hold both a
+    // planned stop and an emergency one. Never adopted as FuelGuid; cleared at the next boundary.
+    UPROPERTY(SaveGame)
+    FGuid EmergencyFuelGuid;
+
     // Set when the player saved this truck's route by hand: the next producer boundary re-reads the
     // own (F) and its position from the route. Otherwise the anchors are authoritative and the route
     // is just what this mod wrote last lap. Runtime only.
@@ -233,6 +239,10 @@ struct FDTTPoolTruckState
 
     UPROPERTY(SaveGame)
     FGuid FuelGuid;
+
+    /** (F) the leg guard inserted mid-lap (EnsureFuelForNextLeg). Cleared by the next assignment. */
+    UPROPERTY(SaveGame)
+    FGuid EmergencyFuelGuid;
 
     /** True while the station hold is (or, right after a load, was) in place. */
     UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Dynamic Time Table")
