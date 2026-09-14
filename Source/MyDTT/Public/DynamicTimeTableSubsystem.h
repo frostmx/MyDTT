@@ -218,8 +218,9 @@ private:
     FDTTSettings Settings;
 
     // A managed truck held docked at the last requester of its lap while the station drains what
-    // the threshold left on board: one entry per truck, torn down with the docking. Runtime only;
-    // after a load such a truck is simply undocked (HOLD_STALE).
+    // the threshold left on board: one entry per truck, torn down with the docking. Only with
+    // LeftoverHoldSeconds > 0 (off by default since 2.4; the drain itself needs no hold). Runtime
+    // only; after a load such a truck is simply undocked (HOLD_STALE).
     struct FDTTLeftoverHold
     {
         TWeakObjectPtr<class AFGBuildableDockingStation> Station;
@@ -497,10 +498,12 @@ private:
     const FDTTDispatchStation* FindDispatchStationByGuid(const FGuid& PathNodeGuid) const;
     /**
      * What the station may move to or from this truck at the end of its docking cycle, applied
-     * by the transfer hook (see MyDTTHooks). For a dispatch truck: the producer fills it up to
-     * this lap's summed requester deficits, a requester of the lap's resource is filled up to its
-     * threshold, any other stop moves what the game would. False for a truck this mod does not
-     * manage, in which case the game's own transfer runs untouched.
+     * by the transfer hook (see MyDTTHooks). For a dispatch truck under exact quantities: the
+     * producer fills it up to this lap's summed requester deficits, a requester of the lap's
+     * resource is filled up to its threshold, the last one drains, any other stop moves what the
+     * game would. False for a truck this mod does not manage and, apart from a depot, whenever
+     * exact quantities are off - the game's own transfer runs untouched then. bOutLeftoverHold is
+     * set only when the drain is to be followed by a hold (LeftoverHoldSeconds > 0).
      */
     bool ComputeTransferPlan(AFGWheeledVehicleIdentifier* Vehicle, class AFGBuildableDockingStation* Station, struct FDTTTransferPlan& OutPlan,
         bool* bOutLeftoverHold = nullptr) const;

@@ -2807,8 +2807,9 @@ void UDynamicTimeTableSubsystem::HandleTruckDocked(AFGWheeledVehicle* Vehicle, A
         FMyDTTHooks::SetTransferPlan(Station, Plan);
         if (bLeftoverHold)
         {
-            // The last requester of the lap: the station takes what it can now, and keeps taking
-            // once a second for a while, so the leftover does not ride back to the depot.
+            // The last requester of the lap with a hold configured: the station takes what it can
+            // now (the Drain plan) and keeps taking once a second for a while, so the leftover does
+            // not ride back to the depot. Without a hold the Drain plan alone is the whole story.
             FDTTLeftoverHold& Hold = LeftoverHolds.FindOrAdd(Identifier);
             Hold.Station = Station;
             Hold.ItemClass = Plan.ItemClass;
@@ -3157,6 +3158,16 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
         return true;
     }
 
+    // Exact quantities off (the default): every other docking runs the game's own transfer - the
+    // producer fills the truck, a requester takes everything that fits - and no plan is set at
+    // all, so no drain and no hold either. The depot above keeps taking leftovers regardless.
+    if (!Settings.bExactQuantities)
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Log, TEXT("XFER_PLAN Truck='%s' Station='%s' Mode=PassThrough Reason=exact quantities off"),
+            *DTSVehicleName(Vehicle), *DTSDockName(StationIdentifier));
+        return false;
+    }
+
     // A pool lap knows its resource and producer from its state: its route may start with the
     // depot it was released from (see AssignPoolTruck), so Route[0] says nothing.
     const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
@@ -3248,10 +3259,12 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
                 OutPlan.ItemClass = ItemClass;
                 OutPlan.TargetItems = int32(FMath::Min<int64>(int64(Levels.Target) * StackSize, TNumericLimits<int32>::Max()));
                 Reason = TEXT("requester");
-                // The last planned stop of the lap takes everything it can, target or not, and
-                // keeps the truck for a while (HandleTruckDocked opens the hold): what stays on
-                // board here rides to the depot otherwise. Off (DrainLeftovers), the truck keeps
-                // its leftovers for the next lap.
+                // The last planned stop of the lap takes everything it can in its docking cycle,
+                // target or not: what stays on board here rides to the depot otherwise. Off
+                // (DrainLeftovers), the truck keeps its leftovers for the next lap. The hold is a
+                // separate option on top (LeftoverHoldSeconds > 0, off by default since 2.4):
+                // HandleTruckDocked then keeps the truck docked and tops the station up as it
+                // consumes. Before 2.4 a hold of 0 switched the drain off with it.
                 // A fluid truck under "fluid full load" leaves the producer with a full tank on every
                 // lap, planned or idle (the producer counts the requesters of the route, not of the
                 // plan), so its last requester in route order drains it even when the lap planned
@@ -3259,12 +3272,12 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
                 // one fill per lap instead of being held (seen 13.09.2026 on the water truck).
                 const bool bFullLoadLastStop = Settings.bFluidFullLoad && !PoolTrucks.Contains(Vehicle) &&
                     IsFluidTruck(Vehicle) && IsLastRequesterInRoute(Vehicle, StationGuid, ResourceId);
-                if (bOutLeftoverHold && Settings.bDrainLeftovers && Settings.LeftoverHoldSeconds > 0.0f &&
-                    !Station->GetIsInLoadMode() && (bFullLoadLastStop || IsLastPlannedRequester(Vehicle, StationGuid)))
+                if (Settings.bDrainLeftovers && !Station->GetIsInLoadMode() &&
+                    (bFullLoadLastStop || IsLastPlannedRequester(Vehicle, StationGuid)))
                 {
                     OutPlan.Mode = FDTTTransferPlan::EMode::Drain;
                     Reason = TEXT("last requester");
-                    *bOutLeftoverHold = true;
+                    if (bOutLeftoverHold) *bOutLeftoverHold = Settings.LeftoverHoldSeconds > 0.0f;
                 }
             }
             else
@@ -3743,7 +3756,24 @@ void UDynamicTimeTableSubsystem::ProcessPoolTruckTarget(
         if (Index > ProducerIndex)
         {
             ReleaseTruckBooking(Vehicle, TEXT("left producer"));
-            CutLapIfCargoEmpty(Vehicle, State.ResourceId, Route, Index, Trigger, State.DepotGuid);
+            if (CutLapIfCargoEmpty(Vehicle, State.ResourceId, Route, Index, Trigger, State.DepotGuid))
+            {
+                // The lap now ends at the requester the truck has just left. Trimming the plan to
+                // the stops that survived makes that requester the last one, so the undock that
+                // brought us here chains the next lap from there (HandleTruckUndocked) when a
+                // request is open - and the truck drives on to the depot when none is. With
+                // exact quantities off this is the normal end of a lap: a requester takes
+                // everything that fits, and the truck is usually empty after the first or second.
+                const TArray<FGuid>& NewRoute = Vehicle->GetVehicleRoute();
+                const int32 Before = State.Requesters.Num();
+                State.Requesters.RemoveAll([&](const FGuid& Guid) { return !NewRoute.Contains(Guid); });
+                for (auto It = State.PlannedItems.CreateIterator(); It; ++It)
+                {
+                    if (!NewRoute.Contains(It.Key())) It.RemoveCurrent();
+                }
+                UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_LAP_TRIMMED Truck='%s' Resource='%s' Requesters=%d->%d Trigger=%s"),
+                    *DTSVehicleName(Vehicle), *State.ResourceId, Before, State.Requesters.Num(), Trigger);
+            }
         }
         UpdatePoolVehicleName(Vehicle, State);
         return;

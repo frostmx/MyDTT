@@ -336,6 +336,13 @@ struct FDTTSettings
 {
     GENERATED_BODY()
 
+    /**
+     * On: the loading station gives a lap only its requesters' shortfall, a requester takes only up
+     * to its target and the last one drains what is left. Off (default): every docking moves what
+     * the game would - a full load at the producer, then everything that fits at each requester;
+     * a truck that empties early starts its next lap from where it is.
+     */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bExactQuantities = false;
     /** A solid requester without a number in its tag is called while its stock is below this many stacks (clamped to the dock). */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 SolidRequestStacks = 40;
     /** A fluid requester without a number in its tag is called while its tank holds fewer than this many stacks of 50 000 L. */
@@ -344,10 +351,10 @@ struct FDTTSettings
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 RequestBufferStacks = 8;
     /** A fluid lap serves one requester and the producer fills the tank completely; the leftovers drain at that requester. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bFluidFullLoad = true;
-    /** The last requester of a lap takes everything beyond its target and holds the truck (LeftoverHoldSeconds). Off: the truck keeps its leftovers. */
+    /** Exact quantities only. The last requester of a lap takes everything it can in its docking cycle, target or not. Off: the truck keeps its leftovers. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bDrainLeftovers = true;
-    /** Seconds a truck stays docked at the last requester of its lap, draining what is left beyond the target. 0 turns the hold off. */
-    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float LeftoverHoldSeconds = 60.0f;
+    /** Extra seconds the drained truck stays docked at that last requester, topping it up as it consumes. 0 (default): it leaves right after the unload. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float LeftoverHoldSeconds = 0.0f;
     /** Seconds between two top-up transfers of a held truck (at a requester or a depot). The poll runs once a second, so 1 is the floor. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float TopUpIntervalSeconds = 1.0f;
     /** A parked truck unloads everything into its depot when the depot is in UNLOAD mode. */
@@ -387,7 +394,8 @@ struct FDTTSettings
     }
     bool operator==(const FDTTSettings& Other) const
     {
-        return SolidRequestStacks == Other.SolidRequestStacks && FluidRequestStacks == Other.FluidRequestStacks &&
+        return bExactQuantities == Other.bExactQuantities &&
+            SolidRequestStacks == Other.SolidRequestStacks && FluidRequestStacks == Other.FluidRequestStacks &&
             RequestBufferStacks == Other.RequestBufferStacks && bFluidFullLoad == Other.bFluidFullLoad &&
             bDrainLeftovers == Other.bDrainLeftovers &&
             LeftoverHoldSeconds == Other.LeftoverHoldSeconds && TopUpIntervalSeconds == Other.TopUpIntervalSeconds &&
@@ -400,10 +408,11 @@ struct FDTTSettings
     bool operator!=(const FDTTSettings& Other) const { return !(*this == Other); }
     FString Describe() const
     {
-        return FString::Printf(TEXT("SolidRequestStacks=%d FluidRequestStacks=%d RequestBufferStacks=%d FluidFullLoad=%s DrainLeftovers=%s "
+        return FString::Printf(TEXT("ExactQuantities=%s SolidRequestStacks=%d FluidRequestStacks=%d RequestBufferStacks=%d FluidFullLoad=%s DrainLeftovers=%s "
             "LeftoverHoldSeconds=%.0f TopUpIntervalSeconds=%.0f UnloadAtDepot=%s SkipProducerWhenCargoCovers=%s "
             "PoolDispatchIntervalSeconds=%.0f MaxRequestersPerLap=%d RequesterClaimTimeoutSeconds=%.0f OverdueRequestMinutes=%d "
             "IdleDispatchRecheckSeconds=%.0f FuelCriticalMarginLaps=%.2f FuelSkipMarginLaps=%.2f"),
+            bExactQuantities ? TEXT("true") : TEXT("false"),
             SolidRequestStacks, FluidRequestStacks, RequestBufferStacks, bFluidFullLoad ? TEXT("true") : TEXT("false"),
             bDrainLeftovers ? TEXT("true") : TEXT("false"),
             LeftoverHoldSeconds, TopUpIntervalSeconds, bUnloadAtDepot ? TEXT("true") : TEXT("false"),
@@ -422,6 +431,7 @@ struct FDTTSettings
         };
         auto AsInt = [&](int32& Out) { if (!Value.IsNumeric()) return false; Out = FCString::Atoi(*Value); return true; };
         const FString F = Field.ToLower();
+        if (F == TEXT("exactquantities")) return AsBool(bExactQuantities);
         if (F == TEXT("solidrequeststacks")) return AsInt(SolidRequestStacks);
         if (F == TEXT("fluidrequeststacks")) return AsInt(FluidRequestStacks);
         if (F == TEXT("requestbufferstacks")) return AsInt(RequestBufferStacks);
