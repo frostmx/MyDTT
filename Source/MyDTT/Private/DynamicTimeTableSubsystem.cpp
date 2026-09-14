@@ -2381,6 +2381,20 @@ bool UDynamicTimeTableSubsystem::EnsureFuelForNextLeg(
     TArray<FGuid> NewRoute = Route;
     if (bWrapped) NewRoute.Add(Fuel);
     else NewRoute.Insert(Fuel, ToIndex);
+    // One pump per lap: a stop the lap planner put further down the route (least detour, after
+    // the producer) is pointless once the tank is filled here, so it goes - unless that dock is
+    // also a requester of this lap, where a delivery is due regardless.
+    const int32 InsertedAt = bWrapped ? Num : ToIndex;
+    int32 Dropped = 0;
+    for (int32 RouteIndex = NewRoute.Num() - 1; RouteIndex > InsertedAt; --RouteIndex)
+    {
+        const FGuid& Node = NewRoute[RouteIndex];
+        if (!DispatchFuelStopGuids.Contains(Node)) continue;
+        const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Claim = RequesterClaims.Find(Node);
+        if (Claim && Claim->Get() == Vehicle) continue;
+        NewRoute.RemoveAt(RouteIndex);
+        ++Dropped;
+    }
     if (!ReplaceRoute(Vehicle, NewRoute))
     {
         UE_LOG(LogDynamicTimeTableSubsystem, Warning,
@@ -2390,9 +2404,9 @@ bool UDynamicTimeTableSubsystem::EnsureFuelForNextLeg(
     }
     OutEmergencyFuel = Fuel;
     UE_LOG(LogDynamicTimeTableSubsystem, Display,
-        TEXT("FUEL_LEG_GUARD Truck='%s' From='%s' To='%s' LegCost=%.3f PumpAfter=%.3f Energy=%.3f Fuel='%s' At=%d Reachable=%s Trigger=%s"),
+        TEXT("FUEL_LEG_GUARD Truck='%s' From='%s' To='%s' LegCost=%.3f PumpAfter=%.3f Energy=%.3f Fuel='%s' At=%d Reachable=%s DroppedLater=%d Trigger=%s"),
         *DTSVehicleName(Vehicle), *DockDisplayName(From), *DockDisplayName(To), Need, PumpAfterCost, Energy,
-        *DockDisplayName(Fuel), bWrapped ? Num : ToIndex, bReachable ? TEXT("true") : TEXT("false"), Trigger);
+        *DockDisplayName(Fuel), InsertedAt, bReachable ? TEXT("true") : TEXT("false"), Dropped, Trigger);
     return true;
 }
 
@@ -2421,7 +2435,14 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
         if (FDTTDispatchTruckAnchors* Anchors = DispatchTruckAnchors.Find(Vehicle))
         {
             FGuid Emergency;
-            if (EnsureFuelForNextLeg(Vehicle, true, Emergency, Trigger)) Anchors->EmergencyFuelGuid = Emergency;
+            if (EnsureFuelForNextLeg(Vehicle, true, Emergency, Trigger))
+            {
+                Anchors->EmergencyFuelGuid = Emergency;
+                // The guard drops a planned stop further down the lap; a borrowed one no longer in
+                // the route must not keep its claim on that dock.
+                if (Anchors->BorrowedFuelGuid.IsValid() && !Vehicle->GetVehicleRoute().Contains(Anchors->BorrowedFuelGuid))
+                    Anchors->BorrowedFuelGuid.Invalidate();
+            }
         }
         return;
     }
@@ -3941,7 +3962,11 @@ void UDynamicTimeTableSubsystem::ProcessPoolTruckTarget(
         // Every leg of the lap, the one to the depot included, on the route as the cut left it.
         {
             FGuid Emergency;
-            if (EnsureFuelForNextLeg(Vehicle, false, Emergency, Trigger)) State.EmergencyFuelGuid = Emergency;
+            if (EnsureFuelForNextLeg(Vehicle, false, Emergency, Trigger))
+            {
+                State.EmergencyFuelGuid = Emergency;
+                if (State.FuelGuid.IsValid() && !Vehicle->GetVehicleRoute().Contains(State.FuelGuid)) State.FuelGuid.Invalidate();
+            }
         }
         UpdatePoolVehicleName(Vehicle, State);
         return;
@@ -4212,7 +4237,11 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     // it chained from - and no target change announces it, so the leg guard runs here.
     {
         FGuid Emergency;
-        if (EnsureFuelForNextLeg(Vehicle, false, Emergency, Trigger, From)) State.EmergencyFuelGuid = Emergency;
+        if (EnsureFuelForNextLeg(Vehicle, false, Emergency, Trigger, From))
+        {
+            State.EmergencyFuelGuid = Emergency;
+            if (State.FuelGuid.IsValid() && !Vehicle->GetVehicleRoute().Contains(State.FuelGuid)) State.FuelGuid.Invalidate();
+        }
     }
     UpdatePoolVehicleName(Vehicle, State);
     return true;
