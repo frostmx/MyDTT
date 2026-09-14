@@ -2488,6 +2488,28 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
     }
     const TCHAR* BaseSource = Requesters.Num() > 0 ? TEXT("requester") : TEXT("kept-last-loop");
 
+    // The boundary runs on arrival at the last stop, before the docking transfer. When that stop
+    // is a pump, the tank read here is the one about to be filled: planning the next lap around
+    // it put the same pump in again, and the truck docked there a lap later with 90 items
+    // (measured 14.09.2026: 'Пластик' 90->100, 'Мотор' 88->100, one wasted stop after every
+    // refuel at a tail (F)). Assume the fill: no (F) this lap. Should the pump turn out empty,
+    // the leg guard puts another one in front of the first leg the tank cannot cover.
+    bool bStandingAtPump = false;
+    {
+        const AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
+        const AFGBuildableDockingStation* DockingNow = IsValid(WheeledVehicle)
+            ? Cast<AFGBuildableDockingStation>(WheeledVehicle->GetCurrentlyDockingStationActor()) : nullptr;
+        const AFGDockingStationIdentifier* DockingIdentifier = IsValid(DockingNow) ? DockingNow->GetStationIdentifier() : nullptr;
+        if (IsValid(DockingIdentifier) && DispatchFuelStopGuids.Contains(DockingIdentifier->GetPathNodeGUID())) bStandingAtPump = true;
+        else if (Route.Num() > 0 && FCString::Strcmp(Trigger, TEXT("waypoint changed")) == 0 && DispatchFuelStopGuids.Contains(Route.Last())) bStandingAtPump = true;
+    }
+    if (bStandingAtPump)
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+            TEXT("DISPATCH_FUEL_AT_PUMP Truck='%s' Resource='%s' Reason=refuelling-now Trigger=%s"),
+            *DTSVehicleName(Vehicle), *ResourceId, Trigger);
+    }
+
     if (BaseLoop.Num() < 2)
     {
         // [Producer] alone, or [Producer, (F)]: no delivery leg to estimate fuel on, and a one-stop
@@ -2523,7 +2545,7 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
         {
             bFuelIncluded = true;
         }
-        else if (!ShouldSkipFuelStop(Vehicle, BaseLoop))
+        else if (!bStandingAtPump && !ShouldSkipFuelStop(Vehicle, BaseLoop))
         {
             // The own (F) names the group as much as the station: when it carries a [tag,N], the
             // lap goes to whichever member is least loaded right now (measured 14.09.2026: eight
@@ -2545,7 +2567,7 @@ void UDynamicTimeTableSubsystem::ProcessDispatchTruckTarget(
         // reachable (F) instead of letting the truck strand. Decided afresh every lap: a borrowed
         // stop is dropped again as soon as the tank no longer needs it. The nearest (F) only names
         // the group; within it the least-loaded member is taken (ChooseFuelStopFromGroup).
-        const bool bIsCriticallyLow = IsFuelCriticallyLow(Vehicle, BaseLoop);
+        const bool bIsCriticallyLow = !bStandingAtPump && IsFuelCriticallyLow(Vehicle, BaseLoop);
         FGuid ChosenGuid;
         if (bIsCriticallyLow)
         {
