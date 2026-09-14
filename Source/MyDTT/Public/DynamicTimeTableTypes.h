@@ -349,7 +349,7 @@ struct FDTTSettings
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 FluidRequestStacks = 56;
     /** A delivery fills a requester up to its limit plus this many stacks, so what is consumed on the way is covered. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 RequestBufferStacks = 8;
-    /** A fluid lap serves one requester and the producer fills the tank completely; the leftovers drain at that requester. */
+    /** A fluid lap serves one requester in either mode; with exact quantities the producer also fills the tank completely and the leftovers drain at that requester. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bFluidFullLoad = true;
     /** Exact quantities only. The last requester of a lap takes everything it can in its docking cycle, target or not. Off: the truck keeps its leftovers. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bDrainLeftovers = true;

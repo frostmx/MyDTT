@@ -72,8 +72,8 @@ without the mod plays on such a server without the window.
 
 The Settings tab (or `/dtt settings` and `/dtt set <field> <value>`) holds the tunables: *exact
 quantities* (off by default, see above), the solid and fluid request limits and the request
-buffer, *fluid trucks always carry a full load* (a fluid lap serves one station, the tank is
-filled completely and drained there), *drain leftovers at the last stop*, leftover hold (0 by
+buffer, *fluid trucks always carry a full load* (a fluid lap serves one station in either mode;
+with exact quantities the tank is also filled completely and drained there), *drain leftovers at the last stop*, leftover hold (0 by
 default) and top-up interval, depot unloading, the producer
 skip, the pool dispatch interval, requesters per lap, the requester claim timeout, the overdue
 minutes after which an unclaimed request is shown in red (5 by default, 0 turns it off), the
