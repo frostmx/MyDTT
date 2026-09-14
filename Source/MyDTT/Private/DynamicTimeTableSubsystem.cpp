@@ -2349,7 +2349,12 @@ bool UDynamicTimeTableSubsystem::EnsureFuelForNextLeg(
     float Need = 0.0f, Energy = 0.0f;
     // TankCoversLeg supplies the cost and the energy; the pump detour is added once, undoubled.
     TankCoversLeg(Vehicle, From, To, ClosingCost, Need, Energy);
-    if (Need < 0.0f || Energy >= FuelLegMarginFactor * Need + PumpAfterCost) return false;
+    const bool bCovered = Need < 0.0f || Energy >= FuelLegMarginFactor * Need + PumpAfterCost;
+    UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
+        TEXT("FUEL_LEG_CHECK Truck='%s' From='%s' To='%s' Index=%d LegCost=%.3f PumpAfter=%.3f Energy=%.3f Verdict=%s Trigger=%s"),
+        *DTSVehicleName(Vehicle), *DockDisplayName(From), *DockDisplayName(To), Index, Need, PumpAfterCost, Energy,
+        Need < 0.0f ? TEXT("no-estimate") : (bCovered ? TEXT("covered") : TEXT("pump-first")), Trigger);
+    if (bCovered) return false;
 
     const FGuid Fuel = ChooseFuelStopFromGroup(Vehicle, FindNearestFuelStop(Vehicle->GetOwnerVehicle(), From));
     if (!Fuel.IsValid())
