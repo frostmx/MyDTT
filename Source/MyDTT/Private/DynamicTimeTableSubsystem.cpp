@@ -25,6 +25,11 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogDynamicTimeTableSubsystem, Log, All);
 
+// How far the autopilot's target index may have crept before a lap stops being chained. Every
+// chained lap adds two stops to the route's depot prefix, so without a ceiling the route grows
+// until the prefix is truncated and the producer misses the target index.
+static constexpr int32 DTTMaxChainedTargetIndex = 6;
+
 namespace
 {
     FString DTSStationName(const AFGTrainStationIdentifier* Identifier)
@@ -3881,8 +3886,13 @@ void UDynamicTimeTableSubsystem::ParkTruck(
     ReleaseRequesterClaimsForVehicle(Vehicle, TEXT("parked"));
     ReleaseTruckBooking(Vehicle, TEXT("parked"));
     FMyDTTHooks::SetHeld(Station, true, TEXT("parked"));
-    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("PARKED Truck='%s' Depot='%s' HoldInstalled=%s"),
-        *DTSVehicleName(Vehicle), *DockDisplayName(StationGuid), FMyDTTHooks::IsUndockHoldInstalled() ? TEXT("true") : TEXT("false"));
+    // The lap's route outlives the lap otherwise: a parked truck kept showing the stops it had
+    // just driven, depot prefix and all, in its vanilla panel. [Depot, Depot] is the same loop a
+    // truck driving home gets, and the next assignment overwrites it anyway.
+    const bool bRouteReset = ReplaceRoute(Vehicle, TArray<FGuid>{ StationGuid, StationGuid });
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("PARKED Truck='%s' Depot='%s' HoldInstalled=%s RouteReset=%s"),
+        *DTSVehicleName(Vehicle), *DockDisplayName(StationGuid), FMyDTTHooks::IsUndockHoldInstalled() ? TEXT("true") : TEXT("false"),
+        bRouteReset ? TEXT("true") : TEXT("false"));
     UpdatePoolVehicleName(Vehicle, State);
     RunPoolDispatch(TEXT("truck parked"));
 }
@@ -4136,6 +4146,24 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     // from there; the depot it was driving back to only shapes the route (see below).
     const bool bChained = State.Phase == EDTTTruckPhase::Assigned && State.ChainFromGuid.IsValid();
     if (State.Phase != EDTTTruckPhase::Parked && !bChained) return false;
+    // The chained lap is shaped to the target index (see below), and that index climbs by two
+    // every lap - the producer and the requester each advance it, and a route write does not put
+    // it back. Past the cap the prefix would be truncated, the producer would no longer land on
+    // the target, and the truck would drive to whatever stop its index happens to point at: at
+    // index 10 of an eleven-stop route that is the return depot, so the lap is dropped in
+    // silence. End the lap at the depot instead - parking is the only thing that resets the
+    // index, and the dispatch it triggers hands the truck a fresh short route.
+    if (bChained && Vehicle->GetCurrentTargetWaypointIndex() > DTTMaxChainedTargetIndex)
+    {
+        // Every dispatch pass retries this while the truck drives home (measured: a line every
+        // five seconds), so only the lap boundary that made the decision is logged; the retries
+        // change nothing, and the truck's phase already says where it is going.
+        UE_CLOG(FCString::Strcmp(Trigger, TEXT("lap end")) == 0, LogDynamicTimeTableSubsystem, Display,
+            TEXT("POOL_CHAIN_STOP Truck='%s' Resource='%s' TargetIndex=%d Max=%d Reason=route-prefix-exhausted Trigger=%s"),
+            *DTSVehicleName(Vehicle), *ResourceId, Vehicle->GetCurrentTargetWaypointIndex(),
+            DTTMaxChainedTargetIndex, Trigger);
+        return false;
+    }
     const FGuid StartDepot = State.DepotGuid;
     const FGuid From = bChained ? State.ChainFromGuid : StartDepot;
     // Claims first, like a legacy lap: two trucks must not plan the same requester in one pass.
@@ -4178,9 +4206,9 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     // setter, not a command (1.0.7), so the route is shaped to the index instead: as many copies
     // of the depot in front as the index says, and the producer lands exactly on the target.
     // A chained lap starts with the index pointing at the old lap's return depot, which can sit
-    // anywhere in a route of up to eight stops; the depot copies in front are never driven to
-    // unless the loop wraps, and then the truck only parks.
-    const int32 TargetIndex = FMath::Clamp(Vehicle->GetCurrentTargetWaypointIndex(), 0, bChained ? 8 : 3);
+    // anywhere up to DTTMaxChainedTargetIndex (a higher index does not chain at all); the depot
+    // copies in front are never driven to unless the loop wraps, and then the truck only parks.
+    const int32 TargetIndex = FMath::Clamp(Vehicle->GetCurrentTargetWaypointIndex(), 0, bChained ? DTTMaxChainedTargetIndex : 3);
     TArray<FGuid> NewRoute;
     for (int32 Copy = 0; Copy < TargetIndex && StartDepot.IsValid(); ++Copy) NewRoute.Add(StartDepot);
     // Without a producer the first requester lands on the target instead.
