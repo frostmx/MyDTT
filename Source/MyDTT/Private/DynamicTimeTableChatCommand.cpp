@@ -18,7 +18,7 @@ ADynamicTimeTableChatCommand::ADynamicTimeTableChatCommand()
     Usage = NSLOCTEXT(
         "DynamicTimeTable",
         "ChatCommand.DTT.Usage",
-        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt trucks [resource] - list dispatch and pool trucks; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt settings - show the settings; /dtt set <field> <value> - change one setting; /dtt recalc - rebuild active bookings");
+        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt trucks [resource] - list dispatch and pool trucks; /dtt why <truck> - what one truck is doing and what stands in its way; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt settings - show the settings; /dtt set <field> <value> - change one setting; /dtt recalc - rebuild active bookings");
     Aliases.Add(TEXT("dynamictimetable"));
 }
 
@@ -103,6 +103,31 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
         const FString ResourceFilter = Arguments.Num() >= 2 ? Arguments[1] : FString();
         TArray<FString> Lines;
         Subsystem->GetTruckStatusLines(Lines, ResourceFilter);
+        for (const FString& Line : Lines)
+        {
+            Sender->SendChatMessage(Line, FLinearColor(0.20f, 0.80f, 1.00f));
+        }
+        return EExecutionStatus::COMPLETED;
+    }
+
+    if (Arguments.Num() >= 1 && Arguments[0].Equals(TEXT("why"), ESearchCase::IgnoreCase))
+    {
+        // The truck name may contain spaces ("Iron Ore -> Smelter A"); everything after the verb is it.
+        FString Query;
+        for (int32 Index = 1; Index < Arguments.Num(); ++Index)
+        {
+            if (!Query.IsEmpty()) Query += TEXT(" ");
+            Query += Arguments[Index];
+        }
+        if (Query.IsEmpty())
+        {
+            Sender->SendChatMessage(
+                TEXT("dTT: /dtt why <truck> - the Name#number from /dtt trucks, the number alone, or the display name."),
+                FLinearColor::Red);
+            return EExecutionStatus::BAD_ARGUMENTS;
+        }
+        TArray<FString> Lines;
+        Subsystem->GetTruckWhyLines(Query, Lines);
         for (const FString& Line : Lines)
         {
             Sender->SendChatMessage(Line, FLinearColor(0.20f, 0.80f, 1.00f));

@@ -5118,6 +5118,173 @@ FString UDynamicTimeTableSubsystem::FormatTruckRow(const FDTTTruckRow& Row)
         Row.PlannedSummary.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(" | planned=%s"), *Row.PlannedSummary));
 }
 
+// ---------------------------------------------------------------------------
+// "/dtt why <truck>": one truck's own account of what it is doing. Everything here is read from
+// the same state the dispatcher decides on, and the answers are phrased as the dispatcher would
+// phrase them - a POOL_SKIP reason belongs in a log nobody is reading at the time, so the same
+// reasons are recomputed here on demand, for this truck, with the stations named.
+// ---------------------------------------------------------------------------
+
+void UDynamicTimeTableSubsystem::GetTruckWhyLines(const FString& TruckQuery, TArray<FString>& OutLines) const
+{
+    OutLines.Reset();
+    AFGWheeledVehicleIdentifier* Vehicle = FindVehicleByQuery(TruckQuery);
+    if (!IsValid(Vehicle))
+    {
+        OutLines.Add(FString::Printf(TEXT("dTT: no truck matches '%s' (use the Name#number from /dtt trucks, the number alone, or the display name)."), *TruckQuery));
+        return;
+    }
+    AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
+    const FDTTPoolTruckState* Pool = PoolTrucks.Find(Vehicle);
+    const FDTTDispatchTruckAnchors* Anchors = DispatchTruckAnchors.Find(Vehicle);
+    const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+    const int32 TargetIndex = Vehicle->GetCurrentTargetWaypointIndex();
+
+    // Line 1: who it is and what it is in this mod's eyes.
+    const FString Kind = Pool ? FString::Printf(TEXT("pool truck, %s"), *PhaseLabel(Pool->Phase))
+        : Anchors ? FString(TEXT("dispatch truck")) : FString(TEXT("not managed by this mod"));
+    OutLines.Add(FString::Printf(TEXT("dTT why '%s': %s%s%s"), *DTSVehicleName(Vehicle), *Kind,
+        Vehicle->IsAutopilotEnabled() ? TEXT("") : TEXT(", autopilot OFF"),
+        Vehicle->IsCurrentlyDocking() ? TEXT(", docking") : TEXT("")));
+
+    // Where it is going. The target index is the one number every route decision turns on.
+    TArray<FString> Stops;
+    for (int32 Index = 0; Index < Route.Num(); ++Index)
+    {
+        Stops.Add(FString::Printf(TEXT("%s%s"), Index == TargetIndex ? TEXT(">") : TEXT(""), *DockDisplayName(Route[Index])));
+    }
+    OutLines.Add(FString::Printf(TEXT("  route[%d] target=%d: %s"), Route.Num(), TargetIndex,
+        Stops.Num() > 0 ? *FString::Join(Stops, TEXT(" > ")) : TEXT("(empty)")));
+
+    // What it carries: the reason a parked truck is skipped more often than any other.
+    TSubclassOf<UFGItemDescriptor> CargoClass;
+    const FString Cargo = DescribeCargo(Vehicle, &CargoClass);
+    OutLines.Add(FString::Printf(TEXT("  cargo: %s"), Cargo.IsEmpty() ? TEXT("empty") : *Cargo));
+
+    if (const FDTTLeftoverHold* Hold = LeftoverHolds.Find(Vehicle))
+    {
+        const UWorld* World = GetWorld();
+        const double Held = Hold->bCycleDone && IsValid(World) ? World->GetTimeSeconds() - Hold->StartedSeconds : 0.0;
+        OutLines.Add(FString::Printf(TEXT("  held at '%s' for %.0f s, moved %d by top-ups; leaves %s"),
+            Hold->Station.IsValid() ? *DTSDockName(Hold->Station->GetStationIdentifier()) : TEXT("<none>"),
+            Held, Hold->MovedByTopUps,
+            Hold->bUntilEmpty ? TEXT("when the cargo is gone (stay until empty)")
+                : *FString::Printf(TEXT("after %.0f s"), Settings.LeftoverHoldSeconds)));
+    }
+    if (const FDTTIndexReset* Reset = IndexResets.Find(Vehicle))
+    {
+        OutLines.Add(FString::Printf(TEXT("  waiting for the autopilot to drop its target index (was %d): no lap is planned until it does."),
+            Reset->IndexBefore));
+    }
+
+    if (Pool)
+    {
+        OutLines.Add(FString::Printf(TEXT("  depot: %s%s"),
+            Pool->DepotGuid.IsValid() ? *DockDisplayName(Pool->DepotGuid) : TEXT("none claimed"),
+            Pool->ChainFromGuid.IsValid() ? *FString::Printf(TEXT(", next lap chains from %s"), *DockDisplayName(Pool->ChainFromGuid)) : TEXT("")));
+        if (Pool->Phase == EDTTTruckPhase::Assigned)
+        {
+            const TSubclassOf<UFGItemDescriptor> ItemClass = Pool->ResourceId.IsEmpty() ? nullptr : ResolveItemClassForResource(Pool->ResourceId);
+            const int32 StackSize = ItemClass ? FMath::Max(1, UFGItemDescriptor::GetStackSize(ItemClass)) : 1;
+            TArray<FString> Parts;
+            for (const FGuid& Requester : Pool->Requesters)
+            {
+                const int32* PlannedItems = Pool->PlannedItems.Find(Requester);
+                Parts.Add(PlannedItems
+                    ? FString::Printf(TEXT("%s:%d stacks"), *DockDisplayName(Requester), *PlannedItems / StackSize)
+                    : DockDisplayName(Requester));
+            }
+            OutLines.Add(FString::Printf(TEXT("  lap: %s from '%s' to %s"), *Pool->ResourceId,
+                Pool->ProducerGuid.IsValid() ? *DockDisplayName(Pool->ProducerGuid) : TEXT("its own cargo"),
+                Parts.Num() > 0 ? *FString::Join(Parts, TEXT(", ")) : TEXT("nothing")));
+        }
+    }
+
+    // Idle, and why. A parked truck (or one on its way home with a lap's worth of chain left) is
+    // matched against every open demand; these are the same tests RunPoolDispatch runs, in order.
+    const bool bIdle = Pool && (Pool->Phase == EDTTTruckPhase::Parked ||
+        (Pool->Phase == EDTTTruckPhase::Assigned && Pool->ChainFromGuid.IsValid()));
+    if (bIdle && IsValid(WheeledVehicle))
+    {
+        const bool bCargoDrained = IsCargoDrainedAtDepot(*Pool);
+        const EResourceForm TruckForm = IFGDockableInterface::Execute_GetDockInventoryResourceForm(WheeledVehicle);
+        int32 Demands = 0;
+        TSet<FString> Seen;
+        for (const FDTTDispatchStation& Station : DispatchStations)
+        {
+            if (GetEffectiveDispatchRole(Station) != EDTTDispatchRole::Requester || !DoesDispatchStationMatchMode(Station)) continue;
+            const FString Key = Station.ResourceId.ToLower();
+            if (Seen.Contains(Key)) continue;
+            Seen.Add(Key);
+            const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(Station.ResourceId);
+            if (!ItemClass) continue;
+            TArray<FDTTOpenRequester> Open;
+            CollectOpenRequesters(Station.ResourceId, ItemClass, Vehicle, Open);
+            if (Open.Num() == 0) continue;
+            ++Demands;
+
+            FString Verdict;
+            const AFGDockingStationIdentifier* TopDock = Open[0].Station->DockingStationIdentifier.Get();
+            const AFGBuildableDockingStation* TopStation = IsValid(TopDock) ? TopDock->GetStation() : nullptr;
+            const bool bFluidRequest = IsValid(TopStation)
+                ? DTSIsFluidForm(TopStation->GetDockingStationResourceForm()) : Open[0].Station->DisplayName.IsEmpty();
+            if (DTSIsFluidForm(TruckForm) != bFluidRequest)
+            {
+                Verdict = DTSIsFluidForm(TruckForm) ? TEXT("a fluid truck cannot carry it") : TEXT("a solid truck cannot carry it");
+            }
+            else if (CargoClass && CargoClass != ItemClass && !bCargoDrained)
+            {
+                Verdict = FString::Printf(TEXT("its cargo is %s, not this"), *UFGItemDescriptor::GetItemName(CargoClass).ToString());
+            }
+            else
+            {
+                const FGuid From = Pool->ChainFromGuid.IsValid() ? Pool->ChainFromGuid : Pool->DepotGuid;
+                int32 ProducerStock = 0;
+                const FGuid Producer = ChooseProducerForResource(Vehicle, Station.ResourceId, ItemClass, From, ProducerStock);
+                const int32 OnBoard = bCargoDrained ? 0 : OnBoardStacksOf(Vehicle, ItemClass);
+                if (Producer.IsValid())
+                {
+                    Verdict = FString::Printf(TEXT("ready: load at '%s' (%d stacks) for '%s'"),
+                        *DockDisplayName(Producer), ProducerStock, *Open[0].Station->DisplayName);
+                }
+                else if (OnBoard > 0)
+                {
+                    Verdict = FString::Printf(TEXT("ready: %d stacks on board for '%s', no producer needed"), OnBoard, *Open[0].Station->DisplayName);
+                }
+                else
+                {
+                    Verdict = TEXT("no LOAD producer of it has stock, and this truck carries none");
+                }
+            }
+            OutLines.Add(FString::Printf(TEXT("  %s: %d open (worst '%s' %d/%d stacks) - %s"),
+                *Station.ResourceId, Open.Num(), *Open[0].Station->DisplayName,
+                Open[0].StockStacks, Open[0].TriggerStacks, *Verdict));
+        }
+        if (Demands == 0)
+        {
+            OutLines.Add(TEXT("  nothing is open: every requester of every resource is above its threshold, or claimed by another truck."));
+        }
+        else
+        {
+            OutLines.Add(FString::Printf(TEXT("  the dispatcher runs every %.0f s and gives each request to the truck closest to it; \"ready\" above means this one is a candidate, not that it wins."),
+                Settings.PoolDispatchIntervalSeconds));
+        }
+    }
+
+    // Fuel, on the loop it is actually driving (or its depot loop when parked): the same estimate
+    // the borrow trigger uses, so a truck refusing to leave can be recognised as low on fuel.
+    if (Route.Num() >= 2)
+    {
+        float CurrentFuelItems = 0.0f, PerLapItems = 0.0f;
+        if (TryEstimateFuelMargin(Vehicle, Route, CurrentFuelItems, PerLapItems) && PerLapItems > 0.0f)
+        {
+            const float Laps = CurrentFuelItems / PerLapItems;
+            OutLines.Add(FString::Printf(TEXT("  fuel: %.0f items, about %.1f laps of this route (borrows a stop below %.1f, skips its own above %.1f)"),
+                CurrentFuelItems, Laps, Settings.FuelCriticalMarginLaps, Settings.FuelSkipMarginLaps));
+        }
+    }
+}
+
 void UDynamicTimeTableSubsystem::GetTruckStatusLines(TArray<FString>& OutLines, const FString& ResourceFilter) const
 {
     OutLines.Reset();

@@ -67,6 +67,8 @@ public:
     void GetDispatchStatusLines(TArray<FString>& OutLines, const FString& ResourceFilter = FString()) const;
     /** /dtt trucks: every dispatch and pool truck, one line each. */
     void GetTruckStatusLines(TArray<FString>& OutLines, const FString& ResourceFilter = FString()) const;
+    /** /dtt why <truck>: what that truck is doing and, when it is doing nothing, what stands in the way. */
+    void GetTruckWhyLines(const FString& TruckQuery, TArray<FString>& OutLines) const;
     /** Rows behind the Dispatch tab, the chat listing and the snapshot; depots and fuel stops only with no filter. */
     void BuildDispatchRows(TArray<FDTTDispatchRow>& OutRows, const FString& ResourceFilter = FString()) const;
     /** Rows behind the Trucks tab, the chat listing and the snapshot. */
