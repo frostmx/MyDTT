@@ -25,10 +25,13 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogDynamicTimeTableSubsystem, Log, All);
 
-// How far the autopilot's target index may have crept before a lap stops being chained. Every
-// chained lap adds two stops to the route's depot prefix, so without a ceiling the route grows
+// How far the autopilot's target index may have crept before a lap stops being chained. The
+// index is normally reset between laps (IndexResets); this is the ceiling for the fallback that
+// shapes the route to the index when the reset did not happen - without one the route would grow
 // until the prefix is truncated and the producer misses the target index.
 static constexpr int32 DTTMaxChainedTargetIndex = 6;
+// How long the lap boundary waits for the autopilot to zero the index before that fallback.
+static constexpr double DTTIndexResetTimeoutSeconds = 3.0;
 
 namespace
 {
@@ -2864,6 +2867,29 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         const int32 TargetIndex = Vehicle->GetCurrentTargetWaypointIndex();
         const bool bDocking = Vehicle->IsCurrentlyDocking();
         const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+        // The lap boundary wrote [Depot, Depot] and left the truck to this poll: once the autopilot
+        // has zeroed the index the truck is free to plan (one dispatch pass after the loop serves
+        // them all). A reset that does not land in time is given up, and the lap is shaped to the
+        // index it has, as before the reset existed.
+        if (const FDTTIndexReset* Reset = IndexResets.Find(Vehicle))
+        {
+            const UWorld* ResetWorld = GetWorld();
+            const double Waited = IsValid(ResetWorld) ? ResetWorld->GetTimeSeconds() - Reset->SinceSeconds : 0.0;
+            if (TargetIndex < 2)
+            {
+                UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_INDEX_RESET_DONE Truck='%s' Before=%d After=%d Waited=%.2f"),
+                    *DTSVehicleName(Vehicle), Reset->IndexBefore, TargetIndex, Waited);
+                IndexResets.Remove(Vehicle);
+                bIndexResetDispatchDue = true;
+            }
+            else if (Waited >= DTTIndexResetTimeoutSeconds)
+            {
+                UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("POOL_INDEX_RESET_TIMEOUT Truck='%s' Before=%d Now=%d Waited=%.2f"),
+                    *DTSVehicleName(Vehicle), Reset->IndexBefore, TargetIndex, Waited);
+                IndexResets.Remove(Vehicle);
+                bIndexResetDispatchDue = true;
+            }
+        }
         FDTTPoolTruckState* Pool = PoolTrucks.Find(Vehicle);
         const FString ResourceId = !Pool && Route.Num() > 0
             ? ResolveDispatchResourceFromProducer(Route[0]) : FString();
@@ -2955,7 +2981,12 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         TickLeftoverHolds(Now);
         TickDepotDrains(Now);
         // A request that opens while every truck is already parked has no boundary to be noticed at.
-        if (PoolTrucks.Num() > 0 && Now - LastPoolDispatchSeconds >= Settings.PoolDispatchIntervalSeconds) RunPoolDispatch(TEXT("timer"));
+        if (bIndexResetDispatchDue)
+        {
+            bIndexResetDispatchDue = false;
+            RunPoolDispatch(TEXT("index reset"));
+        }
+        else if (PoolTrucks.Num() > 0 && Now - LastPoolDispatchSeconds >= Settings.PoolDispatchIntervalSeconds) RunPoolDispatch(TEXT("timer"));
     }
 }
 
@@ -3114,6 +3145,7 @@ void UDynamicTimeTableSubsystem::HandleTruckUndocked(AFGWheeledVehicle* Vehicle)
             PoolState->ChainFromGuid = StationGuid;
             UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_LAP_DONE Truck='%s' LastRequester='%s' Depot='%s'"),
                 *DTSVehicleName(Identifier), *DockDisplayName(StationGuid), *DockDisplayName(PoolState->DepotGuid));
+            if (BeginIndexReset(Identifier, *PoolState)) return;
             RunPoolDispatch(TEXT("lap end"));
         }
     }
@@ -4153,6 +4185,9 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     // index 10 of an eleven-stop route that is the return depot, so the lap is dropped in
     // silence. End the lap at the depot instead - parking is the only thing that resets the
     // index, and the dispatch it triggers hands the truck a fresh short route.
+    // The boundary wrote [Depot, Depot] to reset the index and left the truck to the poll, which
+    // drops the entry once the index is 0 (or gives up): until then this pass is too early.
+    if (IndexResets.Contains(Vehicle)) return false;
     if (bChained && Vehicle->GetCurrentTargetWaypointIndex() > DTTMaxChainedTargetIndex)
     {
         // Every dispatch pass retries this while the truck drives home (measured: a line every
@@ -4208,6 +4243,11 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     // A chained lap starts with the index pointing at the old lap's return depot, which can sit
     // anywhere up to DTTMaxChainedTargetIndex (a higher index does not chain at all); the depot
     // copies in front are never driven to unless the loop wraps, and then the truck only parks.
+    // A chained lap normally arrives here with the index already at 0: the boundary wrote
+    // [Depot, Depot] (BeginIndexReset) and the autopilot zeroed the index that pointed past its
+    // end (measured 15.09.2026: by the autopilot's tick, never by SetVehicleRoute itself). Then no
+    // copy goes in front at all. The padding remains for the parked case (index 0 or 1 from the
+    // depot loop) and as the fallback when the reset did not come in time.
     const int32 TargetIndex = FMath::Clamp(Vehicle->GetCurrentTargetWaypointIndex(), 0, bChained ? DTTMaxChainedTargetIndex : 3);
     TArray<FGuid> NewRoute;
     for (int32 Copy = 0; Copy < TargetIndex && StartDepot.IsValid(); ++Copy) NewRoute.Add(StartDepot);
@@ -4294,6 +4334,26 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
         }
     }
     UpdatePoolVehicleName(Vehicle, State);
+    return true;
+}
+
+bool UDynamicTimeTableSubsystem::BeginIndexReset(AFGWheeledVehicleIdentifier* Vehicle, const FDTTPoolTruckState& State)
+{
+    if (!IsValid(Vehicle) || !State.DepotGuid.IsValid()) return false;
+    // An index of 0 or 1 stays inside the two-stop loop and would not reset; it also costs at most
+    // one depot copy in front of the lap, which is what a parked truck gets anyway.
+    const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
+    if (Index < 2) return false;
+    FDTTIndexReset Reset;
+    Reset.IndexBefore = Index;
+    const UWorld* World = GetWorld();
+    Reset.SinceSeconds = IsValid(World) ? World->GetTimeSeconds() : 0.0;
+    // ReplaceRoute records the finished lap as the route the game may still write back at the end
+    // of this docking, and the loop as the route to restore then (ROUTE_REVERTED_BY_GAME).
+    if (!ReplaceRoute(Vehicle, TArray<FGuid>{ State.DepotGuid, State.DepotGuid })) return false;
+    IndexResets.Add(Vehicle, MoveTemp(Reset));
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("POOL_INDEX_RESET Truck='%s' Index=%d Depot='%s'"),
+        *DTSVehicleName(Vehicle), Index, *DockDisplayName(State.DepotGuid));
     return true;
 }
 

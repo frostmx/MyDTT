@@ -167,6 +167,18 @@ private:
     TSet<AFGWheeledVehicleIdentifier*> InternalRouteChanges;
     TSet<TWeakObjectPtr<AFGRailroadTimeTable>> PendingTimeTableReevaluations;
     TSet<TWeakObjectPtr<AFGWheeledVehicleIdentifier>> PendingRouteReevaluations;
+    // A pool truck between two laps whose target index is being reset. The autopilot zeroes an
+    // index that points past the end of the route, but only on its own tick, so the two-stop
+    // [Depot, Depot] written at the lap boundary must sit for a tick before the next lap is
+    // written; the poll sees the index drop and drops the entry (or times it out).
+    struct FDTTIndexReset
+    {
+        int32 IndexBefore = 0;
+        double SinceSeconds = 0.0;
+    };
+    TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTIndexReset> IndexResets;
+    /** Set by the poll when a reset has landed; the poll runs one dispatch pass for it afterwards. */
+    bool bIndexResetDispatchDue = false;
     bool bTimeTableReevaluationScheduled = false;
     bool bRouteReevaluationScheduled = false;
 
@@ -378,6 +390,8 @@ private:
     bool UpdateRememberedAnchors(AFGWheeledVehicleIdentifier* Vehicle, const FString& ResourceId, const TArray<FGuid>& Route);
     /** Rewrites the complete route while suppressing this mod's SetVehicleRoute hook. */
     bool ReplaceRoute(AFGWheeledVehicleIdentifier* Vehicle, const TArray<FGuid>& NewRoute);
+    /** Lap boundary: write [Depot, Depot] so the autopilot zeroes the target index; true when the dispatch must wait for the poll. */
+    bool BeginIndexReset(AFGWheeledVehicleIdentifier* Vehicle, const struct FDTTPoolTruckState& State);
     /** Fuel cost for one directed edge in the vehicle path network, or a negative value on failure. */
     float SumSegmentFuelConsumption(class AFGVehicleSubsystem* VehicleSubsystem, const FGuid& FromNodeGuid,
         const FGuid& ToNodeGuid, TSubclassOf<class AFGWheeledVehicle> VehicleType) const;
