@@ -388,6 +388,7 @@ void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
     SettingExactQuantities = Check(TEXT("Exact quantities"), TEXT("On: the loading station gives a lap only what its requesters lack, each requester takes only up to its target, the last one drains the rest. Off (default): a full load at the producer and everything that fits at each requester; a truck that empties early starts its next lap from where it is."));
     SettingDrainLeftovers = Check(TEXT("Drain leftovers at the last stop"), TEXT("The last requester of a lap takes everything it can during the unload, target or not, and with a leftover hold the truck stays and tops it up. Works with exact quantities on or off. Off: the truck keeps its leftovers for the next lap."));
     SettingLeftoverHold = Spin(TEXT("Leftover hold, seconds"), TEXT("Extra time the drained truck stays at that last stop, topping the station up as it consumes. 0 (default): it leaves right after the unload."), 0, 600, 5);
+    SettingStayUntilEmpty = Check(TEXT("Stay at the requester until empty"), TEXT("Off (default): a lap visits its stops one after the other. On: the truck stays docked at every stop of its lap, topping it up as it consumes, until its cargo is gone - then it drives on. A stop that stops consuming keeps the truck."));
     SettingTopUpInterval = Spin(TEXT("Top-up interval, seconds"), TEXT("How often a held truck tries to unload again (requester hold or depot)."), 1, 30, 1);
     SettingUnloadAtDepot = Check(TEXT("Unload at the depot"), TEXT("A parked truck empties into its depot when the depot is in UNLOAD mode."));
     SettingSkipProducer = Check(TEXT("Skip the producer when cargo covers the lap"), TEXT("A pool truck whose cargo covers every planned deficit goes straight to the requesters."));
@@ -397,6 +398,8 @@ void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
     Section(TEXT("Fuel"));
     SettingFuelCritical = Spin(TEXT("Borrow a stop below, laps"), TEXT("A truck adds a fuel stop when its tank holds less than this many estimated laps."), 1, 10, 0.1f);
     SettingFuelSkip = Spin(TEXT("Skip own stop above, laps"), TEXT("A truck leaves its own (F) out when its tank holds more than this many laps. Kept above the borrow margin."), 1.1f, 10, 0.1f);
+    SettingFuelLegMargin = Spin(TEXT("Leg guard margin, x"), TEXT("Before every leg the tank must hold this many times the estimated cost of it, or a fuel stop goes in first. The engine's estimate is unverified against real consumption, so 1.0 strands trucks; 2 is the shipped value."), 1.0f, 5, 0.1f);
+    SettingFuelReach = Spin(TEXT("Detour reach, share of the tank"), TEXT("A borrowed (F) is only placed where the tank can reach it on at most this share of its current energy. Lower plans more cautiously, 1.0 spends the whole tank on getting there."), 0.3f, 1.0f, 0.05f);
 
     UHorizontalBox* Buttons = WidgetTree->ConstructWidget<UHorizontalBox>(); Box->AddChildToVerticalBox(Buttons)->SetPadding(FMargin(0,6,0,0));
     SettingsSaveButton = MakeButton(WidgetTree,TEXT("Save")); AddRowItem(Buttons,SettingsSaveButton);
@@ -423,6 +426,7 @@ void UDynamicTimeTableWidget::RefreshSettingsControls(bool bForce)
     SettingFluidFullLoad->SetIsChecked(V.bFluidFullLoad);
     SettingDrainLeftovers->SetIsChecked(V.bDrainLeftovers);
     SettingLeftoverHold->SetValue(V.LeftoverHoldSeconds);
+    SettingStayUntilEmpty->SetIsChecked(V.bStayUntilEmpty);
     SettingTopUpInterval->SetValue(V.TopUpIntervalSeconds);
     SettingUnloadAtDepot->SetIsChecked(V.bUnloadAtDepot);
     SettingSkipProducer->SetIsChecked(V.bSkipProducerWhenCargoCovers);
@@ -433,6 +437,8 @@ void UDynamicTimeTableWidget::RefreshSettingsControls(bool bForce)
     SettingIdleRecheck->SetValue(V.IdleDispatchRecheckSeconds);
     SettingFuelCritical->SetValue(V.FuelCriticalMarginLaps);
     SettingFuelSkip->SetValue(V.FuelSkipMarginLaps);
+    SettingFuelLegMargin->SetValue(V.FuelLegMarginFactor);
+    SettingFuelReach->SetValue(V.FuelReachFraction);
     bRefreshingControls = false;
     bSettingsEdited = false;
 }
@@ -448,6 +454,7 @@ FDTTSettings UDynamicTimeTableWidget::ReadSettingsControls() const
     V.bFluidFullLoad = SettingFluidFullLoad->IsChecked();
     V.bDrainLeftovers = SettingDrainLeftovers->IsChecked();
     V.LeftoverHoldSeconds = SettingLeftoverHold->GetValue();
+    V.bStayUntilEmpty = SettingStayUntilEmpty->IsChecked();
     V.TopUpIntervalSeconds = SettingTopUpInterval->GetValue();
     V.bUnloadAtDepot = SettingUnloadAtDepot->IsChecked();
     V.bSkipProducerWhenCargoCovers = SettingSkipProducer->IsChecked();
@@ -458,6 +465,8 @@ FDTTSettings UDynamicTimeTableWidget::ReadSettingsControls() const
     V.IdleDispatchRecheckSeconds = SettingIdleRecheck->GetValue();
     V.FuelCriticalMarginLaps = SettingFuelCritical->GetValue();
     V.FuelSkipMarginLaps = SettingFuelSkip->GetValue();
+    V.FuelLegMarginFactor = SettingFuelLegMargin->GetValue();
+    V.FuelReachFraction = SettingFuelReach->GetValue();
     V.Sanitize();
     return V;
 }

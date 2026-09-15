@@ -72,6 +72,7 @@ private:
     UPROPERTY() TObjectPtr<UCheckBox> SettingFluidFullLoad;
     UPROPERTY() TObjectPtr<UCheckBox> SettingDrainLeftovers;
     UPROPERTY() TObjectPtr<USpinBox> SettingLeftoverHold;
+    UPROPERTY() TObjectPtr<UCheckBox> SettingStayUntilEmpty;
     UPROPERTY() TObjectPtr<USpinBox> SettingTopUpInterval;
     UPROPERTY() TObjectPtr<UCheckBox> SettingUnloadAtDepot;
     UPROPERTY() TObjectPtr<UCheckBox> SettingSkipProducer;
@@ -82,6 +83,8 @@ private:
     UPROPERTY() TObjectPtr<USpinBox> SettingIdleRecheck;
     UPROPERTY() TObjectPtr<USpinBox> SettingFuelCritical;
     UPROPERTY() TObjectPtr<USpinBox> SettingFuelSkip;
+    UPROPERTY() TObjectPtr<USpinBox> SettingFuelLegMargin;
+    UPROPERTY() TObjectPtr<USpinBox> SettingFuelReach;
     UPROPERTY() TObjectPtr<UButton> SettingsSaveButton;
     UPROPERTY() TObjectPtr<UButton> SettingsDefaultsButton;
     UPROPERTY() TObjectPtr<UTextBlock> SettingsStatusText;

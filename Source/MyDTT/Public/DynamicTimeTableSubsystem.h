@@ -239,6 +239,8 @@ private:
         TSubclassOf<class UFGItemDescriptor> ItemClass;
         /** Set when the docking cycle's own transfer has run; the hold timer starts here. */
         bool bCycleDone = false;
+        /** Settings.bStayUntilEmpty: released when the cargo is gone, never on the clock. */
+        bool bUntilEmpty = false;
         double StartedSeconds = 0.0;
         double LastTopUpSeconds = 0.0;
         int32 MovedByTopUps = 0;
@@ -553,10 +555,11 @@ private:
      * resource is filled up to its threshold, the last one drains, any other stop moves what the
      * game would. False for a truck this mod does not manage and, apart from a depot, whenever
      * exact quantities are off - the game's own transfer runs untouched then. bOutLeftoverHold is
-     * set only when the drain is to be followed by a hold (LeftoverHoldSeconds > 0).
+     * set when the drain is to be followed by a hold (LeftoverHoldSeconds > 0, or the stay-until-
+     * empty mode, which also sets bOutUntilEmpty and then ends the hold on the cargo, not the clock).
      */
     bool ComputeTransferPlan(AFGWheeledVehicleIdentifier* Vehicle, class AFGBuildableDockingStation* Station, struct FDTTTransferPlan& OutPlan,
-        bool* bOutLeftoverHold = nullptr) const;
+        bool* bOutLeftoverHold = nullptr, bool* bOutUntilEmpty = nullptr) const;
 
     // Shared pool.
     bool IsDepotGuid(const FGuid& PathNodeGuid) const { return DispatchDepotGuids.Contains(PathNodeGuid); }

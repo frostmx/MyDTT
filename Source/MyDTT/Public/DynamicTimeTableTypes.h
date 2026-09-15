@@ -365,6 +365,8 @@ struct FDTTSettings
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bDrainLeftovers = true;
     /** Extra seconds the drained truck stays docked at that last requester, topping it up as it consumes. 0 (default): it leaves right after the unload. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float LeftoverHoldSeconds = 0.0f;
+    /** Off (default): a lap visits its requesters one after the other. On: the truck stays docked at every requester of its lap, topping it up as it consumes, until its cargo is gone - then it drives on. A requester that stops consuming keeps the truck; only a full tank on board and no demand at all ever frees it. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bStayUntilEmpty = false;
     /** Seconds between two top-up transfers of a held truck (at a requester or a depot). The poll runs once a second, so 1 is the floor. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float TopUpIntervalSeconds = 1.0f;
     /** A parked truck unloads everything into its depot when the depot is in UNLOAD mode. */
@@ -405,33 +407,38 @@ struct FDTTSettings
         FuelCriticalMarginLaps = FMath::Clamp(FuelCriticalMarginLaps, 1.0f, 10.0f);
         // Keep the dead zone between "borrow" and "safe to skip" (see the 1.0.2 story).
         FuelSkipMarginLaps = FMath::Clamp(FuelSkipMarginLaps, FuelCriticalMarginLaps + 0.1f, 10.0f);
+        FuelLegMarginFactor = FMath::Clamp(FuelLegMarginFactor, 1.0f, 5.0f);
+        FuelReachFraction = FMath::Clamp(FuelReachFraction, 0.3f, 1.0f);
     }
     bool operator==(const FDTTSettings& Other) const
     {
         return bExactQuantities == Other.bExactQuantities &&
             SolidRequestStacks == Other.SolidRequestStacks && FluidRequestStacks == Other.FluidRequestStacks &&
             RequestBufferStacks == Other.RequestBufferStacks && bFluidFullLoad == Other.bFluidFullLoad &&
-            bDrainLeftovers == Other.bDrainLeftovers &&
+            bDrainLeftovers == Other.bDrainLeftovers && bStayUntilEmpty == Other.bStayUntilEmpty &&
             LeftoverHoldSeconds == Other.LeftoverHoldSeconds && TopUpIntervalSeconds == Other.TopUpIntervalSeconds &&
             bUnloadAtDepot == Other.bUnloadAtDepot && bSkipProducerWhenCargoCovers == Other.bSkipProducerWhenCargoCovers &&
             PoolDispatchIntervalSeconds == Other.PoolDispatchIntervalSeconds && MaxRequestersPerLap == Other.MaxRequestersPerLap &&
             RequesterClaimTimeoutSeconds == Other.RequesterClaimTimeoutSeconds && OverdueRequestMinutes == Other.OverdueRequestMinutes &&
             IdleDispatchRecheckSeconds == Other.IdleDispatchRecheckSeconds &&
-            FuelCriticalMarginLaps == Other.FuelCriticalMarginLaps && FuelSkipMarginLaps == Other.FuelSkipMarginLaps;
+            FuelCriticalMarginLaps == Other.FuelCriticalMarginLaps && FuelSkipMarginLaps == Other.FuelSkipMarginLaps &&
+            FuelLegMarginFactor == Other.FuelLegMarginFactor && FuelReachFraction == Other.FuelReachFraction;
     }
     bool operator!=(const FDTTSettings& Other) const { return !(*this == Other); }
     FString Describe() const
     {
         return FString::Printf(TEXT("ExactQuantities=%s SolidRequestStacks=%d FluidRequestStacks=%d RequestBufferStacks=%d FluidFullLoad=%s DrainLeftovers=%s "
-            "LeftoverHoldSeconds=%.0f TopUpIntervalSeconds=%.0f UnloadAtDepot=%s SkipProducerWhenCargoCovers=%s "
+            "LeftoverHoldSeconds=%.0f StayUntilEmpty=%s TopUpIntervalSeconds=%.0f UnloadAtDepot=%s SkipProducerWhenCargoCovers=%s "
             "PoolDispatchIntervalSeconds=%.0f MaxRequestersPerLap=%d RequesterClaimTimeoutSeconds=%.0f OverdueRequestMinutes=%d "
-            "IdleDispatchRecheckSeconds=%.0f FuelCriticalMarginLaps=%.2f FuelSkipMarginLaps=%.2f"),
+            "IdleDispatchRecheckSeconds=%.0f FuelCriticalMarginLaps=%.2f FuelSkipMarginLaps=%.2f FuelLegMarginFactor=%.2f FuelReachFraction=%.2f"),
             bExactQuantities ? TEXT("true") : TEXT("false"),
             SolidRequestStacks, FluidRequestStacks, RequestBufferStacks, bFluidFullLoad ? TEXT("true") : TEXT("false"),
             bDrainLeftovers ? TEXT("true") : TEXT("false"),
-            LeftoverHoldSeconds, TopUpIntervalSeconds, bUnloadAtDepot ? TEXT("true") : TEXT("false"),
+            LeftoverHoldSeconds, bStayUntilEmpty ? TEXT("true") : TEXT("false"),
+            TopUpIntervalSeconds, bUnloadAtDepot ? TEXT("true") : TEXT("false"),
             bSkipProducerWhenCargoCovers ? TEXT("true") : TEXT("false"), PoolDispatchIntervalSeconds, MaxRequestersPerLap,
-            RequesterClaimTimeoutSeconds, OverdueRequestMinutes, IdleDispatchRecheckSeconds, FuelCriticalMarginLaps, FuelSkipMarginLaps);
+            RequesterClaimTimeoutSeconds, OverdueRequestMinutes, IdleDispatchRecheckSeconds, FuelCriticalMarginLaps, FuelSkipMarginLaps,
+            FuelLegMarginFactor, FuelReachFraction);
     }
     /** "/dtt set <field> <value>": true when the field exists and parsed. */
     bool SetByName(const FString& Field, const FString& Value)
@@ -452,6 +459,7 @@ struct FDTTSettings
         if (F == TEXT("fluidfullload")) return AsBool(bFluidFullLoad);
         if (F == TEXT("drainleftovers")) return AsBool(bDrainLeftovers);
         if (F == TEXT("leftoverholdseconds")) return AsFloat(LeftoverHoldSeconds);
+        if (F == TEXT("stayuntilempty")) return AsBool(bStayUntilEmpty);
         if (F == TEXT("topupintervalseconds")) return AsFloat(TopUpIntervalSeconds);
         if (F == TEXT("unloadatdepot")) return AsBool(bUnloadAtDepot);
         if (F == TEXT("skipproducerwhencargocovers")) return AsBool(bSkipProducerWhenCargoCovers);
@@ -462,6 +470,8 @@ struct FDTTSettings
         if (F == TEXT("idledispatchrecheckseconds")) return AsFloat(IdleDispatchRecheckSeconds);
         if (F == TEXT("fuelcriticalmarginlaps")) return AsFloat(FuelCriticalMarginLaps);
         if (F == TEXT("fuelskipmarginlaps")) return AsFloat(FuelSkipMarginLaps);
+        if (F == TEXT("fuellegmarginfactor")) return AsFloat(FuelLegMarginFactor);
+        if (F == TEXT("fuelreachfraction")) return AsFloat(FuelReachFraction);
         return false;
     }
 };

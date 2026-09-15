@@ -3053,7 +3053,8 @@ void UDynamicTimeTableSubsystem::HandleTruckDocked(AFGWheeledVehicle* Vehicle, A
     // A plan is set only for a truck this mod manages; the game's own transfer runs otherwise.
     FDTTTransferPlan Plan;
     bool bLeftoverHold = false;
-    if (IsValid(Station) && ComputeTransferPlan(Identifier, Station, Plan, &bLeftoverHold))
+    bool bUntilEmpty = false;
+    if (IsValid(Station) && ComputeTransferPlan(Identifier, Station, Plan, &bLeftoverHold, &bUntilEmpty))
     {
         FMyDTTHooks::SetTransferPlan(Station, Plan);
         if (bLeftoverHold)
@@ -3065,12 +3066,14 @@ void UDynamicTimeTableSubsystem::HandleTruckDocked(AFGWheeledVehicle* Vehicle, A
             Hold.Station = Station;
             Hold.ItemClass = Plan.ItemClass;
             Hold.bCycleDone = false;
+            Hold.bUntilEmpty = bUntilEmpty;
             Hold.StartedSeconds = 0.0;
             Hold.LastTopUpSeconds = 0.0;
             Hold.MovedByTopUps = 0;
-            FMyDTTHooks::SetHeld(Station, true, TEXT("leftover"));
-            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("LEFTOVER_HOLD Truck='%s' Station='%s' Item=%s MaxSeconds=%.0f"),
-                *DTSVehicleName(Identifier), *DTSDockName(Station->GetStationIdentifier()), *GetNameSafe(Plan.ItemClass), Settings.LeftoverHoldSeconds);
+            FMyDTTHooks::SetHeld(Station, true, bUntilEmpty ? TEXT("until empty") : TEXT("leftover"));
+            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("LEFTOVER_HOLD Truck='%s' Station='%s' Item=%s Until=%s MaxSeconds=%.0f"),
+                *DTSVehicleName(Identifier), *DTSDockName(Station->GetStationIdentifier()), *GetNameSafe(Plan.ItemClass),
+                bUntilEmpty ? TEXT("empty") : TEXT("clock"), bUntilEmpty ? 0.0f : Settings.LeftoverHoldSeconds);
         }
     }
 }
@@ -3389,10 +3392,12 @@ const FDTTDispatchStation* UDynamicTimeTableSubsystem::FindDispatchStationByGuid
 }
 
 bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
-    AFGWheeledVehicleIdentifier* Vehicle, AFGBuildableDockingStation* Station, FDTTTransferPlan& OutPlan, bool* bOutLeftoverHold) const
+    AFGWheeledVehicleIdentifier* Vehicle, AFGBuildableDockingStation* Station, FDTTTransferPlan& OutPlan,
+    bool* bOutLeftoverHold, bool* bOutUntilEmpty) const
 {
     OutPlan = FDTTTransferPlan();
     if (bOutLeftoverHold) *bOutLeftoverHold = false;
+    if (bOutUntilEmpty) *bOutUntilEmpty = false;
     if (!IsValid(Vehicle) || !IsValid(Station)) return false;
     const AFGDockingStationIdentifier* StationIdentifier = Station->GetStationIdentifier();
     if (!IsValid(StationIdentifier)) return false;
@@ -3520,15 +3525,23 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
             // one fill per lap instead of being held (seen 13.09.2026 on the water truck).
             const bool bFullLoadLastStop = Settings.bFluidFullLoad && !PoolTrucks.Contains(Vehicle) &&
                 IsFluidTruck(Vehicle) && IsLastRequesterInRoute(Vehicle, StationGuid, ResourceId);
-            const bool bDrain = Settings.bDrainLeftovers && !Station->GetIsInLoadMode() &&
-                (bFullLoadLastStop || IsLastPlannedRequester(Vehicle, StationGuid));
+            // "Stay until empty" (off by default): the truck parks at this requester, drains into
+            // it and keeps topping it up until there is nothing left on board - then it drives on
+            // to the rest of its lap, or straight into the next one when the lap was cut short by
+            // the empty cargo. It applies to every requester of the lap, not only the last, which
+            // is what makes it a different behaviour and not a longer LeftoverHoldSeconds: the
+            // consumer is served to the end before the truck moves at all.
+            const bool bStayHere = Settings.bStayUntilEmpty && !Station->GetIsInLoadMode();
+            const bool bDrain = bStayHere || (Settings.bDrainLeftovers && !Station->GetIsInLoadMode() &&
+                (bFullLoadLastStop || IsLastPlannedRequester(Vehicle, StationGuid)));
             FDTTRequestLevels Levels;
             if (bDrain)
             {
                 OutPlan.Mode = FDTTTransferPlan::EMode::Drain;
                 OutPlan.ItemClass = ItemClass;
-                Reason = TEXT("last requester");
-                if (bOutLeftoverHold) *bOutLeftoverHold = Settings.LeftoverHoldSeconds > 0.0f;
+                Reason = bStayHere ? TEXT("stay until empty") : TEXT("last requester");
+                if (bOutLeftoverHold) *bOutLeftoverHold = bStayHere || Settings.LeftoverHoldSeconds > 0.0f;
+                if (bOutUntilEmpty) *bOutUntilEmpty = bStayHere;
             }
             else if (!bExact)
             {
@@ -3669,7 +3682,10 @@ void UDynamicTimeTableSubsystem::TickLeftoverHolds(double Now)
             Releases.Emplace(Vehicle, TEXT("empty"));
             continue;
         }
-        if (Now - Hold.StartedSeconds >= Settings.LeftoverHoldSeconds)
+        // A stay-until-empty hold has no clock at all: the loop above released it the moment the
+        // cargo ran out, and until then the consumer is served. A requester that stops consuming
+        // therefore keeps its truck - that is the mode, and why it is off by default.
+        if (!Hold.bUntilEmpty && Now - Hold.StartedSeconds >= Settings.LeftoverHoldSeconds)
         {
             Releases.Emplace(Vehicle, TEXT("timeout"));
             continue;
