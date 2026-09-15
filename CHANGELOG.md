@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.4.3
+
+- Pool trucks no longer collect a growing string of depot stops at the front of their route. The
+  autopilot keeps its target index across a route write, and every chained lap pushed it two
+  stops further; the route was padded with copies of the depot to match. Now the lap boundary
+  writes a two-stop depot loop first, the autopilot resets the index on its next tick, and the
+  next lap starts with the producer at the front. A parked truck's route is reset to the depot
+  loop as well, so the vanilla panel shows the stops it will actually drive.
+- *Drain leftovers at the last stop* works with *Exact quantities* off too. Until now the drain
+  and the leftover hold were switched off together with the quantities; with them off the drain
+  plan moves what the game would, and the hold (*Leftover hold, seconds*) is the difference.
+- Window protocol unchanged (10); save data unchanged.
+
+## 2.4.2
+
+- No more extra fuel stop after a refuel: when a truck reaches its fuel stop at the end of a lap,
+  the next lap is planned as if the tank were already full. Previously the same pump was visited
+  once more a lap later with a nearly full tank.
+- Window protocol unchanged (10); save data unchanged.
+
+## 2.4.1
+
+- A fuel stop that belongs to a `[group]` now stands for the whole group: a truck heading for it
+  refuels at whichever member of the group is least busy. This applies to a truck's own `(F)` in
+  its route, to a borrowed one, and to pool laps.
+- Trucks no longer run dry between stops. Before every leg the truck checks that its tank covers
+  the leg twice over plus the detour to the nearest fuel stop after it; if not, it refuels first.
+  This also covers a lap that was cut short at an empty requester and a pool truck leaving its
+  depot.
+- One fuel stop per lap: when a refuel is inserted, a fuel stop planned further along the same lap
+  is dropped.
+- Pool trucks' fuel stops now count towards the group load shown in the window.
+- Window protocol unchanged (10); save data unchanged.
+
 ## 2.4.0
 
 - New setting *Exact quantities* (`ExactQuantities`), **off by default**. Off, every docking moves
