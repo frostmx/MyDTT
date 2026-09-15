@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.5.0
+
+- Pool laps are no longer padded with copies of the depot at all. The autopilot keeps its target
+  index across a route write, so the lap is now turned to that index instead: the ring
+  producer - requesters - depot is rotated until its first stop lands on the index the truck
+  holds. The stop count is the lap's own, the route in the vanilla panel is the route driven, and
+  the chain between laps no longer has a length limit.
+- `/dtt why <truck>` explains one truck: its phase, route and target, what it carries, the lap it
+  is running or the hold it is under, and - for a truck waiting at its depot - every open request
+  with the reason this truck is not taking it (wrong form, foreign cargo, no producer with stock).
+  Plus what its tank covers, in laps of the route it is on.
+- New setting *Stay at the requester until empty* (off by default): the truck stays docked at each
+  stop of its lap, topping it up as it consumes, until its cargo is gone - and only then drives
+  on. Meant for a consumer that should be served to the end rather than visited.
+- With *Exact quantities* off, a lap is planned by what the stops can hold, not by what they are
+  short of. The game's own transfer empties the truck into the first stop with room for it, so
+  planning by the request target sent trucks to four stops and unloaded everything at the first.
+- The two fuel margins that were constants are settings now: *Leg guard margin* (how many times
+  the estimated cost of a leg must be in the tank before it is driven, 2) and *Detour reach* (the
+  share of the tank a detour to a borrowed fuel stop may cost, 0.8).
+- Window protocol 11: the settings carry three new fields. Server and clients must match.
+
 ## 2.4.3
 
 - Pool trucks no longer collect a growing string of depot stops at the front of their route. The

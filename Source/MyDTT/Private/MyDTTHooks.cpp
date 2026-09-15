@@ -1,6 +1,7 @@
 #include "MyDTTHooks.h"
 
 #include "Buildables/FGBuildableDockingStation.h"
+#include "WheeledVehicles/FGDockingStationIdentifier.h"
 #include "FGInventoryComponent.h"
 #include "Resources/FGItemDescriptor.h"
 #include "HAL/CriticalSection.h"

@@ -29,7 +29,6 @@ DEFINE_LOG_CATEGORY_STATIC(LogDynamicTimeTableSubsystem, Log, All);
 // index is normally reset between laps (IndexResets); this is the ceiling for the fallback that
 // shapes the route to the index when the reset did not happen - without one the route would grow
 // until the prefix is truncated and the producer misses the target index.
-static constexpr int32 DTTMaxChainedTargetIndex = 6;
 // How long the lap boundary waits for the autopilot to zero the index before that fallback.
 static constexpr double DTTIndexResetTimeoutSeconds = 3.0;
 
@@ -2892,6 +2891,8 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
             }
             else if (Waited >= DTTIndexResetTimeoutSeconds)
             {
+                // Given up on: the next lap is then rotated onto whatever index the truck holds,
+                // which costs nothing but a route that reads from the middle in the vanilla panel.
                 UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("POOL_INDEX_RESET_TIMEOUT Truck='%s' Before=%d Now=%d Waited=%.2f"),
                     *DTSVehicleName(Vehicle), Reset->IndexBefore, TargetIndex, Waited);
                 IndexResets.Remove(Vehicle);
@@ -4198,27 +4199,9 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     // from there; the depot it was driving back to only shapes the route (see below).
     const bool bChained = State.Phase == EDTTTruckPhase::Assigned && State.ChainFromGuid.IsValid();
     if (State.Phase != EDTTTruckPhase::Parked && !bChained) return false;
-    // The chained lap is shaped to the target index (see below), and that index climbs by two
-    // every lap - the producer and the requester each advance it, and a route write does not put
-    // it back. Past the cap the prefix would be truncated, the producer would no longer land on
-    // the target, and the truck would drive to whatever stop its index happens to point at: at
-    // index 10 of an eleven-stop route that is the return depot, so the lap is dropped in
-    // silence. End the lap at the depot instead - parking is the only thing that resets the
-    // index, and the dispatch it triggers hands the truck a fresh short route.
     // The boundary wrote [Depot, Depot] to reset the index and left the truck to the poll, which
     // drops the entry once the index is 0 (or gives up): until then this pass is too early.
     if (IndexResets.Contains(Vehicle)) return false;
-    if (bChained && Vehicle->GetCurrentTargetWaypointIndex() > DTTMaxChainedTargetIndex)
-    {
-        // Every dispatch pass retries this while the truck drives home (measured: a line every
-        // five seconds), so only the lap boundary that made the decision is logged; the retries
-        // change nothing, and the truck's phase already says where it is going.
-        UE_CLOG(FCString::Strcmp(Trigger, TEXT("lap end")) == 0, LogDynamicTimeTableSubsystem, Display,
-            TEXT("POOL_CHAIN_STOP Truck='%s' Resource='%s' TargetIndex=%d Max=%d Reason=route-prefix-exhausted Trigger=%s"),
-            *DTSVehicleName(Vehicle), *ResourceId, Vehicle->GetCurrentTargetWaypointIndex(),
-            DTTMaxChainedTargetIndex, Trigger);
-        return false;
-    }
     const FGuid StartDepot = State.DepotGuid;
     const FGuid From = bChained ? State.ChainFromGuid : StartDepot;
     // Claims first, like a legacy lap: two trucks must not plan the same requester in one pass.
@@ -4253,32 +4236,16 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     }
 
     // Producer, the requesters, and the nearest free depot from the last of them: the truck ends
-    // the lap where the next one is likely to start, not necessarily where it slept.
-    //
-    // The autopilot keeps its target index across a route write, and at the depot that index is
-    // whatever the [Depot, Depot] loop left it at - 1 as often as 0 (measured: the first pool lap
-    // drove straight to the requester with an empty truck). SetCurrentTargetWaypoint is a status
-    // setter, not a command (1.0.7), so the route is shaped to the index instead: as many copies
-    // of the depot in front as the index says, and the producer lands exactly on the target.
-    // A chained lap starts with the index pointing at the old lap's return depot, which can sit
-    // anywhere up to DTTMaxChainedTargetIndex (a higher index does not chain at all); the depot
-    // copies in front are never driven to unless the loop wraps, and then the truck only parks.
-    // A chained lap normally arrives here with the index already at 0: the boundary wrote
-    // [Depot, Depot] (BeginIndexReset) and the autopilot zeroed the index that pointed past its
-    // end (measured 15.09.2026: by the autopilot's tick, never by SetVehicleRoute itself). Then no
-    // copy goes in front at all. The padding remains for the parked case (index 0 or 1 from the
-    // depot loop) and as the fallback when the reset did not come in time.
-    const int32 TargetIndex = FMath::Clamp(Vehicle->GetCurrentTargetWaypointIndex(), 0, bChained ? DTTMaxChainedTargetIndex : 3);
+    // the lap where the next one is likely to start, not necessarily where it slept. The lap is
+    // built as a ring in that order and turned to the truck's target index further down.
     TArray<FGuid> NewRoute;
-    for (int32 Copy = 0; Copy < TargetIndex && StartDepot.IsValid(); ++Copy) NewRoute.Add(StartDepot);
-    // Without a producer the first requester lands on the target instead.
-    const int32 FirstStopIndex = NewRoute.Num();
-    const int32 ProducerIndex = Producer.IsValid() ? FirstStopIndex : INDEX_NONE;
     if (Producer.IsValid()) NewRoute.Add(Producer);
     NewRoute.Append(Requesters);
     FGuid ReturnDepot = FindNearestDepot(Vehicle, Requesters.Last());
     if (!ReturnDepot.IsValid()) ReturnDepot = StartDepot;
     NewRoute.Add(ReturnDepot);
+    // The lap's first stop, which the fuel detour is measured from: the ring starts at it.
+    const int32 FirstStopIndex = 0;
 
     // Fuel: the estimate treats the lap as a closed loop, so the Depot -> Producer leg counts
     // once more than it is driven. Conservative, and the pump goes before the depot.
@@ -4300,6 +4267,28 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
                 *DTSVehicleName(Vehicle), *ResourceId, Trigger);
         }
     }
+
+    // The autopilot keeps its target index across a route write and only ever puts it back by
+    // dropping out of range (measured 15.09.2026: an index inside the route is moved by nothing -
+    // not a write, not the autopilot switch, not the position of the stop it named). So the lap is
+    // turned to the index instead of being padded to it: the ring is rotated until its first stop
+    // lands on the index the truck holds. Order and length are unchanged - what stood in front of
+    // the producer now stands behind the return depot, which is where the truck has just been. An
+    // index past the end of the new route needs no rotation at all: the autopilot zeroes it on its
+    // next tick, and index 0 is the producer. A chained lap normally arrives here at 0 anyway
+    // (BeginIndexReset), and a parked one at 0 or 1 from its [Depot, Depot] loop.
+    const int32 TargetIndex = Vehicle->GetCurrentTargetWaypointIndex();
+    const int32 Rotation = TargetIndex > 0 && TargetIndex < NewRoute.Num() ? TargetIndex : 0;
+    if (Rotation > 0)
+    {
+        const int32 Num = NewRoute.Num();
+        TArray<FGuid> Rotated;
+        Rotated.Reserve(Num);
+        for (int32 Index = 0; Index < Num; ++Index) Rotated.Add(NewRoute[(Index - Rotation + Num) % Num]);
+        NewRoute = MoveTemp(Rotated);
+        if (FuelIndex != INDEX_NONE) FuelIndex = (FuelIndex + Rotation) % Num;
+    }
+    const int32 ProducerIndex = Producer.IsValid() ? Rotation : INDEX_NONE;
 
     // The name and the transfer plan read these, so they go in before the truck moves; undone if
     // the route cannot be written.
@@ -4338,11 +4327,11 @@ bool UDynamicTimeTableSubsystem::AssignPoolTruck(
     int32 PlannedItems = 0;
     for (const auto& Pair : State.PlannedItems) PlannedItems += Pair.Value;
     UE_LOG(LogDynamicTimeTableSubsystem, Display,
-        TEXT("POOL_ASSIGNED Truck='%s' Resource='%s' Producer='%s' ProducerIndex=%d ProducerNote=%s OnBoard=%d Needed=%d Requesters=%d PlannedItems=%d Fuel=%s FuelIndex=%d From='%s' Depot='%s' Stops=%d Trigger=%s"),
+        TEXT("POOL_ASSIGNED Truck='%s' Resource='%s' Producer='%s' ProducerIndex=%d ProducerNote=%s OnBoard=%d Needed=%d Requesters=%d PlannedItems=%d Fuel=%s FuelIndex=%d From='%s' Depot='%s' Stops=%d Rotation=%d Trigger=%s"),
         *DTSVehicleName(Vehicle), *ResourceId, Producer.IsValid() ? *DockDisplayName(Producer) : TEXT("-"), ProducerIndex, ProducerNote,
         OnBoardStacks, NeededStacks, Requesters.Num(), PlannedItems,
         FuelGuid.IsValid() ? *DockDisplayName(FuelGuid) : TEXT("-"), FuelIndex,
-        *DockDisplayName(From), *DockDisplayName(ReturnDepot), NewRoute.Num(), Trigger);
+        *DockDisplayName(From), *DockDisplayName(ReturnDepot), NewRoute.Num(), Rotation, Trigger);
     // The first leg of the lap is driven from where the truck stands - the depot, or the requester
     // it chained from - and no target change announces it, so the leg guard runs here.
     {
