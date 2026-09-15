@@ -464,6 +464,8 @@ private:
         int32 StockStacks = 0;
         int32 TriggerStacks = 0;
         int32 TargetStacks = 0;
+        /** The dock's whole inventory in stacks: what a lap without exact quantities can leave here. */
+        int32 CapacityStacks = 0;
         double FillRatio = 0.0;
     };
     /**

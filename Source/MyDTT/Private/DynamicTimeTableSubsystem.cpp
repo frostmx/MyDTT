@@ -1970,6 +1970,7 @@ void UDynamicTimeTableSubsystem::CollectOpenRequesters(
             Candidate.StockStacks = StockStacks;
             Candidate.TriggerStacks = Levels.Trigger;
             Candidate.TargetStacks = Levels.Target;
+            Candidate.CapacityStacks = Levels.Capacity;
             Candidate.FillRatio = static_cast<double>(StockStacks) / static_cast<double>(Levels.Trigger);
             Out.Add(Candidate);
         }
@@ -2036,6 +2037,13 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
     // takes to bring it back up to its threshold. The first is always taken; a later one only
     // while the ones before it leave something on board. A truck that empties early anyway cuts
     // the rest of the lap (CutLapIfCargoEmpty), so overshooting here costs one detour at most.
+    //
+    // What "takes" means depends on the quantities mode. With exact quantities the stop is filled
+    // to its target and no further, so the target is the deficit. With them off (the default) the
+    // game's own transfer empties the truck into the first stop that has room for it, whatever the
+    // target says - so the deficit of such a stop is its whole free capacity, and planning by the
+    // target would send a truck to four stops and unload it all at the first (2.5).
+    const bool bByCapacity = !Settings.bExactQuantities;
     int32 CoveredDeficit = 0;
     FDTTDispatchTruckAnchors* Anchors = OutPlannedItems ? nullptr : DispatchTruckAnchors.Find(Vehicle);
     TMap<FGuid, int32>* Planned = OutPlannedItems ? OutPlannedItems : (Anchors ? &Anchors->PlannedItems : nullptr);
@@ -2052,7 +2060,7 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
         RequesterClaims.Add(Selected->DockingPathNodeGuid, Vehicle);
         RequesterClaimedAtWorldSeconds.Add(Selected->DockingPathNodeGuid, ClaimedAt);
         Result.Add(Selected->DockingPathNodeGuid);
-        CoveredDeficit += FMath::Max(1, Candidate.TargetStacks - Candidate.StockStacks);
+        CoveredDeficit += FMath::Max(1, (bByCapacity ? Candidate.CapacityStacks : Candidate.TargetStacks) - Candidate.StockStacks);
         if (Planned) Planned->Add(Selected->DockingPathNodeGuid, FMath::Max(0, Candidate.TargetStacks - Candidate.StockStacks) * StackSize);
         UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
             TEXT("DISPATCH_CLAIMED Truck='%s' Resource='%s' Requester='%s' Guid=%s Priority=%d StockStacks=%d Trigger=%d Target=%d FillRatio=%.6f"),
@@ -2061,9 +2069,9 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
             Candidate.TriggerStacks, Candidate.TargetStacks, Candidate.FillRatio);
     }
     UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
-        TEXT("DISPATCH_LAP_PLANNED Truck='%s' Resource='%s' Open=%d Requesters=%d Deficit=%d Cargo=%d OnBoard=%d Capacity=%d"),
+        TEXT("DISPATCH_LAP_PLANNED Truck='%s' Resource='%s' Open=%d Requesters=%d Deficit=%d DeficitBy=%s Cargo=%d OnBoard=%d Capacity=%d"),
         *DTSVehicleName(Vehicle), *ResourceId, Candidates.Num(), Result.Num(), CoveredDeficit,
-        AvailableStacks, OnBoardStacks, CapacityStacks);
+        bByCapacity ? TEXT("capacity") : TEXT("target"), AvailableStacks, OnBoardStacks, CapacityStacks);
     if (OutNeededStacks) *OutNeededStacks = CoveredDeficit;
     return Result;
 }
