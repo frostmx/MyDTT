@@ -385,6 +385,10 @@ struct FDTTSettings
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float FuelCriticalMarginLaps = 2.0f;
     /** A truck leaves its own (F) out of a lap above this many estimated lap costs of fuel. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float FuelSkipMarginLaps = 2.5f;
+    /** The leg guard demands this many times the estimated cost of the next leg in the tank before letting the truck drive it; below that a fuel stop goes in first. The engine's per-segment estimate is unverified against real consumption, so 1.0 is not a safe value. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float FuelLegMarginFactor = 2.0f;
+    /** A borrowed (F) is only placed where the tank can reach it using at most this fraction of its current energy. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float FuelReachFraction = 0.8f;
 
     void Sanitize()
     {

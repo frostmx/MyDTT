@@ -2163,7 +2163,7 @@ int32 UDynamicTimeTableSubsystem::ChooseFuelInsertIndex(
     UFGInventoryComponent* FuelInventory = WheeledVehicle->GetFuelInventory();
     const float EnergyPerItem = FuelClass ? UFGItemDescriptor::GetEnergyValue(FuelClass) : 0.0f;
     if (!IsValid(FuelInventory) || !FuelClass || !FMath::IsFinite(EnergyPerItem) || EnergyPerItem <= 0.0f) return Fallback;
-    const float ReachableEnergy = FuelInventory->GetNumItems(FuelClass) * EnergyPerItem * FuelReachFraction;
+    const float ReachableEnergy = FuelInventory->GetNumItems(FuelClass) * EnergyPerItem * Settings.FuelReachFraction;
 
     auto Cost = [&](const FGuid& From, const FGuid& To) -> float
     {
@@ -2305,7 +2305,7 @@ bool UDynamicTimeTableSubsystem::TankCoversLeg(
     if (LegCost < 0.0f) return true;
     OutNeed = LegCost + FMath::Max(0.0f, ExtraCost);
     OutEnergy = FuelInventory->GetNumItems(FuelClass) * EnergyPerItem;
-    return OutEnergy >= FuelLegMarginFactor * OutNeed;
+    return OutEnergy >= Settings.FuelLegMarginFactor * OutNeed;
 }
 
 bool UDynamicTimeTableSubsystem::EnsureFuelForNextLeg(
@@ -2356,7 +2356,7 @@ bool UDynamicTimeTableSubsystem::EnsureFuelForNextLeg(
             const FGuid PumpAfter = FindNearestFuelStop(WheeledVehicle, LastLegEnd);
             if (PumpAfter.IsValid())
             {
-                PumpAfterCost = FMath::Max(0.0f, EstimatePathFuelConsumptionMW(VehicleSubsystem, Preset, WheeledVehicle->GetClass(), LastLegEnd, PumpAfter)) / FuelReachFraction;
+                PumpAfterCost = FMath::Max(0.0f, EstimatePathFuelConsumptionMW(VehicleSubsystem, Preset, WheeledVehicle->GetClass(), LastLegEnd, PumpAfter)) / Settings.FuelReachFraction;
             }
         }
     }
@@ -2364,7 +2364,7 @@ bool UDynamicTimeTableSubsystem::EnsureFuelForNextLeg(
     float Need = 0.0f, Energy = 0.0f;
     // TankCoversLeg supplies the cost and the energy; the pump detour is added once, undoubled.
     TankCoversLeg(Vehicle, From, To, ClosingCost, Need, Energy);
-    const bool bCovered = Need < 0.0f || Energy >= FuelLegMarginFactor * Need + PumpAfterCost;
+    const bool bCovered = Need < 0.0f || Energy >= Settings.FuelLegMarginFactor * Need + PumpAfterCost;
     UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
         TEXT("FUEL_LEG_CHECK Truck='%s' From='%s' To='%s' Index=%d LegCost=%.3f PumpAfter=%.3f Energy=%.3f Verdict=%s Trigger=%s"),
         *DTSVehicleName(Vehicle), *DockDisplayName(From), *DockDisplayName(To), Index, Need, PumpAfterCost, Energy,
@@ -2383,7 +2383,7 @@ bool UDynamicTimeTableSubsystem::EnsureFuelForNextLeg(
     // certainly cannot - but worth a line in the log.
     float ToFuelNeed = 0.0f, ToFuelEnergy = 0.0f;
     const bool bReachable = TankCoversLeg(Vehicle, From, Fuel, 0.0f, ToFuelNeed, ToFuelEnergy) ||
-        (ToFuelNeed >= 0.0f && ToFuelNeed <= Energy * FuelReachFraction);
+        (ToFuelNeed >= 0.0f && ToFuelNeed <= Energy * Settings.FuelReachFraction);
     if (!bReachable)
     {
         UE_LOG(LogDynamicTimeTableSubsystem, Warning,

@@ -356,13 +356,13 @@ private:
 
     // Resource dispatch. The lap limit (Settings.MaxRequestersPerLap), the fuel margins, the claim
     // timeout and the idle recheck interval live in FDTTSettings since 2.1; their stories stay here.
-    // ChooseFuelInsertIndex accepts a position only if the tank can reach the (F) there using
-    // at most this fraction of its current energy - the per-segment estimate is unverified.
-    static constexpr float FuelReachFraction = 0.8f;
-    // The leg guard (EnsureFuelForNextLeg) demands this many times the estimated cost of the next
-    // leg in the tank before letting the truck drive it; below that a fuel stop goes in first.
-    // A constant, not a setting: a setting would change FDTTSettings and with it the protocol.
-    static constexpr float FuelLegMarginFactor = 2.0f;
+    // Settings.FuelReachFraction: ChooseFuelInsertIndex accepts a position only if the tank can
+    // reach the (F) there using at most this fraction of its current energy - the per-segment
+    // estimate is unverified, so a fraction of 1 plans a detour the truck may not survive.
+    // Settings.FuelLegMarginFactor: the leg guard (EnsureFuelForNextLeg) demands this many times
+    // the estimated cost of the next leg in the tank before letting the truck drive it; below that
+    // a fuel stop goes in first. Both were constants until 2.5 for fear of the protocol; they are
+    // the two numbers a world with long roads actually wants to move.
     // IsFuelCriticallyLow triggers this many estimated lap-costs early, not at exactly 1x: the
     // engine's per-segment fuel estimate is unverified against actual consumption, and a borrowed
     // stop lengthens the lap it is added to beyond what was checked - a bare 1x margin let a truck
