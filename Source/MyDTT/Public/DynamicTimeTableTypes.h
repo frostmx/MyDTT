@@ -361,7 +361,7 @@ struct FDTTSettings
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 RequestBufferStacks = 8;
     /** A fluid lap serves one requester in either mode; with exact quantities the producer also fills the tank completely and the leftovers drain at that requester. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bFluidFullLoad = true;
-    /** Exact quantities only. The last requester of a lap takes everything it can in its docking cycle, target or not. Off: the truck keeps its leftovers. */
+    /** The last requester of a lap takes everything it can in its docking cycle, target or not, and with LeftoverHoldSeconds > 0 the truck stays and tops it up. Works in either quantities mode; with exact quantities off the hold is the whole difference. Off: the truck keeps its leftovers. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bDrainLeftovers = true;
     /** Extra seconds the drained truck stays docked at that last requester, topping it up as it consumes. 0 (default): it leaves right after the unload. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float LeftoverHoldSeconds = 0.0f;

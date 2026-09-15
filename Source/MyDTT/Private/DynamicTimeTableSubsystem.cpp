@@ -3401,15 +3401,14 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
         return true;
     }
 
-    // Exact quantities off (the default): every other docking runs the game's own transfer - the
-    // producer fills the truck, a requester takes everything that fits - and no plan is set at
-    // all, so no drain and no hold either. The depot above keeps taking leftovers regardless.
-    if (!Settings.bExactQuantities)
-    {
-        UE_LOG(LogDynamicTimeTableSubsystem, Log, TEXT("XFER_PLAN Truck='%s' Station='%s' Mode=PassThrough Reason=exact quantities off"),
-            *DTSVehicleName(Vehicle), *DTSDockName(StationIdentifier));
-        return false;
-    }
+    // Exact quantities off (the default): the producer and the requesters in the middle of a lap
+    // run the game's own transfer - the producer fills the truck, a requester takes everything
+    // that fits - and get no plan. The drain at the last requester is not part of exact
+    // quantities, though: without a plan the station still takes what fits, but nothing holds the
+    // truck there while it consumes (LeftoverHoldSeconds), and until 2.4.3 the hold went dark with
+    // the quantities. So the resolution below runs in both modes, and only the FillTo planning is
+    // gated on bExact.
+    const bool bExact = Settings.bExactQuantities;
 
     // A pool lap knows its resource and producer from its state: its route may start with the
     // depot it was released from (see AssignPoolTruck), so Route[0] says nothing.
@@ -3441,7 +3440,11 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
     const int64 StackSize = FMath::Max(1, UFGItemDescriptor::GetStackSize(ItemClass));
     const TCHAR* Reason = TEXT("other stop");
 
-    if (StationGuid == ProducerGuid && Station->GetIsInLoadMode())
+    if (StationGuid == ProducerGuid && Station->GetIsInLoadMode() && !bExact)
+    {
+        Reason = TEXT("producer, exact quantities off");
+    }
+    else if (StationGuid == ProducerGuid && Station->GetIsInLoadMode())
     {
         // The producer. Load only what the requesters of this lap can take: each one's deficit,
         // read now, on top of what is already on board. A lap without a requester (no demand, the
@@ -3493,35 +3496,43 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
         if (Stop->ResourceId.Equals(ResourceId, ESearchCase::IgnoreCase) &&
             GetEffectiveDispatchRole(*Stop) == EDTTDispatchRole::Requester && DoesDispatchStationMatchMode(*Stop))
         {
-            // A requester: fill it up to its target (limit plus buffer) and not beyond, so the
-            // truck carries the rest on to the next stop.
+            // The last planned stop of the lap takes everything it can in its docking cycle, target
+            // or not: what stays on board here rides to the depot otherwise. Off (DrainLeftovers),
+            // the truck keeps its leftovers for the next lap. The hold is a separate option on top
+            // (LeftoverHoldSeconds > 0, off by default since 2.4): HandleTruckDocked then keeps the
+            // truck docked and tops the station up as it consumes. Before 2.4 a hold of 0 switched
+            // the drain off with it. Neither needs exact quantities, nor the station's levels: with
+            // the quantities off the drain plan moves what the game would, and the hold is the
+            // whole difference.
+            // A fluid truck under "fluid full load" leaves the producer with a full tank on every
+            // lap, planned or idle (the producer counts the requesters of the route, not of the
+            // plan), so its last requester in route order drains it even when the lap planned
+            // nothing - otherwise the leftover rides the loop and the consumer is topped up by
+            // one fill per lap instead of being held (seen 13.09.2026 on the water truck).
+            const bool bFullLoadLastStop = Settings.bFluidFullLoad && !PoolTrucks.Contains(Vehicle) &&
+                IsFluidTruck(Vehicle) && IsLastRequesterInRoute(Vehicle, StationGuid, ResourceId);
+            const bool bDrain = Settings.bDrainLeftovers && !Station->GetIsInLoadMode() &&
+                (bFullLoadLastStop || IsLastPlannedRequester(Vehicle, StationGuid));
             FDTTRequestLevels Levels;
-            if (GetRequestLevels(*Stop, ItemClass, Levels))
+            if (bDrain)
             {
+                OutPlan.Mode = FDTTTransferPlan::EMode::Drain;
+                OutPlan.ItemClass = ItemClass;
+                Reason = TEXT("last requester");
+                if (bOutLeftoverHold) *bOutLeftoverHold = Settings.LeftoverHoldSeconds > 0.0f;
+            }
+            else if (!bExact)
+            {
+                Reason = TEXT("requester, exact quantities off");
+            }
+            else if (GetRequestLevels(*Stop, ItemClass, Levels))
+            {
+                // A requester in the middle of the lap: fill it up to its target (limit plus buffer)
+                // and not beyond, so the truck carries the rest on to the next stop.
                 OutPlan.Mode = FDTTTransferPlan::EMode::FillTo;
                 OutPlan.ItemClass = ItemClass;
                 OutPlan.TargetItems = int32(FMath::Min<int64>(int64(Levels.Target) * StackSize, TNumericLimits<int32>::Max()));
                 Reason = TEXT("requester");
-                // The last planned stop of the lap takes everything it can in its docking cycle,
-                // target or not: what stays on board here rides to the depot otherwise. Off
-                // (DrainLeftovers), the truck keeps its leftovers for the next lap. The hold is a
-                // separate option on top (LeftoverHoldSeconds > 0, off by default since 2.4):
-                // HandleTruckDocked then keeps the truck docked and tops the station up as it
-                // consumes. Before 2.4 a hold of 0 switched the drain off with it.
-                // A fluid truck under "fluid full load" leaves the producer with a full tank on every
-                // lap, planned or idle (the producer counts the requesters of the route, not of the
-                // plan), so its last requester in route order drains it even when the lap planned
-                // nothing - otherwise the leftover rides the loop and the consumer is topped up by
-                // one fill per lap instead of being held (seen 13.09.2026 on the water truck).
-                const bool bFullLoadLastStop = Settings.bFluidFullLoad && !PoolTrucks.Contains(Vehicle) &&
-                    IsFluidTruck(Vehicle) && IsLastRequesterInRoute(Vehicle, StationGuid, ResourceId);
-                if (Settings.bDrainLeftovers && !Station->GetIsInLoadMode() &&
-                    (bFullLoadLastStop || IsLastPlannedRequester(Vehicle, StationGuid)))
-                {
-                    OutPlan.Mode = FDTTTransferPlan::EMode::Drain;
-                    Reason = TEXT("last requester");
-                    if (bOutLeftoverHold) *bOutLeftoverHold = Settings.LeftoverHoldSeconds > 0.0f;
-                }
             }
             else
             {
@@ -3535,7 +3546,8 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
         OutPlan.Mode == FDTTTransferPlan::EMode::FillTo ? TEXT("FillTo") : OutPlan.Mode == FDTTTransferPlan::EMode::Drain ? TEXT("Drain")
             : OutPlan.Mode == FDTTTransferPlan::EMode::Block ? TEXT("Block") : TEXT("PassThrough"),
         *ItemClass->GetName(), OutPlan.TargetItems, Reason);
-    return true;
+    // With exact quantities off a pass-through is the game's own transfer: no plan to install.
+    return bExact || OutPlan.Mode != FDTTTransferPlan::EMode::PassThrough;
 }
 
 bool UDynamicTimeTableSubsystem::IsLastPlannedRequester(AFGWheeledVehicleIdentifier* Vehicle, const FGuid& StationGuid) const

@@ -386,7 +386,7 @@ void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
     SettingOverdueMinutes = Spin(TEXT("Overdue after, minutes"), TEXT("A request nobody has claimed for this long is shown in red in the Dispatch tab and logged once. 0 turns it off."), 0, 120, 1);
     Section(TEXT("Transfer"));
     SettingExactQuantities = Check(TEXT("Exact quantities"), TEXT("On: the loading station gives a lap only what its requesters lack, each requester takes only up to its target, the last one drains the rest. Off (default): a full load at the producer and everything that fits at each requester; a truck that empties early starts its next lap from where it is."));
-    SettingDrainLeftovers = Check(TEXT("Drain leftovers at the last stop"), TEXT("Exact quantities only. The last requester of a lap takes everything it can during the unload, target or not. Off: the truck keeps its leftovers for the next lap."));
+    SettingDrainLeftovers = Check(TEXT("Drain leftovers at the last stop"), TEXT("The last requester of a lap takes everything it can during the unload, target or not, and with a leftover hold the truck stays and tops it up. Works with exact quantities on or off. Off: the truck keeps its leftovers for the next lap."));
     SettingLeftoverHold = Spin(TEXT("Leftover hold, seconds"), TEXT("Extra time the drained truck stays at that last stop, topping the station up as it consumes. 0 (default): it leaves right after the unload."), 0, 600, 5);
     SettingTopUpInterval = Spin(TEXT("Top-up interval, seconds"), TEXT("How often a held truck tries to unload again (requester hold or depot)."), 1, 30, 1);
     SettingUnloadAtDepot = Check(TEXT("Unload at the depot"), TEXT("A parked truck empties into its depot when the depot is in UNLOAD mode."));
