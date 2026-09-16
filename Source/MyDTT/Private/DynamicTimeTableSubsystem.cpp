@@ -856,7 +856,8 @@ bool UDynamicTimeTableSubsystem::DescribeAutoName(const FString& StationQuery, T
         OutLines.Add(FString::Printf(TEXT("  ends as %s%s"), *FString::Join(Result.Products, TEXT(", ")),
             Result.bMoreProducts ? TEXT(" ...") : TEXT("")));
     }
-    if (Result.bMixed) OutLines.Add(TEXT("  mixed flow: the biggest item won"));
+    if (Result.bFromPort) OutLines.Add(TEXT("  nothing delivered here yet: taken from the port the belt lands on"));
+    else if (Result.bMixed) OutLines.Add(TEXT("  mixed flow: the biggest item won"));
     OutLines.Add(FString::Printf(TEXT("  name would be: %s"),
         *DTSComposeAutoName(Current, Result, false, PreferredItem && PreferredItem == Result.ItemClass)));
 

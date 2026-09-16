@@ -21,9 +21,10 @@
   the resource in the brackets yourself and the mark goes away.
 - Smart and programmable splitters are read, not guessed: a branch filtered to another item is not
   counted. What a station carries is taken from its own cargo, or,
-  when the dock is empty, from the resource already in its name: which ingredient arrives on a
-  belt cannot be read off the connection, because the game sorts an arriving item into whichever
-  slot accepts it. A container between the dock and the factory is a buffer, and the chain is
+  when the dock is empty, from the resource already in its name. A station nobody has delivered to
+  yet - a new one - is named from the port its belt lands on and marked as a guess: the game sorts
+  an arriving item into whichever slot accepts it, so the wiring is a hint and not a fact, and the
+  first delivery corrects the name. A container between the dock and the factory is a buffer, and the chain is
   followed through it. Rates follow the machine's current overclock.
 - `/dtt autoname` lists what would change without changing anything; `apply` writes it all,
   `strip` takes the captions back off and leaves the

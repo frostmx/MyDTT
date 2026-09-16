@@ -41,6 +41,13 @@ struct FDTTAutoNameResult
     /** The chain wanted more than one item and the biggest one won. Printed as '?'. */
     bool bMixed = false;
 
+    /** The item came from the port a belt lands on, not from cargo or a tag. Also printed as '?'. */
+    bool bFromPort = false;
+
+    /** What the ports said, whether or not it was used - kept so the guess can be judged in the log. */
+    TSubclassOf<UFGItemDescriptor> PortItem;
+    int32 PortVoteCount = 0;
+
     /** Final products of the chain, biggest flow first. Requester side only. */
     TArray<FString> Products;
     bool bMoreProducts = false;

@@ -210,11 +210,32 @@ namespace
     }
 
     /**
+     * The ingredient bound to the slot this input connection reaches. It does not say what travels
+     * on the belt - the game sorts an arriving item into whichever slot accepts it - but on a dock
+     * that has never been delivered to, nothing else says anything at all, and a builder who wired
+     * each ingredient to its own port is answered exactly right.
+     */
+    FDTSItem DTSPortIngredient(AFGBuildableManufacturer* Manufacturer, const UFGFactoryConnectionComponent* In)
+    {
+        if (!IsValid(Manufacturer) || !IsValid(In)) return nullptr;
+        const TSubclassOf<UFGRecipe> Recipe = Manufacturer->GetCurrentRecipe();
+        if (!Recipe) return nullptr;
+
+        const int32 Index = In->GetInventoryAccessIndex();
+        if (Index < 0) return nullptr;
+
+        const TArray<FItemAmount> Ingredients = UFGRecipe::GetIngredients(Manufacturer, Recipe);
+        if (!Ingredients.IsValidIndex(Index)) return nullptr;
+        return Ingredients[Index].ItemClass;
+    }
+
+    /**
      * Downstream from a connection, collecting the machines at the far end.
      * Filter null on the first pass (the item is still unknown), set on the second.
+     * OutPortVotes, when given, gathers what the ports say - see DTSPortIngredient.
      */
     void DTSWalkDemand(UFGFactoryConnectionComponent* Start, FDTSItem Filter, FDTSWalk& Walk,
-        TSet<AActor*>& OutMachines, bool bThroughBuffers = true)
+        TSet<AActor*>& OutMachines, bool bThroughBuffers = true, TSet<FDTSItem>* OutPortVotes = nullptr)
     {
         TSet<AActor*> Visited;
         TArray<UFGFactoryConnectionComponent*> Frontier;
@@ -234,6 +255,10 @@ namespace
             if (AFGBuildableManufacturer* Manufacturer = Cast<AFGBuildableManufacturer>(Node))
             {
                 OutMachines.Add(Manufacturer);
+                if (OutPortVotes)
+                {
+                    if (const FDTSItem Voted = DTSPortIngredient(Manufacturer, In)) OutPortVotes->Add(Voted);
+                }
                 continue;
             }
 
@@ -413,11 +438,13 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
     Walk.NodeBudget = FMath::Max(16, Limits.MaxNodes);
 
     TSet<AActor*> Machines;
+    TSet<FDTSItem> PortVotes;
     if (bRequester)
     {
         // The first pass runs unfiltered, because a smart splitter's filter can only be asked about
         // a known item; once the item is decided the walk is taken again with the filters on.
-        for (UFGFactoryConnectionComponent* DockOut : DockOuts) DTSWalkDemand(DockOut->GetConnection(), nullptr, Walk, Machines);
+        for (UFGFactoryConnectionComponent* DockOut : DockOuts)
+            DTSWalkDemand(DockOut->GetConnection(), nullptr, Walk, Machines, true, &PortVotes);
     }
     else
     {
@@ -437,6 +464,7 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
     float Rate = 0.0f;
     DTSPickDominant(Rates, Item, Rate);
     bool bMixed = Rates.Num() > 1;
+    FString Source = bMixed ? TEXT("dominant") : TEXT("only-one");
 
     // The cargo wins over the arithmetic whenever the chain has a use for it: a station feeding an
     // assembler with two ingredients carries exactly one of them, and only the station knows which.
@@ -445,6 +473,7 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
         Item = Cargo;
         Rate = Rates[Cargo];
         bMixed = false;
+        Source = TEXT("cargo");
     }
     else if (Preferred && Rates.Contains(Preferred))
     {
@@ -453,7 +482,27 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
         Item = Preferred;
         Rate = Rates[Preferred];
         bMixed = false;
+        Source = TEXT("tag");
     }
+    else if (PortVotes.Num() == 1)
+    {
+        // A station nobody has delivered to yet: no cargo, no tag. Every port the chain ends at
+        // agrees on one ingredient, so that is the answer - still marked as a guess, because the
+        // wiring is what makes it true and the game does not enforce it.
+        const FDTSItem Voted = *PortVotes.CreateConstIterator();
+        if (const float* Wanted = Rates.Find(Voted))
+        {
+            Item = Voted;
+            Rate = *Wanted;
+            Out.bFromPort = true;
+            Source = TEXT("port");
+        }
+    }
+
+    // What the ports would have said, kept for the log: this is how the guess is judged against the
+    // docks whose cargo leaves no doubt.
+    if (PortVotes.Num() == 1) Out.PortItem = *PortVotes.CreateConstIterator();
+    Out.PortVoteCount = PortVotes.Num();
     if (!Item) { Out.SkipReason = TEXT("no-machines"); return false; }
     if (DTSIsFluidItem(Item)) { Out.SkipReason = TEXT("fluid-not-supported"); return false; }
 
@@ -510,8 +559,20 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
     Out.bRequester = bRequester;
     Out.ItemClass = Item;
     Out.RatePerMinute = Rate;
-    // Without cargo to go by, several candidate items on one chain means the biggest one was taken.
-    Out.bMixed = bMixed;
+    // Without cargo to go by, several candidate items on one chain means the biggest one was taken,
+    // and a port's word is a guess as well: the game does not make the wiring mean anything.
+    Out.bMixed = bMixed || Out.bFromPort;
+
+    // How this station was decided, and what the ports would have said either way. A dock whose
+    // cargo leaves no doubt is the only place where the port's word can be checked against the
+    // truth, so it reports both. Measured over one built world on 16.09.2026: 19 agreed, 18
+    // disagreed - a coin flip, and the failures came in clean swapped pairs, two docks feeding one
+    // assembler through each other's port. That is why the port is the last word and not the first,
+    // and why it still prints '?'.
+    UE_LOG(LogDTTAutoName, Verbose, TEXT("AUTONAME_PORTCHECK Item=%s Source=%s Port=%s Votes=%d"),
+        *UFGItemDescriptor::GetItemName(Item).ToString(), *Source,
+        Out.PortItem ? *UFGItemDescriptor::GetItemName(Out.PortItem).ToString() : TEXT("-"),
+        Out.PortVoteCount);
 
     Out.ResourceName = UFGItemDescriptor::GetItemName(Item).ToString().TrimStartAndEnd();
     if (Out.ResourceName.IsEmpty()) { Out.SkipReason = TEXT("resource-has-no-name"); return false; }
