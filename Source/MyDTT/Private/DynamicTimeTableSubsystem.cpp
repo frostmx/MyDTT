@@ -122,6 +122,84 @@ namespace
     }
 
     /**
+     * The auto-name block this mod writes itself: the dispatch tag plus a tail, as in
+     * "Factory-2 (Iron Ore) -240/m -> Ingots". The tail holds no words in any language - a sign, a
+     * rate, "/m", the marks '*' (the chain is fed by more than this station) and '?' (mixed flow),
+     * then an optional arrow and the final products. A server switched to another language still
+     * recognises blocks it wrote before, which words would not survive.
+     *
+     * It is split off before every other parser runs: ParseStationTag hands the round tags that
+     * follow ']' to the group name and MakeTaggedName then copies them onto every member, so an
+     * auto tag left in place would spread across the whole group.
+     */
+    const FString& DTSAutoArrow()
+    {
+        static const FString Arrow = FString::Chr(0x2192);
+        return Arrow;
+    }
+
+    const FString& DTSAutoEllipsis()
+    {
+        static const FString Ellipsis = FString::Chr(0x2026);
+        return Ellipsis;
+    }
+
+    bool DTSIsAutoTail(const FString& Tail)
+    {
+        if (Tail.Len() < 4 || (Tail[0] != TEXT('+') && Tail[0] != TEXT('-'))) return false;
+
+        int32 At = 1;
+        while (At < Tail.Len() && FChar::IsDigit(Tail[At])) ++At;
+        if (At == 1) return false;
+        if (At < Tail.Len() && Tail[At] == TEXT('.'))
+        {
+            const int32 Dot = At++;
+            while (At < Tail.Len() && FChar::IsDigit(Tail[At])) ++At;
+            if (At == Dot + 1) return false;
+        }
+        if (!Tail.Mid(At).StartsWith(TEXT("/m"), ESearchCase::CaseSensitive)) return false;
+        At += 2;
+        while (At < Tail.Len() && (Tail[At] == TEXT('*') || Tail[At] == TEXT('?'))) ++At;
+
+        FString Rest = Tail.Mid(At).TrimStartAndEnd();
+        if (Rest.IsEmpty()) return true;
+        if (!Rest.StartsWith(DTSAutoArrow())) return false;
+        Rest = Rest.Mid(DTSAutoArrow().Len()).TrimStartAndEnd();
+        return !Rest.IsEmpty() && !Rest.Contains(TEXT("(")) && !Rest.Contains(TEXT(")"));
+    }
+
+    /** "Dock [g] (F) (Iron) -240/m" -> Head "Dock [g] (F)", Tag "(Iron)", Tail "-240/m". */
+    bool DTSSplitAutoBlock(const FString& FullName, FString& OutHead, FString& OutTag, FString& OutTail)
+    {
+        OutHead = FullName.TrimStartAndEnd();
+        OutTag.Reset();
+        OutTail.Reset();
+
+        int32 Close = INDEX_NONE;
+        if (!OutHead.FindLastChar(TEXT(')'), Close)) return false;
+        const FString Tail = OutHead.Mid(Close + 1).TrimStartAndEnd();
+        if (!DTSIsAutoTail(Tail)) return false;
+
+        int32 Open = INDEX_NONE;
+        if (!OutHead.Left(Close).FindLastChar(TEXT('('), Open)) return false;
+        if (OutHead.Mid(Open + 1, Close - Open - 1).TrimStartAndEnd().IsEmpty()) return false;
+
+        OutTag = OutHead.Mid(Open, Close - Open + 1);
+        OutTail = Tail;
+        OutHead = OutHead.Left(Open).TrimStartAndEnd();
+        return true;
+    }
+
+    FString DTSJoinAutoBlock(const FString& Head, const FString& Tag, const FString& Tail)
+    {
+        FString Result = Head.TrimStartAndEnd();
+        if (Tag.IsEmpty()) return Result;
+        Result = Result.IsEmpty() ? Tag : FString::Printf(TEXT("%s %s"), *Result, *Tag);
+        if (!Tail.IsEmpty()) Result += FString::Printf(TEXT(" %s"), *Tail);
+        return Result;
+    }
+
+    /**
      * A group has no stored identity any more - it is just a name on a station - so its id has to
      * be derived from that name. It has to stay the same across rebuilds, or the rotation cursor
      * and any open client window would lose their group every time a station is renamed.
@@ -140,8 +218,14 @@ namespace
     }
 }
 
-bool UDynamicTimeTableSubsystem::ParseStationTag(const FString& FullName, FString& OutBaseName, FString& OutGroupName, int32& OutTargetSlots)
+bool UDynamicTimeTableSubsystem::ParseStationTag(const FString& InFullName, FString& OutBaseName, FString& OutGroupName, int32& OutTargetSlots)
 {
+    // The auto-name block is not part of the group grammar and must not reach it: a round tag
+    // sitting right after ']' would be read as a tag of the group and copied onto every member.
+    FString AutoTag, AutoTail, WithoutAutoBlock;
+    DTSSplitAutoBlock(InFullName, WithoutAutoBlock, AutoTag, AutoTail);
+    const FString& FullName = WithoutAutoBlock;
+
     OutBaseName = FullName.TrimStartAndEnd();
     OutGroupName.Reset();
     OutTargetSlots = 1;
@@ -220,9 +304,14 @@ FString UDynamicTimeTableSubsystem::SanitizeGroupName(const FString& GroupName)
 
 FString UDynamicTimeTableSubsystem::MakeTaggedName(const FString& BaseName, const FString& GroupName, int32 TargetSlots)
 {
+    // Whatever the auto-namer wrote rides along untouched: a slot edit from the window must not
+    // silently drop the block, or the next pass would put it straight back.
+    FString AutoHead, AutoTag, AutoTail;
+    DTSSplitAutoBlock(BaseName, AutoHead, AutoTag, AutoTail);
+
     const FString Group = SanitizeGroupName(GroupName);
     FString Base = StripStationTag(BaseName);
-    if (Group.IsEmpty()) return Base;
+    if (Group.IsEmpty()) return DTSJoinAutoBlock(Base, AutoTag, AutoTail);
 
     TArray<FString> InheritedTagArray;
     for (const FString& InheritedTag : DTSExtractParenthesizedTags(Group))
@@ -237,11 +326,19 @@ FString UDynamicTimeTableSubsystem::MakeTaggedName(const FString& BaseName, cons
     const FString InheritedTags = FString::Join(InheritedTagArray, TEXT(" "));
     FString Result = Base.IsEmpty() ? Tag : FString::Printf(TEXT("%s %s"), *Base, *Tag);
     if (!InheritedTags.IsEmpty()) Result += FString::Printf(TEXT(" %s"), *InheritedTags);
-    return Result;
+    return DTSJoinAutoBlock(Result, AutoTag, AutoTail);
 }
 
-bool UDynamicTimeTableSubsystem::ParseDispatchTag(const FString& FullName, FString& OutBaseName, FString& OutResourceId, EDTTDispatchRole& OutRole, int32& OutThreshold)
+bool UDynamicTimeTableSubsystem::ParseDispatchTag(const FString& InFullName, FString& OutBaseName, FString& OutResourceId, EDTTDispatchRole& OutRole, int32& OutThreshold)
 {
+    // The auto tag is a dispatch tag - it is the tail behind it that is new - so only the tail is
+    // taken off here. The scan below then reads the tag exactly as it reads a hand-written one.
+    FString AutoHead, AutoTag, AutoTail;
+    const bool bAuto = DTSSplitAutoBlock(InFullName, AutoHead, AutoTag, AutoTail);
+    const FString FullName = bAuto
+        ? (AutoHead.IsEmpty() ? AutoTag : FString::Printf(TEXT("%s %s"), *AutoHead, *AutoTag))
+        : AutoHead;
+
     OutBaseName = FullName.TrimStartAndEnd();
     OutResourceId.Reset();
     OutRole = EDTTDispatchRole::None;
@@ -333,8 +430,11 @@ FString UDynamicTimeTableSubsystem::MakeDispatchTaggedName(const FString& BaseNa
     return Base.IsEmpty() ? Tag : FString::Printf(TEXT("%s %s"), *Base, *Tag);
 }
 
-bool UDynamicTimeTableSubsystem::ParseFuelStopTag(const FString& FullName, FString& OutBaseName)
+bool UDynamicTimeTableSubsystem::ParseFuelStopTag(const FString& InFullName, FString& OutBaseName)
 {
+    FString FullName, AutoTag, AutoTail;
+    DTSSplitAutoBlock(InFullName, FullName, AutoTag, AutoTail);
+
     OutBaseName = FullName.TrimStartAndEnd();
     static const FString Tag = TEXT("(F)");
     const int32 TagIndex = FullName.Find(Tag, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
@@ -343,8 +443,11 @@ bool UDynamicTimeTableSubsystem::ParseFuelStopTag(const FString& FullName, FStri
     return true;
 }
 
-bool UDynamicTimeTableSubsystem::ParseDepotTag(const FString& FullName, FString& OutBaseName)
+bool UDynamicTimeTableSubsystem::ParseDepotTag(const FString& InFullName, FString& OutBaseName)
 {
+    FString FullName, AutoTag, AutoTail;
+    DTSSplitAutoBlock(InFullName, FullName, AutoTag, AutoTail);
+
     OutBaseName = FullName.TrimStartAndEnd();
     static const FString Tag = TEXT("(D)");
     const int32 TagIndex = FullName.Find(Tag, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
