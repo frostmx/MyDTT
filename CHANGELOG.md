@@ -1,5 +1,38 @@
 # Changelog
 
+## 3.0.0
+
+- Stations can name themselves. With *Name stations from their belts* on (Settings, off by
+  default), the mod walks the conveyors around every truck dock and writes what it found into the
+  station's name: `Factory-2 (Iron Ore) -240/m -> Ingots` - the resource, how much the chain
+  behind it wants per minute, and what that chain finally makes. It also sets the station's own
+  LOAD/UNLOAD switch, so a new dock needs no configuration at all.
+- Text you wrote yourself is kept: everything left of the tag is yours, and a name ending in a
+  full stop is yours entirely and is never touched. `(F)` and `(D)` stations are left alone.
+- Your own word for a resource survives: `(Bauxite)` written in your language stays as you typed
+  it for as long as the belt carries that item. The mod only writes the game's name where it
+  cannot tell what you meant.
+- The number in a tag you wrote, as in `(Motor-40)`, survives a rewrite; it is dropped only when
+  the chain starts carrying something else, because it was a level for a different cargo.
+- What the tail means: `-` the station feeds the factory (a truck brings this), `+` the station
+  collects from it (a truck takes this away), `*` more than one station carries the same cargo into
+  the same chain and both show its whole demand, `?` the mod could not tell what this station
+  carries - the dock was empty and the chain wants several things - so the biggest one won. Write
+  the resource in the brackets yourself and the mark goes away.
+- Smart and programmable splitters are read, not guessed: a branch filtered to another item is not
+  counted. What a station carries is taken from its own cargo, or,
+  when the dock is empty, from the resource already in its name: which ingredient arrives on a
+  belt cannot be read off the connection, because the game sorts an arriving item into whichever
+  slot accepts it. A container between the dock and the factory is a buffer, and the chain is
+  followed through it. Rates follow the machine's current overclock.
+- `/dtt autoname` lists what would change without changing anything; `apply` writes it all,
+  `strip` takes the captions back off and leaves the
+  resource tags in place, so the stations keep working, and `/dtt autoname <station>` explains one dock: the
+  chain it feeds, every machine on it and the name it would get.
+- Recalculated a couple of seconds after anything is built, dismantled, re-piped or renamed, and
+  once a minute for everything else (that is what notices an overclock change).
+- Window protocol 12: the settings carry five new fields. Server and clients must match.
+
 ## 2.5.0
 
 - Pool laps are no longer padded with copies of the depot at all. The autopilot keeps its target
