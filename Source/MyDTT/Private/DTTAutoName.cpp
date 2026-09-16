@@ -170,30 +170,38 @@ namespace
     }
 
     /** Can Item leave this splitter through this output? Plain splitters and mergers always say yes. */
-    bool DTSSplitterAllows(AActor* Attachment, const UFGFactoryConnectionComponent* Out, FDTSItem Item)
+    enum class EDTSRule : uint8 { Blocked, Overflow, Allowed };
+
+    /**
+     * What a smart splitter's output does with Item: passes it, blocks it, or takes it only as
+     * overflow - whatever the other outputs would not accept. The walks treat overflow as passable,
+     * a deliberate over-count of demand; the share model does not discount an overflow branch,
+     * because it takes nothing from a line whose other branches keep up.
+     */
+    EDTSRule DTSSplitterRule(AActor* Attachment, const UFGFactoryConnectionComponent* Out, FDTSItem Item)
     {
         const AFGBuildableSplitterSmart* Smart = Cast<AFGBuildableSplitterSmart>(Attachment);
-        if (!Smart || !Item) return true;
+        if (!Smart || !Item) return EDTSRule::Allowed;
 
         const TArray<FSplitterSortRule> Rules = Smart->GetSortRules();
-        if (Rules.Num() == 0) return true;
+        if (Rules.Num() == 0) return EDTSRule::Allowed;
 
         const int32 Index = DTSOutputIndexFromName(Out);
-        if (Index == INDEX_NONE) return true;
+        if (Index == INDEX_NONE) return EDTSRule::Allowed;
 
-        bool bHasOwnRule = false, bWild = false, bAnyUndefined = false, bNone = false;
+        bool bHasOwnRule = false, bWild = false, bOverflow = false, bAnyUndefined = false, bNone = false;
         bool bExactHere = false, bNamedElsewhere = false;
         for (const FSplitterSortRule& Rule : Rules)
         {
             UClass* RuleClass = Rule.ItemClass.Get();
             if (!RuleClass) continue;
             const bool bMine = Rule.OutputIndex == Index;
-            const bool bWildClass = RuleClass->IsChildOf(UFGWildCardDescriptor::StaticClass()) ||
-                                    RuleClass->IsChildOf(UFGOverflowDescriptor::StaticClass());
+            const bool bWildClass = RuleClass->IsChildOf(UFGWildCardDescriptor::StaticClass());
+            const bool bOverflowClass = RuleClass->IsChildOf(UFGOverflowDescriptor::StaticClass());
             const bool bUndefClass = RuleClass->IsChildOf(UFGAnyUndefinedDescriptor::StaticClass());
             const bool bNoneClass = RuleClass->IsChildOf(UFGNoneDescriptor::StaticClass());
 
-            if (!bWildClass && !bUndefClass && !bNoneClass && RuleClass == Item.Get())
+            if (!bWildClass && !bOverflowClass && !bUndefClass && !bNoneClass && RuleClass == Item.Get())
             {
                 if (bMine) bExactHere = true; else bNamedElsewhere = true;
             }
@@ -201,16 +209,22 @@ namespace
             {
                 bHasOwnRule = true;
                 bWild |= bWildClass;
+                bOverflow |= bOverflowClass;
                 bAnyUndefined |= bUndefClass;
                 bNone |= bNoneClass;
             }
         }
 
-        if (bExactHere) return true;
-        if (bWild) return true;                       // Any, and Overflow counted as passable
-        if (bAnyUndefined) return !bNamedElsewhere;
-        if (bNone) return false;
-        return !bHasOwnRule;                          // an output nobody filtered carries everything
+        if (bExactHere || bWild) return EDTSRule::Allowed;
+        if (bOverflow) return EDTSRule::Overflow;
+        if (bAnyUndefined) return bNamedElsewhere ? EDTSRule::Blocked : EDTSRule::Allowed;
+        if (bNone) return EDTSRule::Blocked;
+        return bHasOwnRule ? EDTSRule::Blocked : EDTSRule::Allowed;   // an output nobody filtered carries everything
+    }
+
+    bool DTSSplitterAllows(AActor* Attachment, const UFGFactoryConnectionComponent* Out, FDTSItem Item)
+    {
+        return DTSSplitterRule(Attachment, Out, Item) != EDTSRule::Blocked;
     }
 
     /** Megajoules in one inventory unit of this fuel: an item, or a litre of a fluid. */
@@ -511,6 +525,75 @@ namespace
             DTSAddSupply(Machine, Made);
             for (const TPair<FDTSItem, float>& Pair : Made) Out.FindOrAdd(Pair.Key) += Pair.Value;
         }, nullptr);
+    }
+
+    enum class EDTSFlow : uint8 { Supply, Demand };
+
+    /**
+     * Items of Item per minute crossing Entry - the port a walk arrives at - in the direction
+     * asked: Supply is what comes out of that port towards the caller, Demand is what the branch
+     * behind it takes. EfficiencyCheckerMod's model: at a splitter the other outputs' demand comes
+     * off the supply, at a merger the other inputs' supply comes off the demand, so a dock at the
+     * end of a shared line shows the share that reaches it and not the whole line. A container
+     * passes flow through and takes nothing; another truck station, a train platform and the sink
+     * end the branch and take nothing - what a truck carries away is not a rate of this factory.
+     * A pipe junction's ports have no direction, so they all count on the near side and nothing is
+     * discounted: a fluid network is reported whole.
+     */
+    float DTSFlow(UFGConnectionComponent* Entry, FDTSItem Item, EDTSFlow Mode, FDTSWalk& Walk, TSet<AActor*>& Visited, int32 Depth)
+    {
+        if (!IsValid(Entry) || Depth > 64 || Walk.bOverflow) return 0.0f;
+        AActor* Node = Entry->GetOwner();
+        if (!IsValid(Node) || Visited.Contains(Node)) return 0.0f;
+        Visited.Add(Node);
+        if (--Walk.NodeBudget <= 0) { Walk.bOverflow = true; return 0.0f; }
+
+        const EDTSPort Kind = DTSPortKind(Entry);
+        if (DTSIsMachine(Node))
+        {
+            FDTSRates Rates;
+            if (Mode == EDTSFlow::Supply && Kind != EDTSPort::Consumer) DTSAddSupply(Node, Rates);
+            if (Mode == EDTSFlow::Demand && Kind != EDTSPort::Producer) DTSAddDemand(Node, Rates);
+            const float* Found = Rates.Find(Item);
+            return Found ? *Found : 0.0f;
+        }
+
+        if (Node->IsA<AFGBuildableConveyorBase>() || Node->IsA<AFGBuildablePipeline>())
+        {
+            UFGConnectionComponent* Far = DTSOtherEnd(Node, Entry);
+            if (!IsValid(Far) || !DTSIsConnected(Far)) return 0.0f;
+            return DTSFlow(DTSFarEnd(Far), Item, Mode, Walk, Visited, Depth + 1);
+        }
+
+        if (!DTSIsPassThrough(Node) && !DTSIsBuffer(Node)) return 0.0f;
+
+        // Ports on the near side carry the flow asked for; ports on the far side take some of it.
+        const EDTSPort Near = Mode == EDTSFlow::Supply ? EDTSPort::Consumer : EDTSPort::Producer;
+        const EDTSFlow Opposite = Mode == EDTSFlow::Supply ? EDTSFlow::Demand : EDTSFlow::Supply;
+        float Along = 0.0f;
+        float Taken = 0.0f;
+        TArray<UFGConnectionComponent*> Ports;
+        DTSCollectPorts(Node, Ports);
+        for (UFGConnectionComponent* Port : Ports)
+        {
+            if (Port == Entry || !IsValid(Port) || !DTSIsConnected(Port)) continue;
+            const EDTSPort PortKind = DTSPortKind(Port);
+            const UFGFactoryConnectionComponent* Belt = Cast<UFGFactoryConnectionComponent>(Port);
+            const EDTSRule Rule = Belt && PortKind == EDTSPort::Producer ? DTSSplitterRule(Node, Belt, Item) : EDTSRule::Allowed;
+            if (PortKind == Near || PortKind == EDTSPort::Any)
+            {
+                if (Rule == EDTSRule::Blocked) continue;
+                Along += DTSFlow(DTSFarEnd(Port), Item, Mode, Walk, Visited, Depth + 1);
+            }
+            else
+            {
+                // A splitter's other output in a supply walk, a merger's other input in a demand
+                // walk. An overflow output takes only what is left, so it takes nothing here.
+                if (Rule != EDTSRule::Allowed) continue;
+                Taken += DTSFlow(DTSFarEnd(Port), Item, Opposite, Walk, Visited, Depth + 1);
+            }
+        }
+        return FMath::Max(0.0f, Along - Taken);
     }
 
     /**
@@ -883,6 +966,33 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
             FDTSRates One;
             DTSAddSupply(Machine, One);
             if (One.Contains(Item)) Out.Machines.Add(Machine);
+        }
+
+        // The number on a collecting station is what comes down the belt to it, not what the line
+        // makes: the ten refineries behind one dock also fed four constructors and a sink through
+        // five splitters, and the player who had written 100 on that dock was right where the
+        // walk said 200. Pipes have no direction to discount along, so a fluid dock keeps the
+        // network's whole output.
+        Out.LineRatePerMinute = Rate;
+        if (!bFluidDock)
+        {
+            FDTSWalk Flow;
+            Flow.NodeBudget = FMath::Max(16, Limits.MaxNodes) * 16;
+            TSet<AActor*> Visited;
+            Visited.Add(Station);
+            float Reaching = 0.0f;
+            for (UFGConnectionComponent* Seed : DTSSeeds(DockPorts))
+            {
+                Reaching += DTSFlow(Seed, Item, EDTSFlow::Supply, Flow, Visited, 0);
+            }
+            if (Flow.bOverflow)
+            {
+                UE_LOG(LogDTTAutoName, Verbose, TEXT("AUTONAME_SHARE_CUT Station=%s Line=%.1f"), *Station->GetName(), Rate);
+            }
+            else
+            {
+                Rate = FMath::Min(Rate, Reaching);
+            }
         }
     }
 

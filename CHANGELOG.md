@@ -54,6 +54,13 @@
   ordinary sweep never touches those words - only `apply` and a language change do - so a world
   full of tags in your language looks the same after the update until you ask.
 - Fixed: a belt on a station's fuel input was read as the station's cargo, so a coal belt into a
+- A collecting station shows what reaches it, not what the line makes. At every splitter on the
+  way the demand of the other branches comes off, at every merger the supply of the other inputs
+  comes off, the way EfficiencyCheckerMod counts it: ten refineries make 200 plastic, four
+  constructors on the side branches take 100, the dock says `+100/m`, and `/dtt autoname
+  <station>` says "100/min of the 200/min the line makes". A sink, a container or another
+  station on a side branch takes nothing, nor does an overflow branch. Pipes have no direction to
+  discount along, so a fluid station still shows the whole network.
   truck stop's fuel slot made it a coal collector. Only the storage inputs count now.
 - Window protocol 13: the settings carry six new fields. Server and clients must match.
 

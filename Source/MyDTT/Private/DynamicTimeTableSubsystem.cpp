@@ -917,9 +917,14 @@ bool UDynamicTimeTableSubsystem::DescribeAutoName(const FString& StationQuery, T
     }
     else
     {
-        OutLines.Add(FString::Printf(TEXT("%s: %s %s, %s/min, %d machine(s)%s"),
+        // A collecting station behind a shared line says both numbers: its share, and what the
+        // line makes - the difference is what the other branches take.
+        const bool bShared = !Result.bRequester && Result.LineRatePerMinute > Result.RatePerMinute + 0.5f;
+        OutLines.Add(FString::Printf(TEXT("%s: %s %s, %s/min%s, %d machine(s)%s"),
             *Current, Result.bRequester ? TEXT("consumes") : TEXT("produces"), *Result.ResourceName,
-            *DTSFormatRate(Result.RatePerMinute), Result.Machines.Num(), Result.bFluidDock ? TEXT(", by pipe") : TEXT("")));
+            *DTSFormatRate(Result.RatePerMinute),
+            bShared ? *FString::Printf(TEXT(" of the %s/min the line makes"), *DTSFormatRate(Result.LineRatePerMinute)) : TEXT(""),
+            Result.Machines.Num(), Result.bFluidDock ? TEXT(", by pipe") : TEXT("")));
     }
     OutLines.Add(FString::Printf(TEXT("  mode now %s, auto-name wants %s"),
         Station->GetIsInLoadMode() ? TEXT("LOAD") : TEXT("UNLOAD"),

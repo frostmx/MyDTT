@@ -47,6 +47,12 @@ struct FDTTAutoNameResult
 
     float RatePerMinute = 0.0f;
 
+    /**
+     * For a collecting station: what the machines behind the belt make in all, before the other
+     * branches on the way took their share. RatePerMinute is what reaches the dock.
+     */
+    float LineRatePerMinute = 0.0f;
+
     /** The chain wanted more than one item and the biggest one won. Printed as '?'. */
     bool bMixed = false;
 
