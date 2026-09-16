@@ -41,6 +41,7 @@ namespace
             UE_LOG(LogDynamicTimeTableModule,Log,TEXT("AUTONAME_HOOK_ALIVE Reason=%s"),Reason);
         }
         Subsystem->MarkAllDocksForAutoName(Reason);
+        Subsystem->NoteBuiltForAutoName(Source);
     }
 }
 #endif

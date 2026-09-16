@@ -20,6 +20,10 @@
   ending in a full stop are not touched.
 - The warehouse mark is a crate, `+▣` / `-▣`: the plain square looked like a missing glyph. Names
   written with the old square are still read and get the crate on their next pass.
+- A station you just placed, renamed, or ran a belt or pipe to is named first. Building anything
+  queues every dock for a new walk, a few per second, and a new station used to wait its turn
+  through the whole list - about a minute on a big factory. Now it is walked two seconds after
+  the belt lands.
 
 ## 3.0.0
 

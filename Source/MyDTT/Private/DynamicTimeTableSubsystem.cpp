@@ -16,6 +16,10 @@
 #include "WheeledVehicles/FGWheeledVehicleIdentifier.h"
 #include "FGDockableInterface.h"
 #include "Buildables/FGBuildableDockingStation.h"
+#include "Buildables/FGBuildableConveyorBase.h"
+#include "Buildables/FGBuildablePipeline.h"
+#include "FGFactoryConnectionComponent.h"
+#include "FGPipeConnectionComponent.h"
 #include "FGInventoryComponent.h"
 #include "FGBlueprintFunctionLibrary.h"
 #include "Resources/FGItemDescriptor.h"
@@ -757,6 +761,22 @@ void UDynamicTimeTableSubsystem::MarkAllDocksForAutoName(const TCHAR* Reason)
     }
 }
 
+void UDynamicTimeTableSubsystem::MarkDockUrgentForAutoName(AFGDockingStationIdentifier* Identifier, const TCHAR* Reason)
+{
+    if (!IsValid(Identifier)) return;
+    const FGuid Guid = Identifier->GetPathNodeGUID();
+    bool bAlready = false;
+    AutoNameDirty.Add(Guid, &bAlready);
+    if (!bAlready) AutoNameDirtySinceSeconds = FPlatformTime::Seconds();
+    AutoNameUrgent.AddUnique(Guid);
+    UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("AUTONAME_URGENT Name=\"%s\" Reason=%s"), *DTSDockName(Identifier), Reason);
+}
+
+void UDynamicTimeTableSubsystem::NoteBuiltForAutoName(const AActor* Built)
+{
+    if (IsValid(Built) && GetSettings().bAutoNameStations) AutoNameBuilt.AddUnique(Built);
+}
+
 bool UDynamicTimeTableSubsystem::ProcessAutoNameForStation(AFGDockingStationIdentifier* Identifier, bool bPreviewOnly, TArray<FString>* OutLines, bool bExplainAll,
     const TMap<TSubclassOf<UFGItemDescriptor>, FString>* WorldWords)
 {
@@ -928,6 +948,58 @@ int32 UDynamicTimeTableSubsystem::RunAutoNamePass(bool bApplyAll, bool bPreviewO
 
     // Read after the filling walk, so a dock's item is known even when it is empty.
     const TMap<TSubclassOf<UFGItemDescriptor>, FString> WorldWords = CollectWorldWords();
+
+    // The dock the player is standing at goes first: placing a station or laying its belt marks
+    // the whole world dirty, and at a few docks a pass the new one would otherwise wait its turn
+    // through a hundred others - which reads as a caption that takes a minute to appear.
+    if (!bWholeWorld)
+    {
+        // The dock a new building is, or the one a new belt or pipe now ends at.
+        auto Urgent = [&](const AActor* Actor)
+        {
+            if (const AFGBuildableDockingStation* Dock = Cast<AFGBuildableDockingStation>(Actor))
+                MarkDockUrgentForAutoName(Dock->GetStationIdentifier(), TEXT("built"));
+        };
+        for (const TWeakObjectPtr<const AActor>& Weak : AutoNameBuilt)
+        {
+            const AActor* Built = Weak.Get();
+            if (!Built) continue;
+            Urgent(Built);
+            if (const AFGBuildableConveyorBase* Belt = Cast<AFGBuildableConveyorBase>(Built))
+            {
+                for (const UFGFactoryConnectionComponent* End : { Belt->GetConnection0(), Belt->GetConnection1() })
+                {
+                    const UFGFactoryConnectionComponent* Far = IsValid(End) ? End->GetConnection() : nullptr;
+                    if (IsValid(Far)) Urgent(Far->GetOwner());
+                }
+            }
+            else if (const AFGBuildablePipeline* Pipe = Cast<AFGBuildablePipeline>(Built))
+            {
+                for (const UFGPipeConnectionComponent* End : { Pipe->GetPipeConnection0(), Pipe->GetPipeConnection1() })
+                {
+                    const UFGPipeConnectionComponent* Far = IsValid(End) ? End->GetPipeConnection() : nullptr;
+                    if (IsValid(Far)) Urgent(Far->GetOwner());
+                }
+            }
+        }
+        AutoNameBuilt.Reset();
+    }
+    if (!bWholeWorld && AutoNameUrgent.Num() > 0)
+    {
+        TArray<FGuid> Urgent = MoveTemp(AutoNameUrgent);
+        AutoNameUrgent.Reset();
+        for (const FGuid& Guid : Urgent)
+        {
+            if (!AutoNameDirty.Contains(Guid)) continue;
+            for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
+            {
+                if (!IsValid(Identifier) || Identifier->GetPathNodeGUID() != Guid) continue;
+                AutoNameDirty.Remove(Guid);
+                if (ProcessAutoNameForStation(Identifier, false, nullptr, false, &WorldWords)) ++Changed;
+                break;
+            }
+        }
+    }
 
     for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
     {
@@ -2341,12 +2413,7 @@ void UDynamicTimeTableSubsystem::HandleDockingStationNameChanged(AFGDockingStati
     // Typing a name is how a player meets this feature: they put a station down, name it, and the
     // caption should appear while they are still looking at the panel. Waiting for the next sweep
     // reads as "it does not work".
-    if (GetSettings().bAutoNameStations)
-    {
-        bool bAlready = false;
-        AutoNameDirty.Add(Id->GetPathNodeGUID(), &bAlready);
-        if (!bAlready) AutoNameDirtySinceSeconds = FPlatformTime::Seconds();
-    }
+    if (GetSettings().bAutoNameStations) MarkDockUrgentForAutoName(Id, TEXT("renamed"));
 
     RebuildGroupsFromNames();
 }

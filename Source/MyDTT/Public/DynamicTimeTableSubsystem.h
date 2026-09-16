@@ -145,6 +145,16 @@ public:
     int32 RestoreGameWords(bool bApply, TArray<FString>& OutLines);
     /** Something was built, dismantled or re-piped: every chain may have changed. */
     void MarkAllDocksForAutoName(const TCHAR* Reason);
+    /**
+     * This dock in particular was placed, renamed, or had a belt or pipe attached: it is walked
+     * first in the next timed pass, ahead of the whole-world queue a build fills.
+     */
+    void MarkDockUrgentForAutoName(class AFGDockingStationIdentifier* Identifier, const TCHAR* Reason);
+    /**
+     * A building just appeared. Which dock it touches is read at the next timed pass, not now:
+     * a belt's ends are not connected yet when the buildable subsystem announces it.
+     */
+    void NoteBuiltForAutoName(const AActor* Built);
 
     /** Pool trucks for ADTTSaveDataActor to write into the save. */
     void ExportPoolTrucks(TArray<FDTTSavedPoolTruck>& OutTrucks) const;
@@ -184,6 +194,9 @@ private:
     TSet<AActor*> InternalNameChanges;
     /** Docks whose chain has to be walked again, by path node guid. Runtime only. */
     TSet<FGuid> AutoNameDirty;
+    /** Docks to walk before the rest of the dirty set, in the order they were marked. */
+    TArray<FGuid> AutoNameUrgent;
+    TArray<TWeakObjectPtr<const AActor>> AutoNameBuilt;
     /**
      * What one dock's last walk reached. Two docks share a chain only when they carry the same item
      * into the same machines: a rotor dock and a stator dock feeding one assembler are not two
