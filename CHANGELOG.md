@@ -1,5 +1,26 @@
 # Changelog
 
+## 3.0.1
+
+- The game's own "Truck Station" is no longer copied into a name. A station nobody has renamed
+  used to come out as `(Steel Ingot) Truck Station -60/m -> Steel Beam`, with the default text
+  baked in the server's language; it is now `(Steel Ingot) -60/m -> Steel Beam`. A head that is
+  that default text - left by an earlier version - goes the same way on the next pass. Text you
+  typed yourself, even if it is "Truck Station", is a plain string and stays.
+- A station that gets a new resource word takes the word the other stations already use for that
+  item: `(Cubes)` on three stations makes the fourth `(Cubes)` too, not `(Modular Frame)`. The most
+  common word wins where they differ; the game's name is used only where nobody has given the item
+  a word. This applies to new stations, to a station whose cargo changed, and to `apply`, which
+  rewrites game words; the timed sweep still never rewrites a word.
+- `/dtt autoname gamenames` previews, and `/dtt autoname gamenames apply` writes, the game's names
+  back into every resource tag: a word that is an item's name in any language, or that the stations
+  carrying it hold, becomes that item's name in the naming language. The number, your text, the
+  group and the caption stay. Every station with a resource tag is covered, including the ones the
+  auto-namer skips; words that stand for nothing are listed and left alone; `(F)`, `(D)` and names
+  ending in a full stop are not touched.
+- The warehouse mark is a crate, `+▣` / `-▣`: the plain square looked like a missing glyph. Names
+  written with the old square are still read and get the crate on their next pass.
+
 ## 3.0.0
 
 - Stations can name themselves. With *Name stations from their belts* on (Settings, off by
