@@ -45,8 +45,8 @@
   and, at the end of the tail, what they make: `(Fuel) -20/m -> 1250 MW`. Water for coal and
   nuclear plants is counted as well.
 - A station with no machine behind it - only a container or a train platform - is a warehouse. It
-  is named after its cargo with `+□` or `-□` in place of a rate: the sign says which way the
-  trucks go, the box says nothing is consumed or made here.
+  is named after its cargo with `+▣` or `-▣` in place of a rate: the sign says which way the
+  trucks go, the crate says nothing is consumed or made here.
 - The names can be written in any language the game itself is translated into: *Language of the
   names* in Settings, English by default, `/dtt set naminglanguage ?` for the codes. Only the item
   names change and they are the game's own translations; the mod's window and chat stay English.

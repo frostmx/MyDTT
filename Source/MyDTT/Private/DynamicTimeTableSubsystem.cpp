@@ -153,11 +153,21 @@ namespace
         return Ellipsis;
     }
 
-    /** The mark of a warehouse station: a box, in place of the rate it does not have. */
+    /**
+     * The mark of a warehouse station: a crate, in place of the rate it does not have. The game's
+     * UI font draws only a handful of symbols - of the geometric shapes just the squares, circles
+     * and diamonds - and the plain square it first got read as a missing glyph. Names written
+     * with that square are still read.
+     */
     const FString& DTSAutoStore()
     {
-        static const FString Store = FString::Chr(0x25A1);
+        static const FString Store = FString::Chr(0x25A3);
         return Store;
+    }
+
+    bool DTSIsStoreMark(TCHAR Ch)
+    {
+        return Ch == DTSAutoStore()[0] || Ch == TEXT('\x25A1');
     }
 
     bool DTSIsAutoTail(const FString& Tail)
@@ -165,7 +175,7 @@ namespace
         if (Tail.Len() < 2 || (Tail[0] != TEXT('+') && Tail[0] != TEXT('-'))) return false;
 
         int32 At = 1;
-        if (Tail[1] == DTSAutoStore()[0])
+        if (DTSIsStoreMark(Tail[1]))
         {
             At = 2;
         }
