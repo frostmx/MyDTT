@@ -4,10 +4,11 @@
 
 - Stations can name themselves. With *Name stations from their belts* on (Settings, off by
   default), the mod walks the conveyors and pipes around every truck dock and writes what it found into the
-  station's name: `Factory-2 (Iron Ore) -240/m -> Ingots` - the resource, how much the chain
-  behind it wants per minute, and what that chain finally makes. It also sets the station's own
+  station's name: `(Iron Ore) Factory-2 -240/m -> Ingots` - the resource, how much the chain
+  behind it wants per minute, and what that chain finally makes. The tag comes first, so a
+  station list sorted by name falls into resources. It also sets the station's own
   LOAD/UNLOAD switch, so a new dock needs no configuration at all.
-- Text you wrote yourself is kept: everything left of the tag is yours, and a name ending in a
+- Text you wrote yourself is kept: everything between the tag and the tail is yours, and a name ending in a
   full stop is yours entirely and is never touched. `(F)` and `(D)` stations are left alone.
 - Your own word for a resource survives: `(Bauxite)` written in your language stays as you typed
   it for as long as the belt carries that item. The mod only writes the game's name where it
@@ -35,7 +36,7 @@
 - Recalculated a couple of seconds after anything is built, dismantled, re-piped or renamed, and
   once a minute for everything else (that is what notices an overclock change).
 - Pipes count too. The walk follows pipelines, junctions, pumps and valves the way it follows
-  belts, so a fluid truck station is named like a solid one - `Refinery-1 (Crude Oil) -600/m ->
+  belts, so a fluid truck station is named like a solid one - `(Crude Oil) Refinery-1 -600/m ->
   Plastic`, rates in cubic metres per minute - and a fluid buffer is a buffer like a container.
   Alumina reaching the foundries by pipe now counts as supplied, so the silica station is no
   longer asked to bring it.

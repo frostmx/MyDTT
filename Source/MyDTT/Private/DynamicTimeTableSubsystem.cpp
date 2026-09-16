@@ -191,33 +191,57 @@ namespace
         return !Rest.IsEmpty() && !Rest.Contains(TEXT("(")) && !Rest.Contains(TEXT(")"));
     }
 
-    /** "Dock [g] (F) (Iron) -240/m" -> Head "Dock [g] (F)", Tag "(Iron)", Tail "-240/m". */
+    /**
+     * "(Iron) Dock [g] -240/m" -> Tag "(Iron)", Head "Dock [g]", Tail "-240/m". The tag leads the
+     * name so that a list sorted by name falls into resources; the tail is the last thing on it.
+     * The player's text sits between the two, so the tail is found from the end - the shortest
+     * suffix that reads as one - and the tag is taken from the front. A name written before the
+     * tag moved to the front, with the tag just ahead of the tail, is still read.
+     */
     bool DTSSplitAutoBlock(const FString& FullName, FString& OutHead, FString& OutTag, FString& OutTail)
     {
         OutHead = FullName.TrimStartAndEnd();
         OutTag.Reset();
         OutTail.Reset();
 
-        int32 Close = INDEX_NONE;
-        if (!OutHead.FindLastChar(TEXT(')'), Close)) return false;
-        const FString Tail = OutHead.Mid(Close + 1).TrimStartAndEnd();
-        if (!DTSIsAutoTail(Tail)) return false;
+        int32 TailAt = INDEX_NONE;
+        for (int32 At = OutHead.Len() - 1; At > 0; --At)
+        {
+            if (OutHead[At] != TEXT('+') && OutHead[At] != TEXT('-')) continue;
+            if (!FChar::IsWhitespace(OutHead[At - 1])) continue;
+            if (DTSIsAutoTail(OutHead.Mid(At))) { TailAt = At; break; }
+        }
+        if (TailAt == INDEX_NONE) return false;
+        const FString Front = OutHead.Left(TailAt).TrimEnd();
 
         int32 Open = INDEX_NONE;
-        if (!OutHead.Left(Close).FindLastChar(TEXT('('), Open)) return false;
-        if (OutHead.Mid(Open + 1, Close - Open - 1).TrimStartAndEnd().IsEmpty()) return false;
+        int32 Close = INDEX_NONE;
+        if (Front.StartsWith(TEXT("(")) && Front.FindChar(TEXT(')'), Close))
+        {
+            Open = 0;
+        }
+        else if (Front.EndsWith(TEXT(")")) && Front.FindLastChar(TEXT('('), Open))
+        {
+            Close = Front.Len() - 1;
+        }
+        else
+        {
+            return false;
+        }
+        if (Front.Mid(Open + 1, Close - Open - 1).TrimStartAndEnd().IsEmpty()) return false;
 
-        OutTag = OutHead.Mid(Open, Close - Open + 1);
-        OutTail = Tail;
-        OutHead = OutHead.Left(Open).TrimStartAndEnd();
+        OutTag = Front.Mid(Open, Close - Open + 1);
+        OutTail = OutHead.Mid(TailAt);
+        OutHead = DTSCutOut(Front, Open, Close + 1).TrimStartAndEnd();
         return true;
     }
 
+    /** Tag first, then the player's text, then the caption. */
     FString DTSJoinAutoBlock(const FString& Head, const FString& Tag, const FString& Tail)
     {
         FString Result = Head.TrimStartAndEnd();
         if (Tag.IsEmpty()) return Result;
-        Result = Result.IsEmpty() ? Tag : FString::Printf(TEXT("%s %s"), *Result, *Tag);
+        Result = Result.IsEmpty() ? Tag : FString::Printf(TEXT("%s %s"), *Tag, *Result);
         if (!Tail.IsEmpty()) Result += FString::Printf(TEXT(" %s"), *Tail);
         return Result;
     }
@@ -354,15 +378,14 @@ FString UDynamicTimeTableSubsystem::MakeTaggedName(const FString& BaseName, cons
 
 bool UDynamicTimeTableSubsystem::ParseDispatchTag(const FString& InFullName, FString& OutBaseName, FString& OutResourceId, EDTTDispatchRole& OutRole, int32& OutThreshold)
 {
-    // The auto tag is a dispatch tag - it is the tail behind it that is new - so only the tail is
-    // taken off here. The scan below then reads the tag exactly as it reads a hand-written one.
+    // The auto tag is a dispatch tag - it is the caption behind the name that is new - so in an
+    // auto-named station only that tag is read, and a bracket the player put in their own text
+    // ("Dock (old)") cannot be mistaken for it. A hand-written name is scanned whole.
     FString AutoHead, AutoTag, AutoTail;
     const bool bAuto = DTSSplitAutoBlock(InFullName, AutoHead, AutoTag, AutoTail);
-    const FString FullName = bAuto
-        ? (AutoHead.IsEmpty() ? AutoTag : FString::Printf(TEXT("%s %s"), *AutoHead, *AutoTag))
-        : AutoHead;
+    const FString FullName = bAuto ? AutoTag : AutoHead;
 
-    OutBaseName = FullName.TrimStartAndEnd();
+    OutBaseName = bAuto ? DTSJoinAutoBlock(AutoHead, AutoTag, FString()) : FullName.TrimStartAndEnd();
     OutResourceId.Reset();
     OutRole = EDTTDispatchRole::None;
     OutThreshold = 0;
@@ -419,7 +442,7 @@ bool UDynamicTimeTableSubsystem::ParseDispatchTag(const FString& InFullName, FSt
 
         if (Role != EDTTDispatchRole::None)
         {
-            OutBaseName = DTSCutOut(FullName, Open, Close + 1).TrimStartAndEnd();
+            OutBaseName = bAuto ? AutoHead : DTSCutOut(FullName, Open, Close + 1).TrimStartAndEnd();
             OutResourceId = Resource;
             OutRole = Role;
             OutThreshold = Threshold;
@@ -450,7 +473,9 @@ FString UDynamicTimeTableSubsystem::MakeDispatchTaggedName(const FString& BaseNa
         : Role == EDTTDispatchRole::Requester
             ? FString::Printf(TEXT("(%s-%d)"), *Resource, FMath::Max(0, Threshold))
             : FString::Printf(TEXT("(%s)"), *Resource);
-    return Base.IsEmpty() ? Tag : FString::Printf(TEXT("%s %s"), *Base, *Tag);
+    // The tag goes first: the station list is sorted by name, and a name that starts with the
+    // resource sorts the stations by what they carry.
+    return Base.IsEmpty() ? Tag : FString::Printf(TEXT("%s %s"), *Tag, *Base);
 }
 
 bool UDynamicTimeTableSubsystem::ParseFuelStopTag(const FString& InFullName, FString& OutBaseName)
@@ -593,7 +618,7 @@ FString UDynamicTimeTableSubsystem::StripAutoBlock(const FString& FullName)
     // Only the caption goes. The resource tag stays: it is what the dispatcher reads, it is usually
     // the player's own word for the item, and a strip that unconfigured eighty stations would be a
     // worse surprise than the caption ever was.
-    return Head.IsEmpty() ? Tag : Head + TEXT(" ") + Tag;
+    return DTSJoinAutoBlock(Head, Tag, FString());
 }
 
 void UDynamicTimeTableSubsystem::MarkAllDocksForAutoName(const TCHAR* Reason)
