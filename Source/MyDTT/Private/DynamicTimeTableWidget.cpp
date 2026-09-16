@@ -1058,6 +1058,12 @@ const FLinearColor DTTCardTintWait(0.16f, 0.14f, 0.07f, 1.0f);
         int32 Hash = INDEX_NONE;
         return Name.FindLastChar(TEXT('#'), Hash) ? Name.Mid(Hash + 1) : Name;
     }
+    /** The name without the object number: the number tells /dtt why which truck, the card does not need it. */
+    FString DTTTruckTitle(const FString& Name)
+    {
+        int32 Hash = INDEX_NONE;
+        return Name.FindLastChar(TEXT('#'), Hash) ? Name.Left(Hash) : Name;
+    }
     /** Runs of the same stop (a pool lap starts with copies of its depot that only carry the target index) collapse into one chip. */
     int32 DTTRouteChips(const TArray<FString>& Stops)
     {
@@ -1335,7 +1341,7 @@ void UDynamicTimeTableWidget::PopulateTruckCard(const FDTTTruckRow& Row, FDTTCar
 
     UHorizontalBox* Head = Sink.HBox(Body, FMargin(0, 0, 0, 2));
     Sink.Icon(Head, IconFor(Row.ItemClass), 28, FMargin(0, 0, 8, 0));
-    Sink.Text(Head, Row.Name, 17, FLinearColor::White, false, FMargin(0, 0, 10, 0));
+    Sink.Text(Head, DTTTruckTitle(Row.Name), 17, FLinearColor::White, false, FMargin(0, 0, 10, 0));
     Sink.Text(Head, Row.ResourceId.IsEmpty() ? TEXT("no resource") : Row.ResourceId, 14, Row.ResourceId.IsEmpty() ? DTTDim : DTTCyan, false, FMargin(0, 0, 10, 0), true);
     Sink.Badge(Head, PhaseLabel, PhaseColor);
     Sink.Badge(Head, TEXT("Autopilot off"), FLinearColor(0.6f, 0.3f, 0.05f), !Row.bAutopilot);

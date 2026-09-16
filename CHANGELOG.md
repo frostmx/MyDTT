@@ -24,6 +24,8 @@
   queues every dock for a new walk, a few per second, and a new station used to wait its turn
   through the whole list - about a minute on a big factory. Now it is walked two seconds after
   the belt lands.
+- Truck cards in the window no longer show the truck's object number after its name; the number
+  is still what `/dtt trucks` prints and `/dtt why` takes.
 
 ## 3.0.0
 
