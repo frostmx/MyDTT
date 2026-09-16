@@ -11,9 +11,10 @@
 - Text you wrote yourself is kept: everything between the tag and the tail is yours, and a name ending in a
   full stop is yours entirely and is never touched. `(F)` and `(D)` stations are left alone.
 - Your own word for a resource survives: `(Bauxite)` written in your language stays as you typed
-  it for as long as the belt carries that item. The mod only writes the game's name where it
-  cannot tell what you meant - or when you pick another naming language and the word is one of
-  the game's own (see below).
+  it for as long as the belt carries that item, and a word the game does not know in any language
+  stays whatever the dock holds - it is your name for what the trucks carry. The mod only writes
+  the game's name where your word is the game's name for a different item - or when you pick
+  another naming language and the word is one of the game's own (see below).
 - The number in a tag you wrote, as in `(Motor-40)`, survives a rewrite; it is dropped only when
   the chain starts carrying something else, because it was a level for a different cargo.
 - What the tail means: `-` the station feeds the factory (a truck brings this), `+` the station
@@ -53,7 +54,6 @@
   language; a word of your own, which the game has in no language, stays as you typed it. An
   ordinary sweep never touches those words - only `apply` and a language change do - so a world
   full of tags in your language looks the same after the update until you ask.
-- Fixed: a belt on a station's fuel input was read as the station's cargo, so a coal belt into a
 - A collecting station shows what reaches it, not what the line makes. At every splitter on the
   way the demand of the other branches comes off, at every merger the supply of the other inputs
   comes off, the way EfficiencyCheckerMod counts it: ten refineries make 200 plastic, four
@@ -61,6 +61,7 @@
   <station>` says "100/min of the 200/min the line makes". A sink, a container or another
   station on a side branch takes nothing, nor does an overflow branch. Pipes have no direction to
   discount along, so a fluid station still shows the whole network.
+- Fixed: a belt on a station's fuel input was read as the station's cargo, so a coal belt into a
   truck stop's fuel slot made it a coal collector. Only the storage inputs count now.
 - Window protocol 13: the settings carry six new fields. Server and clients must match.
 

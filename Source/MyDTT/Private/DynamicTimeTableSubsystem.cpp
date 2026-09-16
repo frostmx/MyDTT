@@ -718,7 +718,14 @@ bool UDynamicTimeTableSubsystem::ProcessAutoNameForStation(AFGDockingStationIden
     // The number a player wrote is kept while the cargo is the same thing - compared as an item
     // class, not as text, or the first pass would drop it just because the tag was written in
     // another language than the server's.
-    const bool bSameResource = bHasTag && PreferredItem && Result.ItemClass && PreferredItem == Result.ItemClass;
+    //
+    // A word the game does not know in any language, and no cargo has taught the dispatcher yet,
+    // is the player's own name for whatever the dock carries, and it counts as the same resource.
+    // Replacing it would cost the player their naming on an empty dock - or on a freshly loaded
+    // world, whose dispatcher has not looked at any cargo yet: that is how "(Cubes)" became
+    // "(Modular Frame)" on the first preview after a load.
+    const bool bOwnWord = bHasTag && !ResolveItemClassForResource(TagResource);
+    const bool bSameResource = bHasTag && Result.ItemClass && (bOwnWord || (PreferredItem && PreferredItem == Result.ItemClass));
     // ... except on a pass over the whole world (apply, and the preview that mirrors it) or right
     // after the naming language changed: a word that is the game's own name for the item in some
     // language is then rewritten in the chosen one, and only a word the game does not know at all
@@ -897,9 +904,9 @@ bool UDynamicTimeTableSubsystem::DescribeAutoName(const FString& StationQuery, T
     FString TagBase, TagResource;
     EDTTDispatchRole TagRole = EDTTDispatchRole::None;
     int32 TagThreshold = 0;
+    const bool bHasTag = ParseDispatchTag(Current, TagBase, TagResource, TagRole, TagThreshold);
     const TSubclassOf<UFGItemDescriptor> PreferredItem =
-        (!bAutoWasUnsure && ParseDispatchTag(Current, TagBase, TagResource, TagRole, TagThreshold))
-            ? ResolveItemClassForResource(TagResource) : nullptr;
+        (bHasTag && !bAutoWasUnsure) ? ResolveItemClassForResource(TagResource) : nullptr;
 
     FDTTAutoNameResult Result;
     if (!FDTTAutoNameScanner::Scan(Station, Limits, PreferredItem, Result))
@@ -950,8 +957,10 @@ bool UDynamicTimeTableSubsystem::DescribeAutoName(const FString& StationQuery, T
     }
     if (Result.bFromPort) OutLines.Add(TEXT("  nothing delivered here yet: taken from the port the belt lands on"));
     else if (Result.bMixed) OutLines.Add(Result.bWarehouse ? TEXT("  the stores hold several things: the most numerous won") : TEXT("  mixed flow: the biggest item won"));
-    // Same rule as a pass over the whole world: a game word in the tag shows in the naming language.
-    const bool bSameResource = PreferredItem && PreferredItem == Result.ItemClass;
+    // Same rules as a pass over the whole world: a game word in the tag shows in the naming
+    // language, a word the game does not know is the player's own and stays.
+    const bool bOwnWord = bHasTag && !ResolveItemClassForResource(TagResource);
+    const bool bSameResource = Result.ItemClass && (bOwnWord || (PreferredItem && PreferredItem == Result.ItemClass));
     OutLines.Add(FString::Printf(TEXT("  name would be: %s"),
         *DTSComposeAutoName(Current, Result, false, bSameResource, bSameResource && !ResolveItemClassByName(TagResource))));
 
