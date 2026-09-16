@@ -22,14 +22,15 @@
 - Smart and programmable splitters are read, not guessed: a branch filtered to another item is not
   counted. What a station carries is taken from its own cargo, or,
   when the dock is empty, from the resource already in its name. A station nobody has delivered to
-  yet - a new one - is named from the port its belt lands on and marked as a guess: the game sorts
-  an arriving item into whichever slot accepts it, so the wiring is a hint and not a fact, and the
-  first delivery corrects the name. A container between the dock and the factory is a buffer, and the chain is
+  yet - a new one - is named from what the factory behind it is missing: the ingredient its
+  machines need and no belt already brings. Where even that is ambiguous, because both ingredients
+  come by truck, the port the belt lands on decides and the name is marked as a guess; the first
+  delivery corrects it either way. A container between the dock and the factory is a buffer, and the chain is
   followed through it. Rates follow the machine's current overclock.
 - `/dtt autoname` lists what would change without changing anything; `apply` writes it all,
   `strip` takes the captions back off and leaves the
   resource tags in place, so the stations keep working, and `/dtt autoname <station>` explains one dock: the
-  chain it feeds, every machine on it and the name it would get.
+  chain it feeds, every machine on it, the name it would get and which signal decided it.
 - Recalculated a couple of seconds after anything is built, dismantled, re-piped or renamed, and
   once a minute for everything else (that is what notices an overclock change).
 - Window protocol 12: the settings carry five new fields. Server and clients must match.

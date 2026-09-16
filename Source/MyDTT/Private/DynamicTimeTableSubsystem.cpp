@@ -593,7 +593,7 @@ void UDynamicTimeTableSubsystem::MarkAllDocksForAutoName(const TCHAR* Reason)
     }
 }
 
-bool UDynamicTimeTableSubsystem::ProcessAutoNameForStation(AFGDockingStationIdentifier* Identifier, bool bPreviewOnly, TArray<FString>* OutLines)
+bool UDynamicTimeTableSubsystem::ProcessAutoNameForStation(AFGDockingStationIdentifier* Identifier, bool bPreviewOnly, TArray<FString>* OutLines, bool bExplainAll)
 {
     if (!IsValid(Identifier)) return false;
 
@@ -621,6 +621,7 @@ bool UDynamicTimeTableSubsystem::ProcessAutoNameForStation(AFGDockingStationIden
     FDTTAutoNameLimits Limits;
     Limits.MaxNodes = GetSettings().AutoNameMaxNodes;
     Limits.MaxProducts = GetSettings().AutoNameMaxProducts;
+    Limits.bExplainAll = bExplainAll;
 
     // What the station says about itself today, so an empty dock on a branching chain keeps its
     // answer instead of drifting to whatever is biggest.
@@ -738,7 +739,7 @@ int32 UDynamicTimeTableSubsystem::RunAutoNamePass(bool bApplyAll, bool bPreviewO
     {
         for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
         {
-            if (IsValid(Identifier)) ProcessAutoNameForStation(Identifier, true, nullptr);
+            if (IsValid(Identifier)) ProcessAutoNameForStation(Identifier, true, nullptr, bWholeWorld);
         }
     }
 
@@ -753,7 +754,7 @@ int32 UDynamicTimeTableSubsystem::RunAutoNamePass(bool bApplyAll, bool bPreviewO
 
         --Budget;
         if (!bPreviewOnly) AutoNameDirty.Remove(Guid);
-        if (ProcessAutoNameForStation(Identifier, bPreviewOnly, OutLines)) ++Changed;
+        if (ProcessAutoNameForStation(Identifier, bPreviewOnly, OutLines, bWholeWorld)) ++Changed;
 
         // Chat drops a long burst, so whatever a pass reports also goes to the log.
         if (OutLines)
@@ -827,6 +828,7 @@ bool UDynamicTimeTableSubsystem::DescribeAutoName(const FString& StationQuery, T
     FDTTAutoNameLimits Limits;
     Limits.MaxNodes = GetSettings().AutoNameMaxNodes;
     Limits.MaxProducts = GetSettings().AutoNameMaxProducts;
+    Limits.bExplainAll = true;
 
     FString PrevHead, PrevTag, PrevTail;
     const bool bAutoWasUnsure = DTSSplitAutoBlock(Current, PrevHead, PrevTag, PrevTail) && PrevTail.Contains(TEXT("?"));
@@ -855,6 +857,16 @@ bool UDynamicTimeTableSubsystem::DescribeAutoName(const FString& StationQuery, T
     {
         OutLines.Add(FString::Printf(TEXT("  ends as %s%s"), *FString::Join(Result.Products, TEXT(", ")),
             Result.bMoreProducts ? TEXT(" ...") : TEXT("")));
+    }
+    OutLines.Add(FString::Printf(TEXT("  decided by: %s"), *Result.DecidedBy));
+    if (Result.bRequester)
+    {
+        OutLines.Add(FString::Printf(TEXT("  nobody else brings: %s"),
+            Result.UnsuppliedCount == 1 ? *UFGItemDescriptor::GetItemName(Result.UnsuppliedItem).ToString()
+                                        : *FString::Printf(TEXT("%d candidates"), Result.UnsuppliedCount)));
+        OutLines.Add(FString::Printf(TEXT("  the ports say: %s"),
+            Result.PortVoteCount == 1 ? *UFGItemDescriptor::GetItemName(Result.PortItem).ToString()
+                                      : *FString::Printf(TEXT("%d different ones"), Result.PortVoteCount)));
     }
     if (Result.bFromPort) OutLines.Add(TEXT("  nothing delivered here yet: taken from the port the belt lands on"));
     else if (Result.bMixed) OutLines.Add(TEXT("  mixed flow: the biggest item won"));

@@ -15,6 +15,9 @@ struct FDTTAutoNameLimits
     int32 MaxNodes = 500;
     int32 MaxMachines = 64;
     int32 MaxProducts = 3;
+
+    /** Work out what every signal says, not just the one that decides. For the chat commands. */
+    bool bExplainAll = false;
 };
 
 /**
@@ -47,6 +50,13 @@ struct FDTTAutoNameResult
     /** What the ports said, whether or not it was used - kept so the guess can be judged in the log. */
     TSubclassOf<UFGItemDescriptor> PortItem;
     int32 PortVoteCount = 0;
+
+    /** cargo | tag | unsupplied | port | dominant | only-one. Printed by /dtt autoname <station>. */
+    FString DecidedBy;
+
+    /** The ingredient this chain needs that no belt brings, when there is exactly one of them. */
+    TSubclassOf<UFGItemDescriptor> UnsuppliedItem;
+    int32 UnsuppliedCount = 0;
 
     /** Final products of the chain, biggest flow first. Requester side only. */
     TArray<FString> Products;

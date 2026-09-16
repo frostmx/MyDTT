@@ -329,6 +329,74 @@ namespace
     }
 
     /**
+     * What already arrives at these machines on a belt from something that makes it.
+     *
+     * The strongest thing that can be said about an empty dock: whatever the chain needs and
+     * nobody else delivers is what this dock is for. A truck station upstream ends the walk
+     * silently and supplies nothing, so two docks feeding one assembler stay ambiguous - which is
+     * honest, that case really is a coin flip.
+     */
+    void DTSCollectBeltSupply(const TSet<AActor*>& Machines, FDTSWalk& Walk, FDTSRates& Out)
+    {
+        // One walk for the whole chain, not one per machine: twenty foundries share the belts
+        // behind them, and walking each separately spends the node budget on the same conveyors
+        // twenty times over - which made the answer "I cannot tell" on exactly the big factories
+        // this is for.
+        TSet<AActor*> Visited;
+        TArray<UFGFactoryConnectionComponent*> Frontier;
+        for (AActor* Machine : Machines)
+        {
+            Visited.Add(Machine);
+            TArray<UFGFactoryConnectionComponent*> Conns;
+            DTSGetFactoryConnections(Machine, Conns);
+            for (UFGFactoryConnectionComponent* Conn : Conns)
+            {
+                if (!IsValid(Conn) || !Conn->IsConnected()) continue;
+                if (Conn->GetDirection() != EFactoryConnectionDirection::FCD_INPUT) continue;
+                Frontier.Add(Conn->GetConnection());
+            }
+        }
+
+        while (Frontier.Num() > 0)
+        {
+            UFGFactoryConnectionComponent* OutConn = Frontier.Pop(EAllowShrinking::No);
+            if (!IsValid(OutConn)) continue;
+
+            AActor* Node = OutConn->GetOwner();
+            if (!IsValid(Node) || Visited.Contains(Node)) continue;
+            Visited.Add(Node);
+
+            if (--Walk.NodeBudget <= 0) { Walk.bOverflow = true; return; }
+
+            if (Node->IsA<AFGBuildableManufacturer>() || Node->IsA<AFGBuildableResourceExtractor>())
+            {
+                FDTSRates Made;
+                DTSAddSupply(Node, Made);
+                for (const TPair<FDTSItem, float>& Pair : Made) Out.FindOrAdd(Pair.Key) += Pair.Value;
+                continue;
+            }
+
+            if (!DTSIsBuffer(Node) && !DTSIsPassThrough(Node)) continue;
+
+            if (AFGBuildableConveyorBase* Belt = Cast<AFGBuildableConveyorBase>(Node))
+            {
+                UFGFactoryConnectionComponent* Far = DTSBeltFarSide(Belt, OutConn);
+                if (IsValid(Far) && Far->IsConnected()) Frontier.Add(Far->GetConnection());
+                continue;
+            }
+
+            TArray<UFGFactoryConnectionComponent*> Conns;
+            DTSGetFactoryConnections(Node, Conns);
+            for (UFGFactoryConnectionComponent* Conn : Conns)
+            {
+                if (!IsValid(Conn) || !Conn->IsConnected()) continue;
+                if (Conn->GetDirection() != EFactoryConnectionDirection::FCD_INPUT) continue;
+                Frontier.Add(Conn->GetConnection());
+            }
+        }
+    }
+
+    /**
      * From a machine forward to whatever the chain finally makes. A branch that reaches another
      * manufacturer keeps going; a branch that dies at a container, a station or a bare belt end
      * makes the last manufacturer on it the final one.
@@ -468,12 +536,14 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
 
     // The cargo wins over the arithmetic whenever the chain has a use for it: a station feeding an
     // assembler with two ingredients carries exactly one of them, and only the station knows which.
+    bool bDecided = false;
     if (Cargo && Rates.Contains(Cargo))
     {
         Item = Cargo;
         Rate = Rates[Cargo];
         bMixed = false;
         Source = TEXT("cargo");
+        bDecided = true;
     }
     else if (Preferred && Rates.Contains(Preferred))
     {
@@ -483,12 +553,53 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
         Rate = Rates[Preferred];
         bMixed = false;
         Source = TEXT("tag");
+        bDecided = true;
     }
-    else if (PortVotes.Num() == 1)
+
+    // Ask the factory itself: whatever this chain needs and no belt already brings is what the
+    // trucks are for. A foundry fed scrap by its own refineries and silica by nobody is a silica
+    // station, and that is a fact about the world rather than a guess about wiring. Two docks
+    // feeding one assembler leave two ingredients unsupplied and stay ambiguous, which is honest.
+    //
+    // The walk backwards is not cheap, so it runs when the answer is still open - or when someone
+    // asked to be told everything, which is what /dtt autoname and its preview do.
+    if (bRequester && (!bDecided || Limits.bExplainAll))
     {
-        // A station nobody has delivered to yet: no cargo, no tag. Every port the chain ends at
-        // agrees on one ingredient, so that is the answer - still marked as a guess, because the
-        // wiring is what makes it true and the game does not enforce it.
+        FDTSWalk Back;
+        Back.NodeBudget = FMath::Max(16, Limits.MaxNodes);
+        FDTSRates ByBelt;
+        DTSCollectBeltSupply(Machines, Back, ByBelt);
+
+        // Covered means covered by the numbers, not merely present: an aluminium plant makes some
+        // of its own silica as a by-product and still lives on trucks for the rest, and an
+        // ingredient that arrives half-fed is exactly the one a station is there to carry.
+        for (const TPair<FDTSItem, float>& Pair : Rates)
+        {
+            // A fluid arrives by pipe, which this walk cannot see at all, so it would always look
+            // unsupplied. Trucks do not carry it either - naming stops at solids - so it is not a
+            // candidate and must not stand in the way of the one that is.
+            if (DTSIsFluidItem(Pair.Key)) continue;
+
+            const float* Supplied = ByBelt.Find(Pair.Key);
+            if (Supplied && *Supplied >= Pair.Value * 0.99f) continue;
+            Out.UnsuppliedItem = Pair.Key;
+            ++Out.UnsuppliedCount;
+        }
+
+        if (!bDecided && Out.UnsuppliedCount == 1)
+        {
+            Item = Out.UnsuppliedItem;
+            Rate = Rates[Out.UnsuppliedItem];
+            bMixed = false;
+            Source = TEXT("unsupplied");
+            bDecided = true;
+        }
+    }
+
+    if (!bDecided && PortVotes.Num() == 1)
+    {
+        // Nothing left but the wiring: the port a belt lands on carries the slot, and so the
+        // ingredient, it reaches. Taken, and marked as the guess it is.
         const FDTSItem Voted = *PortVotes.CreateConstIterator();
         if (const float* Wanted = Rates.Find(Voted))
         {
@@ -499,8 +610,8 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
         }
     }
 
-    // What the ports would have said, kept for the log: this is how the guess is judged against the
-    // docks whose cargo leaves no doubt.
+    // What the other signals would have said, kept for the log: a dock whose cargo leaves no doubt
+    // is the only place where a guess can be checked against the truth.
     if (PortVotes.Num() == 1) Out.PortItem = *PortVotes.CreateConstIterator();
     Out.PortVoteCount = PortVotes.Num();
     if (!Item) { Out.SkipReason = TEXT("no-machines"); return false; }
@@ -562,6 +673,7 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
     // Without cargo to go by, several candidate items on one chain means the biggest one was taken,
     // and a port's word is a guess as well: the game does not make the wiring mean anything.
     Out.bMixed = bMixed || Out.bFromPort;
+    Out.DecidedBy = Source;
 
     // How this station was decided, and what the ports would have said either way. A dock whose
     // cargo leaves no doubt is the only place where the port's word can be checked against the
@@ -569,10 +681,12 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
     // disagreed - a coin flip, and the failures came in clean swapped pairs, two docks feeding one
     // assembler through each other's port. That is why the port is the last word and not the first,
     // and why it still prints '?'.
-    UE_LOG(LogDTTAutoName, Verbose, TEXT("AUTONAME_PORTCHECK Item=%s Source=%s Port=%s Votes=%d"),
+    UE_LOG(LogDTTAutoName, Verbose, TEXT("AUTONAME_PORTCHECK Item=%s Source=%s Port=%s Votes=%d Unsupplied=%s Candidates=%d"),
         *UFGItemDescriptor::GetItemName(Item).ToString(), *Source,
         Out.PortItem ? *UFGItemDescriptor::GetItemName(Out.PortItem).ToString() : TEXT("-"),
-        Out.PortVoteCount);
+        Out.PortVoteCount,
+        Out.UnsuppliedItem ? *UFGItemDescriptor::GetItemName(Out.UnsuppliedItem).ToString() : TEXT("-"),
+        Out.UnsuppliedCount);
 
     Out.ResourceName = UFGItemDescriptor::GetItemName(Item).ToString().TrimStartAndEnd();
     if (Out.ResourceName.IsEmpty()) { Out.SkipReason = TEXT("resource-has-no-name"); return false; }

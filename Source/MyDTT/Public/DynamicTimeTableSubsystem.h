@@ -194,7 +194,7 @@ private:
     /** Called once a second from PollTruckStates; debounces, sweeps and renames. */
     void TickAutoName();
     /** Walks one dock and writes the result; returns true when the name or the mode changed. */
-    bool ProcessAutoNameForStation(class AFGDockingStationIdentifier* Identifier, bool bPreviewOnly, TArray<FString>* OutLines);
+    bool ProcessAutoNameForStation(class AFGDockingStationIdentifier* Identifier, bool bPreviewOnly, TArray<FString>* OutLines, bool bExplainAll = false);
     int32 MigrationAttempts = 0;
     /**
      * Raised by a timer a few seconds after persistence is initialised. At OnWorldBeginPlay the
