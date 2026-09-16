@@ -28,6 +28,10 @@
   is still what `/dtt trucks` prints and `/dtt why` takes.
 - Dispatch cards show an auto-named station by its caption, `-5/m -> Adaptive Control Unit`,
   instead of "(no name)" when the station has no text of its own.
+- Server and client may run different 3.0.x versions: the descriptor now declares
+  `RemoteVersionRange >=3.0.0 <3.1.0`. From here on, a release that does not change the client
+  build bumps the last number and keeps the range; one that does bumps the middle number and
+  moves the range with it.
 
 ## 3.0.0
 
