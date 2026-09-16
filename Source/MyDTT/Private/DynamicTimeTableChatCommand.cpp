@@ -18,7 +18,7 @@ ADynamicTimeTableChatCommand::ADynamicTimeTableChatCommand()
     Usage = NSLOCTEXT(
         "DynamicTimeTable",
         "ChatCommand.DTT.Usage",
-        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt trucks [resource] - list dispatch and pool trucks; /dtt why <truck> - what one truck is doing and what stands in its way; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt settings - show the settings; /dtt set <field> <value> - change one setting; /dtt autoname [apply|strip|<station>] - name stations from their belts; /dtt recalc - rebuild active bookings");
+        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt trucks [resource] - list dispatch and pool trucks; /dtt why <truck> - what one truck is doing and what stands in its way; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt settings - show the settings; /dtt set <field> <value> - change one setting; /dtt autoname [apply|strip|gamenames [apply]|<station>] - name stations from their belts; /dtt recalc - rebuild active bookings");
     Aliases.Add(TEXT("dynamictimetable"));
 }
 
@@ -231,6 +231,14 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
         {
             const int32 Stripped = Subsystem->StripAutoNames(&Lines);
             Lines.Add(FString::Printf(TEXT("dTT: %d station(s) stripped."), Stripped));
+        }
+        else if (Verb.Equals(TEXT("gamenames"), ESearchCase::IgnoreCase))
+        {
+            const bool bApply = Arguments.Num() >= 3 && Arguments[2].Equals(TEXT("apply"), ESearchCase::IgnoreCase);
+            const int32 Changed = Subsystem->RestoreGameWords(bApply, Lines);
+            Lines.Add(bApply
+                ? FString::Printf(TEXT("dTT: %d station(s) renamed."), Changed)
+                : FString::Printf(TEXT("dTT: %d station(s) would change. /dtt autoname gamenames apply writes them."), Changed));
         }
         else if (!Verb.IsEmpty())
         {

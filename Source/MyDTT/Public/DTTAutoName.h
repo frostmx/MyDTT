@@ -116,4 +116,7 @@ public:
      */
     static bool Scan(AFGBuildableDockingStation* Station, const FDTTAutoNameLimits& Limits,
         TSubclassOf<UFGItemDescriptor> Preferred, FDTTAutoNameResult& Out);
+
+    /** What the dock holds right now: the most numerous item in it, or its fluid. Null when empty. */
+    static TSubclassOf<UFGItemDescriptor> DockCargo(AFGBuildableDockingStation* Station);
 };

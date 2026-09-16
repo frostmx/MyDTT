@@ -257,6 +257,101 @@ namespace
     }
 
     /**
+     * A station nobody has named carries the game's own "Truck Station" as its text: a string
+     * table entry, shown to every player in their own language. That text is not the player's,
+     * and copying it into the name would bake it in the server's language for everyone. The
+     * check is on the text itself, not on the words: a player who typed exactly "Truck Station"
+     * gets a plain string, and their text is theirs.
+     */
+    bool DTSIsTableText(const FText& Text)
+    {
+        FName TableId;
+        FTextKey Key;
+        return FTextInspector::GetTableIdAndKey(Text, TableId, Key);
+    }
+
+    /**
+     * The words a station is born with - the building's display name and its descriptor's, in
+     * the server's language and in English. A head that is one of them was baked in by an
+     * earlier pass, or copied by hand, and goes the same way as the default text.
+     */
+    bool DTSIsStationDefaultName(const AFGBuildableDockingStation* Station, const FString& Text)
+    {
+        const FString Wanted = Text.TrimStartAndEnd();
+        if (Wanted.IsEmpty() || !IsValid(Station)) return false;
+
+        TArray<FText> Defaults;
+        if (const FTextProperty* Property = FindFProperty<FTextProperty>(Station->GetClass(), TEXT("mDisplayName")))
+        {
+            Defaults.Add(Property->GetPropertyValue_InContainer(Station));
+        }
+        if (const TSubclassOf<UFGItemDescriptor> Descriptor = Station->GetBuiltWithDescriptor())
+        {
+            Defaults.Add(UFGItemDescriptor::GetItemName(Descriptor));
+        }
+        for (const FText& Default : Defaults)
+        {
+            if (Wanted.Equals(Default.ToString().TrimStartAndEnd(), ESearchCase::IgnoreCase)) return true;
+            const FString* Source = FTextInspector::GetSourceString(Default);
+            if (Source && Wanted.Equals(Source->TrimStartAndEnd(), ESearchCase::IgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * What a name is composed from: the current name minus the game's default text. A station
+     * nobody has named contributes nothing; one that had "Truck Station" baked in by an earlier
+     * pass, or a hand-written tag next to that text, keeps its tag and its caption. OutDropped
+     * receives the text that went.
+     */
+    FString DTSComposeSource(const AFGDockingStationIdentifier* Identifier, const AFGBuildableDockingStation* Station,
+        const FString& Current, bool bHadAuto, const FString& PrevHead, const FString& PrevTag, const FString& PrevTail,
+        bool bHasTag, const FString& TagBase, const FString& TagResource, EDTTDispatchRole TagRole, int32 TagThreshold,
+        FString* OutDropped = nullptr)
+    {
+        if (DTSIsTableText(Identifier->GetStationName()))
+        {
+            if (OutDropped) *OutDropped = Current;
+            return FString();
+        }
+        const FString PlayerText = bHasTag ? TagBase : (bHadAuto ? PrevHead : Current);
+        if (!DTSIsStationDefaultName(Station, PlayerText)) return Current;
+        if (OutDropped) *OutDropped = PlayerText;
+        if (bHadAuto) return DTSJoinAutoBlock(FString(), PrevTag, PrevTail);
+        return bHasTag ? UDynamicTimeTableSubsystem::MakeDispatchTaggedName(FString(), TagResource, TagRole, TagThreshold) : FString();
+    }
+
+    /** The same name with another word in its resource tag; empty when the tag cannot be found. */
+    FString DTSReplaceTagWord(const FString& Current, const FString& OldWord, const FString& NewWord, EDTTDispatchRole Role, int32 Threshold)
+    {
+        const FString NewTag = UDynamicTimeTableSubsystem::MakeDispatchTaggedName(FString(), NewWord, Role, Threshold);
+        if (NewTag.IsEmpty()) return FString();
+
+        FString Head, Tag, Tail;
+        if (DTSSplitAutoBlock(Current, Head, Tag, Tail)) return DTSJoinAutoBlock(Head, NewTag, Tail);
+
+        // Hand-written: the tag is the last bracketed group that reads as one, wherever it sits.
+        int32 SearchEnd = Current.Len();
+        while (SearchEnd > 0)
+        {
+            int32 Close = INDEX_NONE;
+            int32 Open = INDEX_NONE;
+            if (!Current.Left(SearchEnd).FindLastChar(TEXT(')'), Close)) break;
+            if (!Current.Left(Close).FindLastChar(TEXT('('), Open)) break;
+            FString Base, Word;
+            EDTTDispatchRole GroupRole = EDTTDispatchRole::None;
+            int32 GroupThreshold = 0;
+            if (UDynamicTimeTableSubsystem::ParseDispatchTag(Current.Mid(Open, Close - Open + 1), Base, Word, GroupRole, GroupThreshold) &&
+                Word == OldWord)
+            {
+                return Current.Left(Open) + NewTag + Current.Mid(Close + 1);
+            }
+            SearchEnd = Open;
+        }
+        return FString();
+    }
+
+    /**
      * A group has no stored identity any more - it is just a name on a station - so its id has to
      * be derived from that name. It has to stay the same across rebuilds, or the rotation cursor
      * and any open client window would lose their group every time a station is renamed.
@@ -584,7 +679,8 @@ namespace
      * resource stays too: normally yes while it means the same item, no when the naming language
      * was just changed and the word is one of the game's own.
      */
-    FString DTSComposeAutoName(const FString& CurrentName, const FDTTAutoNameResult& Result, bool bShared, bool bSameResource, bool bKeepWord)
+    FString DTSComposeAutoName(const FString& CurrentName, const FDTTAutoNameResult& Result, bool bShared, bool bSameResource, bool bKeepWord,
+        const FString* WorldWord = nullptr)
     {
         FString OldBase, OldResource;
         EDTTDispatchRole OldRole = EDTTDispatchRole::None;
@@ -598,7 +694,12 @@ namespace
         // mod's item name is the game's, which is a different language on a Russian save and would
         // rewrite "(Боксит)" as "(Bauxite)" on the first pass - and strip could never put it back,
         // because by then nothing remembers it.
-        const FString Resource = bKeepWord ? OldResource : Result.ResourceName;
+        //
+        // A word that is written anew is the one the other stations already use for this item -
+        // the player's own, where they have one - so a new station falls in with its neighbours
+        // instead of bringing the game's name into a world named by hand.
+        const FString Resource = bKeepWord ? OldResource
+            : (WorldWord && !WorldWord->IsEmpty()) ? *WorldWord : Result.ResourceName;
 
         const EDTTDispatchRole Role = bKeepThreshold ? EDTTDispatchRole::Requester : EDTTDispatchRole::ByStationMode;
         const FString Head = UDynamicTimeTableSubsystem::MakeDispatchTaggedName(
@@ -653,7 +754,8 @@ void UDynamicTimeTableSubsystem::MarkAllDocksForAutoName(const TCHAR* Reason)
     }
 }
 
-bool UDynamicTimeTableSubsystem::ProcessAutoNameForStation(AFGDockingStationIdentifier* Identifier, bool bPreviewOnly, TArray<FString>* OutLines, bool bExplainAll)
+bool UDynamicTimeTableSubsystem::ProcessAutoNameForStation(AFGDockingStationIdentifier* Identifier, bool bPreviewOnly, TArray<FString>* OutLines, bool bExplainAll,
+    const TMap<TSubclassOf<UFGItemDescriptor>, FString>* WorldWords)
 {
     if (!IsValid(Identifier)) return false;
 
@@ -742,7 +844,10 @@ bool UDynamicTimeTableSubsystem::ProcessAutoNameForStation(AFGDockingStationIden
     // survives as it was typed. The timed sweep never does this on its own.
     const bool bRelabel = bExplainAll || AutoNameRelabelPending;
     const bool bKeepWord = bSameResource && !(bRelabel && ResolveItemClassByName(TagResource));
-    const FString NewName = DTSComposeAutoName(Current, Result, bShared, bSameResource, bKeepWord);
+    const FString ComposeFrom = DTSComposeSource(Identifier, Station, Current, bHadAuto, PrevHead, PrevTag, PrevTail,
+        bHasTag, TagBase, TagResource, TagRole, TagThreshold);
+    const FString* WorldWord = WorldWords ? WorldWords->Find(Result.ItemClass) : nullptr;
+    const FString NewName = DTSComposeAutoName(ComposeFrom, Result, bShared, bSameResource, bKeepWord, WorldWord);
 
     // The sign already in the name is the memory of the last topology, so no separate "we have
     // been here" flag is needed: the mod sets the switch when it first names a station and again
@@ -818,6 +923,9 @@ int32 UDynamicTimeTableSubsystem::RunAutoNamePass(bool bApplyAll, bool bPreviewO
         }
     }
 
+    // Read after the filling walk, so a dock's item is known even when it is empty.
+    const TMap<TSubclassOf<UFGItemDescriptor>, FString> WorldWords = CollectWorldWords();
+
     for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
     {
         if (Budget <= 0) break;
@@ -829,7 +937,7 @@ int32 UDynamicTimeTableSubsystem::RunAutoNamePass(bool bApplyAll, bool bPreviewO
 
         --Budget;
         if (!bPreviewOnly) AutoNameDirty.Remove(Guid);
-        if (ProcessAutoNameForStation(Identifier, bPreviewOnly, OutLines, bWholeWorld)) ++Changed;
+        if (ProcessAutoNameForStation(Identifier, bPreviewOnly, OutLines, bWholeWorld, &WorldWords)) ++Changed;
 
         // Chat drops a long burst, so whatever a pass reports also goes to the log.
         if (OutLines)
@@ -871,6 +979,123 @@ int32 UDynamicTimeTableSubsystem::StripAutoNames(TArray<FString>* OutLines)
     return Stripped;
 }
 
+TMap<TSubclassOf<UFGItemDescriptor>, FString> UDynamicTimeTableSubsystem::CollectWorldWords() const
+{
+    // A word is the player's when the game does not know it in any language. The item it stands
+    // for is what that dock holds, or, for an empty dock, what its belts said the last time it
+    // was walked. Where the stations disagree, the most common word wins; a dock still marked as
+    // a guess teaches nothing.
+    TMap<TSubclassOf<UFGItemDescriptor>, FString> Words;
+    AFGVehicleSubsystem* Vehicles = AFGVehicleSubsystem::Get(GetWorld());
+    if (!IsValid(Vehicles)) return Words;
+
+    struct FVote { FString Word; int32 Count = 0; };
+    TMap<TSubclassOf<UFGItemDescriptor>, TMap<FString, FVote>> Votes;
+    for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
+    {
+        if (!IsValid(Identifier)) continue;
+        const FString Current = Identifier->GetStationName().ToString();
+        FString Head, Tag, Tail;
+        if (DTSSplitAutoBlock(Current, Head, Tag, Tail) && Tail.Contains(TEXT("?"))) continue;
+        FString Base, Word;
+        EDTTDispatchRole Role = EDTTDispatchRole::None;
+        int32 Threshold = 0;
+        if (!ParseDispatchTag(Current, Base, Word, Role, Threshold) || ResolveItemClassByName(Word)) continue;
+
+        TSubclassOf<UFGItemDescriptor> Item = FDTTAutoNameScanner::DockCargo(Identifier->GetStation());
+        if (!Item)
+        {
+            if (const FDTTAutoNameReach* Reach = AutoNameMachines.Find(Identifier->GetPathNodeGUID())) Item = Reach->ItemClass;
+        }
+        if (!Item) continue;
+        FVote& Vote = Votes.FindOrAdd(Item).FindOrAdd(Word.ToLower());
+        if (Vote.Count++ == 0) Vote.Word = Word;
+    }
+    for (const TPair<TSubclassOf<UFGItemDescriptor>, TMap<FString, FVote>>& ByItem : Votes)
+    {
+        const FVote* Best = nullptr;
+        for (const TPair<FString, FVote>& Pair : ByItem.Value)
+        {
+            if (!Best || Pair.Value.Count > Best->Count || (Pair.Value.Count == Best->Count && Pair.Value.Word < Best->Word)) Best = &Pair.Value;
+        }
+        if (Best) Words.Add(ByItem.Key, Best->Word);
+    }
+    return Words;
+}
+
+int32 UDynamicTimeTableSubsystem::RestoreGameWords(bool bApply, TArray<FString>& OutLines)
+{
+    if (!IsServer()) return 0;
+    AFGVehicleSubsystem* Vehicles = AFGVehicleSubsystem::Get(GetWorld());
+    if (!IsValid(Vehicles)) return 0;
+
+    // The world word in reverse. A word the game knows in some language is that item; a word it
+    // does not know is whatever the stations carrying it hold, when they all hold the same thing.
+    // The number, the text, the group and the caption stay. Stations the auto-namer skips are in:
+    // the word is in the name, not in the belts. A name ending in a full stop, and (F) and (D)
+    // stations, are the player's as ever.
+    TMap<FString, TSet<TSubclassOf<UFGItemDescriptor>>> CargoByWord;
+    for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
+    {
+        if (!IsValid(Identifier)) continue;
+        FString Base, Word;
+        EDTTDispatchRole Role = EDTTDispatchRole::None;
+        int32 Threshold = 0;
+        if (!ParseDispatchTag(Identifier->GetStationName().ToString(), Base, Word, Role, Threshold)) continue;
+        if (const TSubclassOf<UFGItemDescriptor> Cargo = FDTTAutoNameScanner::DockCargo(Identifier->GetStation()))
+        {
+            CargoByWord.FindOrAdd(Word.ToLower()).Add(Cargo);
+        }
+    }
+
+    int32 Changed = 0;
+    int32 Unknown = 0;
+    for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
+    {
+        if (!IsValid(Identifier)) continue;
+        const FString Current = Identifier->GetStationName().ToString();
+        FString Ignored;
+        if (ParseFuelStopTag(Current, Ignored) || ParseDepotTag(Current, Ignored)) continue;
+        FString Base, Word;
+        EDTTDispatchRole Role = EDTTDispatchRole::None;
+        int32 Threshold = 0;
+        if (!ParseDispatchTag(Current, Base, Word, Role, Threshold)) continue;
+        if (Current.TrimStartAndEnd().EndsWith(TEXT(".")))
+        {
+            OutLines.Add(FString::Printf(TEXT("%s - skipped (player-owned-name)"), *Current));
+            continue;
+        }
+
+        TSubclassOf<UFGItemDescriptor> Item = ResolveItemClassByName(Word);
+        if (!Item)
+        {
+            const TSet<TSubclassOf<UFGItemDescriptor>>* Cargo = CargoByWord.Find(Word.ToLower());
+            if (Cargo && Cargo->Num() == 1) Item = *Cargo->CreateConstIterator();
+        }
+        if (!Item)
+        {
+            ++Unknown;
+            OutLines.Add(FString::Printf(TEXT("%s - \"%s\" is not an item the game knows, and no station carrying it holds anything"), *Current, *Word));
+            continue;
+        }
+
+        const FString GameWord = ItemNameForNaming(Item);
+        if (GameWord.IsEmpty() || GameWord == Word) continue;
+        const FString NewName = DTSReplaceTagWord(Current, Word, GameWord, Role, Threshold);
+        if (NewName.IsEmpty() || NewName == Current) continue;
+        if (bApply && !RenameDockGuarded(Identifier, NewName)) continue;
+        ++Changed;
+        OutLines.Add(FString::Printf(TEXT("%s %s %s"), *Current, *DTSAutoArrow(), *NewName));
+    }
+    if (Unknown > 0) OutLines.Add(FString::Printf(TEXT("dTT: %d word(s) left as they are - not an item."), Unknown));
+
+    // Chat drops a long burst, so whatever a pass reports also goes to the log.
+    for (const FString& Line : OutLines)
+        UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("AUTONAME_LINE %s"), *Line);
+    if (bApply && Changed > 0) RebuildGroupsFromNames();
+    return Changed;
+}
+
 bool UDynamicTimeTableSubsystem::DescribeAutoName(const FString& StationQuery, TArray<FString>& OutLines) const
 {
     AFGVehicleSubsystem* Vehicles = AFGVehicleSubsystem::Get(GetWorld());
@@ -909,7 +1134,8 @@ bool UDynamicTimeTableSubsystem::DescribeAutoName(const FString& StationQuery, T
     Limits.bExplainAll = true;
 
     FString PrevHead, PrevTag, PrevTail;
-    const bool bAutoWasUnsure = DTSSplitAutoBlock(Current, PrevHead, PrevTag, PrevTail) && PrevTail.Contains(TEXT("?"));
+    const bool bHadAuto = DTSSplitAutoBlock(Current, PrevHead, PrevTag, PrevTail);
+    const bool bAutoWasUnsure = bHadAuto && PrevTail.Contains(TEXT("?"));
 
     FString TagBase, TagResource;
     EDTTDispatchRole TagRole = EDTTDispatchRole::None;
@@ -971,8 +1197,18 @@ bool UDynamicTimeTableSubsystem::DescribeAutoName(const FString& StationQuery, T
     // language, a word the game does not know is the player's own and stays.
     const bool bOwnWord = bHasTag && !ResolveItemClassForResource(TagResource);
     const bool bSameResource = Result.ItemClass && (bOwnWord || (PreferredItem && PreferredItem == Result.ItemClass));
+    FString Dropped;
+    const FString ComposeFrom = DTSComposeSource(Identifier, Station, Current, bHadAuto, PrevHead, PrevTag, PrevTail,
+        bHasTag, TagBase, TagResource, TagRole, TagThreshold, &Dropped);
+    if (!Dropped.IsEmpty()) OutLines.Add(FString::Printf(TEXT("  \"%s\" is the game's own text, not yours: dropped"), *Dropped));
+    const TMap<TSubclassOf<UFGItemDescriptor>, FString> WorldWords = CollectWorldWords();
+    if (const FString* WorldWord = WorldWords.Find(Result.ItemClass))
+    {
+        OutLines.Add(FString::Printf(TEXT("  the other stations call this item \"%s\""), **WorldWord));
+    }
     OutLines.Add(FString::Printf(TEXT("  name would be: %s"),
-        *DTSComposeAutoName(Current, Result, false, bSameResource, bSameResource && !ResolveItemClassByName(TagResource))));
+        *DTSComposeAutoName(ComposeFrom, Result, false, bSameResource, bSameResource && !ResolveItemClassByName(TagResource),
+            WorldWords.Find(Result.ItemClass))));
 
     // Same reason a pass logs its lines: chat is lossy, and this is the answer to "why that name".
     for (const FString& Line : OutLines)

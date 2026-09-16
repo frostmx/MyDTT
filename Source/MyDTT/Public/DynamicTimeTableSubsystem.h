@@ -137,6 +137,12 @@ public:
     int32 RunAutoNamePass(bool bApplyAll, bool bPreviewOnly, TArray<FString>* OutLines);
     /** /dtt autoname strip: takes the mod's block back off every name. */
     int32 StripAutoNames(TArray<FString>* OutLines);
+    /**
+     * /dtt autoname gamenames [apply]: every resource word that stands for an item becomes that
+     * item's name in the naming language; the rest of the name stays. Returns how many stations
+     * changed (or would change); words that stand for nothing are listed and left alone.
+     */
+    int32 RestoreGameWords(bool bApply, TArray<FString>& OutLines);
     /** Something was built, dismantled or re-piped: every chain may have changed. */
     void MarkAllDocksForAutoName(const TCHAR* Reason);
 
@@ -195,7 +201,14 @@ private:
     /** Called once a second from PollTruckStates; debounces, sweeps and renames. */
     void TickAutoName();
     /** Walks one dock and writes the result; returns true when the name or the mode changed. */
-    bool ProcessAutoNameForStation(class AFGDockingStationIdentifier* Identifier, bool bPreviewOnly, TArray<FString>* OutLines, bool bExplainAll = false);
+    bool ProcessAutoNameForStation(class AFGDockingStationIdentifier* Identifier, bool bPreviewOnly, TArray<FString>* OutLines, bool bExplainAll = false,
+        const TMap<TSubclassOf<class UFGItemDescriptor>, FString>* WorldWords = nullptr);
+    /**
+     * The player's own words for items, read off the stations that carry them: a station that
+     * gets a new word takes the one the others already use for its item, and the game's name
+     * only when nobody has given the item a word.
+     */
+    TMap<TSubclassOf<class UFGItemDescriptor>, FString> CollectWorldWords() const;
     /** The item's name in the naming language from the settings. */
     FString ItemNameForNaming(TSubclassOf<class UFGItemDescriptor> ItemClass) const;
     /** The scanner answers in classes; this writes their names, in the naming language, into the result. */

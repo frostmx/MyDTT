@@ -732,6 +732,15 @@ namespace
     }
 }
 
+TSubclassOf<UFGItemDescriptor> FDTTAutoNameScanner::DockCargo(AFGBuildableDockingStation* Station)
+{
+    if (!IsValid(Station)) return nullptr;
+    TArray<UFGConnectionComponent*> Ports, Outs;
+    FMyDTTHooks::GetDockPorts(Station, Ports, Outs);
+    Ports.Append(Outs);
+    return DTSDockCargoItem(Station, Ports);
+}
+
 bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAutoNameLimits& Limits,
     TSubclassOf<UFGItemDescriptor> Preferred, FDTTAutoNameResult& Out)
 {
