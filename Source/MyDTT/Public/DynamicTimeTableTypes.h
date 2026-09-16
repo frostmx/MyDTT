@@ -391,6 +391,20 @@ struct FDTTSettings
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float FuelLegMarginFactor = 2.0f;
     /** A borrowed (F) is only placed where the tank can reach it using at most this fraction of its current energy. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float FuelReachFraction = 0.8f;
+    /**
+     * Off by default on purpose: a world that already has hand-written tags must look exactly the
+     * same after the update. On, the mod reads the belts around every dock, writes what it found
+     * into the station's name and sets its LOAD/UNLOAD switch.
+     */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bAutoNameStations = false;
+    /** Quiet time after the last build or rename before a dirty station is walked again. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float AutoNameDebounceSeconds = 2.0f;
+    /** Every station is marked dirty this often, which is what catches an overclock change. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") float AutoNameSweepSeconds = 60.0f;
+    /** Ceiling on the buildings one walk may visit; above it the station is left alone. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 AutoNameMaxNodes = 500;
+    /** How many final products the name lists before it ends in an ellipsis. */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 AutoNameMaxProducts = 3;
 
     void Sanitize()
     {
@@ -409,6 +423,10 @@ struct FDTTSettings
         FuelSkipMarginLaps = FMath::Clamp(FuelSkipMarginLaps, FuelCriticalMarginLaps + 0.1f, 10.0f);
         FuelLegMarginFactor = FMath::Clamp(FuelLegMarginFactor, 1.0f, 5.0f);
         FuelReachFraction = FMath::Clamp(FuelReachFraction, 0.3f, 1.0f);
+        AutoNameDebounceSeconds = FMath::Clamp(AutoNameDebounceSeconds, 0.5f, 30.0f);
+        AutoNameSweepSeconds = FMath::Clamp(AutoNameSweepSeconds, 10.0f, 600.0f);
+        AutoNameMaxNodes = FMath::Clamp(AutoNameMaxNodes, 50, 5000);
+        AutoNameMaxProducts = FMath::Clamp(AutoNameMaxProducts, 1, 8);
     }
     bool operator==(const FDTTSettings& Other) const
     {
@@ -422,7 +440,10 @@ struct FDTTSettings
             RequesterClaimTimeoutSeconds == Other.RequesterClaimTimeoutSeconds && OverdueRequestMinutes == Other.OverdueRequestMinutes &&
             IdleDispatchRecheckSeconds == Other.IdleDispatchRecheckSeconds &&
             FuelCriticalMarginLaps == Other.FuelCriticalMarginLaps && FuelSkipMarginLaps == Other.FuelSkipMarginLaps &&
-            FuelLegMarginFactor == Other.FuelLegMarginFactor && FuelReachFraction == Other.FuelReachFraction;
+            FuelLegMarginFactor == Other.FuelLegMarginFactor && FuelReachFraction == Other.FuelReachFraction &&
+            bAutoNameStations == Other.bAutoNameStations && AutoNameDebounceSeconds == Other.AutoNameDebounceSeconds &&
+            AutoNameSweepSeconds == Other.AutoNameSweepSeconds && AutoNameMaxNodes == Other.AutoNameMaxNodes &&
+            AutoNameMaxProducts == Other.AutoNameMaxProducts;
     }
     bool operator!=(const FDTTSettings& Other) const { return !(*this == Other); }
     FString Describe() const
@@ -430,7 +451,8 @@ struct FDTTSettings
         return FString::Printf(TEXT("ExactQuantities=%s SolidRequestStacks=%d FluidRequestStacks=%d RequestBufferStacks=%d FluidFullLoad=%s DrainLeftovers=%s "
             "LeftoverHoldSeconds=%.0f StayUntilEmpty=%s TopUpIntervalSeconds=%.0f UnloadAtDepot=%s SkipProducerWhenCargoCovers=%s "
             "PoolDispatchIntervalSeconds=%.0f MaxRequestersPerLap=%d RequesterClaimTimeoutSeconds=%.0f OverdueRequestMinutes=%d "
-            "IdleDispatchRecheckSeconds=%.0f FuelCriticalMarginLaps=%.2f FuelSkipMarginLaps=%.2f FuelLegMarginFactor=%.2f FuelReachFraction=%.2f"),
+            "IdleDispatchRecheckSeconds=%.0f FuelCriticalMarginLaps=%.2f FuelSkipMarginLaps=%.2f FuelLegMarginFactor=%.2f FuelReachFraction=%.2f "
+            "AutoNameStations=%s AutoNameDebounceSeconds=%.0f AutoNameSweepSeconds=%.0f AutoNameMaxNodes=%d AutoNameMaxProducts=%d"),
             bExactQuantities ? TEXT("true") : TEXT("false"),
             SolidRequestStacks, FluidRequestStacks, RequestBufferStacks, bFluidFullLoad ? TEXT("true") : TEXT("false"),
             bDrainLeftovers ? TEXT("true") : TEXT("false"),
@@ -438,7 +460,9 @@ struct FDTTSettings
             TopUpIntervalSeconds, bUnloadAtDepot ? TEXT("true") : TEXT("false"),
             bSkipProducerWhenCargoCovers ? TEXT("true") : TEXT("false"), PoolDispatchIntervalSeconds, MaxRequestersPerLap,
             RequesterClaimTimeoutSeconds, OverdueRequestMinutes, IdleDispatchRecheckSeconds, FuelCriticalMarginLaps, FuelSkipMarginLaps,
-            FuelLegMarginFactor, FuelReachFraction);
+            FuelLegMarginFactor, FuelReachFraction,
+            bAutoNameStations ? TEXT("true") : TEXT("false"), AutoNameDebounceSeconds, AutoNameSweepSeconds,
+            AutoNameMaxNodes, AutoNameMaxProducts);
     }
     /** "/dtt set <field> <value>": true when the field exists and parsed. */
     bool SetByName(const FString& Field, const FString& Value)
@@ -472,6 +496,11 @@ struct FDTTSettings
         if (F == TEXT("fuelskipmarginlaps")) return AsFloat(FuelSkipMarginLaps);
         if (F == TEXT("fuellegmarginfactor")) return AsFloat(FuelLegMarginFactor);
         if (F == TEXT("fuelreachfraction")) return AsFloat(FuelReachFraction);
+        if (F == TEXT("autonamestations")) return AsBool(bAutoNameStations);
+        if (F == TEXT("autonamedebounceseconds")) return AsFloat(AutoNameDebounceSeconds);
+        if (F == TEXT("autonamesweepseconds")) return AsFloat(AutoNameSweepSeconds);
+        if (F == TEXT("autonamemaxnodes")) return AsInt(AutoNameMaxNodes);
+        if (F == TEXT("autonamemaxproducts")) return AsInt(AutoNameMaxProducts);
         return false;
     }
 };

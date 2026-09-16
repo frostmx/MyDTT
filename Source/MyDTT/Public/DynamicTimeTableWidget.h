@@ -85,6 +85,11 @@ private:
     UPROPERTY() TObjectPtr<USpinBox> SettingFuelSkip;
     UPROPERTY() TObjectPtr<USpinBox> SettingFuelLegMargin;
     UPROPERTY() TObjectPtr<USpinBox> SettingFuelReach;
+    UPROPERTY() TObjectPtr<UCheckBox> SettingAutoName;
+    UPROPERTY() TObjectPtr<USpinBox> SettingAutoNameDebounce;
+    UPROPERTY() TObjectPtr<USpinBox> SettingAutoNameSweep;
+    UPROPERTY() TObjectPtr<USpinBox> SettingAutoNameMaxNodes;
+    UPROPERTY() TObjectPtr<USpinBox> SettingAutoNameMaxProducts;
     UPROPERTY() TObjectPtr<UButton> SettingsSaveButton;
     UPROPERTY() TObjectPtr<UButton> SettingsDefaultsButton;
     UPROPERTY() TObjectPtr<UTextBlock> SettingsStatusText;

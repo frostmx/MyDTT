@@ -109,11 +109,13 @@ void UDynamicTimeTableWidget::NativeConstruct()
     SettingsDefaultsButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsDefaultsClicked);
     for (USpinBox* Spin : { SettingSolidRequest.Get(), SettingFluidRequest.Get(), SettingRequestBuffer.Get(),
         SettingLeftoverHold.Get(), SettingTopUpInterval.Get(), SettingDispatchInterval.Get(), SettingMaxRequesters.Get(),
-        SettingClaimTimeout.Get(), SettingOverdueMinutes.Get(), SettingIdleRecheck.Get(), SettingFuelCritical.Get(), SettingFuelSkip.Get() })
+        SettingClaimTimeout.Get(), SettingOverdueMinutes.Get(), SettingIdleRecheck.Get(), SettingFuelCritical.Get(), SettingFuelSkip.Get(),
+        SettingAutoNameDebounce.Get(), SettingAutoNameSweep.Get(), SettingAutoNameMaxNodes.Get(), SettingAutoNameMaxProducts.Get() })
     {
         if (Spin) Spin->OnValueChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingSpinChanged);
     }
-    for (UCheckBox* Check : { SettingExactQuantities.Get(), SettingFluidFullLoad.Get(), SettingDrainLeftovers.Get(), SettingUnloadAtDepot.Get(), SettingSkipProducer.Get() })
+    for (UCheckBox* Check : { SettingExactQuantities.Get(), SettingFluidFullLoad.Get(), SettingDrainLeftovers.Get(), SettingUnloadAtDepot.Get(), SettingSkipProducer.Get(),
+        SettingAutoName.Get() })
     {
         if (Check) Check->OnCheckStateChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingCheckChanged);
     }
@@ -401,6 +403,13 @@ void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
     SettingFuelLegMargin = Spin(TEXT("Leg guard margin, x"), TEXT("Before every leg the tank must hold this many times the estimated cost of it, or a fuel stop goes in first. The engine's estimate is unverified against real consumption, so 1.0 strands trucks; 2 is the shipped value."), 1.0f, 5, 0.1f);
     SettingFuelReach = Spin(TEXT("Detour reach, share of the tank"), TEXT("A borrowed (F) is only placed where the tank can reach it on at most this share of its current energy. Lower plans more cautiously, 1.0 spends the whole tank on getting there."), 0.3f, 1.0f, 0.05f);
 
+    Section(TEXT("Naming"));
+    SettingAutoName = Check(TEXT("Name stations from their belts"), TEXT("Off by default. On: the mod reads the belts around every dock, writes \"(Resource) -240/m -> Product\" into the name and sets the LOAD/UNLOAD switch to match. Text you wrote yourself is kept; a name ending in a full stop is left alone entirely."));
+    SettingAutoNameDebounce = Spin(TEXT("Rewrite after, seconds"), TEXT("Quiet time after the last build or rename before a station is walked again."), 0.5f, 30, 0.5f);
+    SettingAutoNameSweep = Spin(TEXT("Full sweep every, seconds"), TEXT("Every station is checked this often. This is what notices an overclock change, which no hook reports."), 10, 600, 10);
+    SettingAutoNameMaxNodes = Spin(TEXT("Walk at most, buildings"), TEXT("A chain longer than this leaves the station unnamed instead of costing a frame."), 50, 5000, 50);
+    SettingAutoNameMaxProducts = Spin(TEXT("Products in the name"), TEXT("How many final products the name lists before it ends in an ellipsis."), 1, 8, 1);
+
     UHorizontalBox* Buttons = WidgetTree->ConstructWidget<UHorizontalBox>(); Box->AddChildToVerticalBox(Buttons)->SetPadding(FMargin(0,6,0,0));
     SettingsSaveButton = MakeButton(WidgetTree,TEXT("Save")); AddRowItem(Buttons,SettingsSaveButton);
     SettingsDefaultsButton = MakeButton(WidgetTree,TEXT("Defaults")); AddRowItem(Buttons,SettingsDefaultsButton);
@@ -439,6 +448,11 @@ void UDynamicTimeTableWidget::RefreshSettingsControls(bool bForce)
     SettingFuelSkip->SetValue(V.FuelSkipMarginLaps);
     SettingFuelLegMargin->SetValue(V.FuelLegMarginFactor);
     SettingFuelReach->SetValue(V.FuelReachFraction);
+    SettingAutoName->SetIsChecked(V.bAutoNameStations);
+    SettingAutoNameDebounce->SetValue(V.AutoNameDebounceSeconds);
+    SettingAutoNameSweep->SetValue(V.AutoNameSweepSeconds);
+    SettingAutoNameMaxNodes->SetValue(float(V.AutoNameMaxNodes));
+    SettingAutoNameMaxProducts->SetValue(float(V.AutoNameMaxProducts));
     bRefreshingControls = false;
     bSettingsEdited = false;
 }
@@ -467,6 +481,11 @@ FDTTSettings UDynamicTimeTableWidget::ReadSettingsControls() const
     V.FuelSkipMarginLaps = SettingFuelSkip->GetValue();
     V.FuelLegMarginFactor = SettingFuelLegMargin->GetValue();
     V.FuelReachFraction = SettingFuelReach->GetValue();
+    V.bAutoNameStations = SettingAutoName->IsChecked();
+    V.AutoNameDebounceSeconds = SettingAutoNameDebounce->GetValue();
+    V.AutoNameSweepSeconds = SettingAutoNameSweep->GetValue();
+    V.AutoNameMaxNodes = FMath::RoundToInt(SettingAutoNameMaxNodes->GetValue());
+    V.AutoNameMaxProducts = FMath::RoundToInt(SettingAutoNameMaxProducts->GetValue());
     V.Sanitize();
     return V;
 }
