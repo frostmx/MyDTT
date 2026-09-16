@@ -5846,7 +5846,14 @@ void UDynamicTimeTableSubsystem::BuildDispatchRows(TArray<FDTTDispatchRow>& OutR
         FDTTDispatchRow& Row = OutRows.AddDefaulted_GetRef();
         Row.ResourceId = Station.ResourceId;
         Row.ItemClass = TSoftClassPtr<UFGItemDescriptor>(ItemClass.Get());
-        Row.StationName = StripDispatchTag(Station.DisplayName);
+        // The card already names the resource, so the tag goes; the auto-name caption stays,
+        // or a station with no text of its own would read as "(no name)".
+        {
+            FString Head, Tag, Tail;
+            Row.StationName = DTSSplitAutoBlock(Station.DisplayName, Head, Tag, Tail)
+                ? (Head.TrimStartAndEnd() + TEXT(" ") + Tail).TrimStartAndEnd()
+                : StripDispatchTag(Station.DisplayName);
+        }
         Row.DockingPathNodeGuid = Station.DockingPathNodeGuid;
         Row.Role = GetEffectiveDispatchRole(Station);
         Row.bModeKnown = IsValid(Dock);

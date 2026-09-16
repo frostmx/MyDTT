@@ -26,6 +26,8 @@
   the belt lands.
 - Truck cards in the window no longer show the truck's object number after its name; the number
   is still what `/dtt trucks` prints and `/dtt why` takes.
+- Dispatch cards show an auto-named station by its caption, `-5/m -> Adaptive Control Unit`,
+  instead of "(no name)" when the station has no text of its own.
 
 ## 3.0.0
 
