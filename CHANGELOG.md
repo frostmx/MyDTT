@@ -1,5 +1,16 @@
 # Changelog
 
+## 3.0.2
+
+- The pool serves the request that has waited longest. The dispatcher used to rank open requests
+  by how far below the threshold they were, so a small station that dipped a little long ago kept
+  losing every free truck to a big one that had just dipped a lot. Now an empty station comes
+  first, then the request that has been open and unclaimed the longest; the stock ratio only
+  breaks ties. The same order picks which stations a pool lap visits. Legacy trucks on their own
+  routes still take the most starved requesters. `/dtt why` prints the waiting time of the first
+  request of every resource.
+- Client build unchanged; `RemoteVersionRange` stays `>=3.0.0 <3.1.0`.
+
 ## 3.0.1
 
 - The game's own "Truck Station" is no longer copied into a name. A station nobody has renamed

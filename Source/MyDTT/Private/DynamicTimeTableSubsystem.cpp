@@ -2887,10 +2887,12 @@ bool UDynamicTimeTableSubsystem::EstimateTruckCargoStacks(
 
 void UDynamicTimeTableSubsystem::CollectOpenRequesters(
     const FString& ResourceId, TSubclassOf<UFGItemDescriptor> ItemClass,
-    AFGWheeledVehicleIdentifier* ForVehicle, TArray<FDTTOpenRequester>& Out) const
+    AFGWheeledVehicleIdentifier* ForVehicle, TArray<FDTTOpenRequester>& Out, bool bByWaitTime) const
 {
     Out.Reset();
     if (!ItemClass) return;
+    const UWorld* World = GetWorld();
+    const double Now = IsValid(World) ? World->GetTimeSeconds() : 0.0;
     for (const FDTTDispatchStation& Station : DispatchStations)
     {
         if (GetEffectiveDispatchRole(Station) != EDTTDispatchRole::Requester ||
@@ -2911,11 +2913,15 @@ void UDynamicTimeTableSubsystem::CollectOpenRequesters(
         const int32 StockStacks = ReadDockStockInStacks(Station.DockingStationIdentifier.Get(), ItemClass);
         FDTTRequestLevels Levels;
         const bool bLevels = GetRequestLevels(Station, ItemClass, Levels);
+        // The clock runs only while the request is open and unclaimed (UpdateRequesterWaitTimes);
+        // no entry means it opened since the last poll, or is already claimed by ForVehicle.
+        const double* Since = RequesterOpenSinceWorldSeconds.Find(Station.DockingPathNodeGuid);
+        const double WaitingSeconds = Since ? FMath::Max(0.0, Now - *Since) : 0.0;
         UE_LOG(LogDynamicTimeTableSubsystem, VeryVerbose,
-            TEXT("DISPATCH_CANDIDATE Truck='%s' Resource='%s' Station='%s' StockStacks=%d Trigger=%d Target=%d Open=%s"),
+            TEXT("DISPATCH_CANDIDATE Truck='%s' Resource='%s' Station='%s' StockStacks=%d Trigger=%d Target=%d Open=%s Waiting=%.0f"),
             *DTSVehicleName(ForVehicle), *ResourceId, *Station.DisplayName, StockStacks,
             bLevels ? Levels.Trigger : INDEX_NONE, bLevels ? Levels.Target : INDEX_NONE,
-            bLevels && StockStacks < Levels.Trigger ? TEXT("true") : TEXT("false"));
+            bLevels && StockStacks < Levels.Trigger ? TEXT("true") : TEXT("false"), WaitingSeconds);
         // Unreadable inventory: neither stock nor capacity is known; a trigger of 0 never opens.
         if (!bLevels) continue;
         if (StockStacks < Levels.Trigger)
@@ -2927,14 +2933,24 @@ void UDynamicTimeTableSubsystem::CollectOpenRequesters(
             Candidate.TargetStacks = Levels.Target;
             Candidate.CapacityStacks = Levels.Capacity;
             Candidate.FillRatio = static_cast<double>(StockStacks) / static_cast<double>(Levels.Trigger);
+            Candidate.WaitingSeconds = WaitingSeconds;
             Out.Add(Candidate);
         }
     }
 
     // Lowest stock/threshold ratio is the most starved requester. Name and GUID make ties stable
-    // across subsystem rebuilds and server restarts.
-    Out.Sort([](const FDTTOpenRequester& A, const FDTTOpenRequester& B)
+    // across subsystem rebuilds and server restarts. The pool's order puts an empty station ahead
+    // of everything and then the request that has waited longest: a small station that dipped
+    // below its threshold long ago must not keep losing to a big one that just did. The clock
+    // ticks once a second, so waits within a second are the same wait and starvation decides.
+    Out.Sort([bByWaitTime](const FDTTOpenRequester& A, const FDTTOpenRequester& B)
     {
+        if (bByWaitTime)
+        {
+            const bool bEmptyA = A.StockStacks <= 0, bEmptyB = B.StockStacks <= 0;
+            if (bEmptyA != bEmptyB) return bEmptyA;
+            if (FMath::Abs(A.WaitingSeconds - B.WaitingSeconds) >= 0.5) return A.WaitingSeconds > B.WaitingSeconds;
+        }
         if (!FMath::IsNearlyEqual(A.FillRatio, B.FillRatio)) return A.FillRatio < B.FillRatio;
         if (A.Station->DisplayName != B.Station->DisplayName)
             return A.Station->DisplayName < B.Station->DisplayName;
@@ -2958,8 +2974,11 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
         return Result;
     }
 
+    // A pool lap takes the empty and the longest-waiting requesters first; a legacy lap keeps
+    // taking the most starved.
+    const bool bPoolTruck = PoolTrucks.Contains(Vehicle);
     TArray<FDTTOpenRequester> Candidates;
-    CollectOpenRequesters(ResourceId, ItemClass, Vehicle, Candidates);
+    CollectOpenRequesters(ResourceId, ItemClass, Vehicle, Candidates, bPoolTruck);
     if (Candidates.Num() == 0)
     {
         // No lap planned: the previous lap's plan must not outlive it, or the kept-last loop
@@ -2980,7 +2999,6 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
         // A pool truck without a producer delivers from what it carries; a legacy lap always
         // loads at Route[0].
         const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
-        const bool bPoolTruck = PoolTrucks.Contains(Vehicle);
         const FGuid Producer = ProducerGuid.IsValid() ? ProducerGuid : (!bPoolTruck && Route.Num() > 0 ? Route[0] : FGuid());
         const int32 ProducerStacks = Producer.IsValid() ? ReadDockStockInStacks(FindDockByPathNode(Producer), ItemClass) : 0;
         AvailableStacks = FMath::Max(1, FMath::Min(CapacityStacks, OnBoardStacks + ProducerStacks));
@@ -3018,10 +3036,11 @@ TArray<FGuid> UDynamicTimeTableSubsystem::SelectRequestersForResource(
         CoveredDeficit += FMath::Max(1, (bByCapacity ? Candidate.CapacityStacks : Candidate.TargetStacks) - Candidate.StockStacks);
         if (Planned) Planned->Add(Selected->DockingPathNodeGuid, FMath::Max(0, Candidate.TargetStacks - Candidate.StockStacks) * StackSize);
         UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
-            TEXT("DISPATCH_CLAIMED Truck='%s' Resource='%s' Requester='%s' Guid=%s Priority=%d StockStacks=%d Trigger=%d Target=%d FillRatio=%.6f"),
+            TEXT("DISPATCH_CLAIMED Truck='%s' Resource='%s' Requester='%s' Guid=%s Priority=%d StockStacks=%d Trigger=%d Target=%d FillRatio=%.6f Waiting=%.0f Order=%s"),
             *DTSVehicleName(Vehicle), *ResourceId, *Selected->DisplayName,
             *Selected->DockingPathNodeGuid.ToString(), Priority, Candidate.StockStacks,
-            Candidate.TriggerStacks, Candidate.TargetStacks, Candidate.FillRatio);
+            Candidate.TriggerStacks, Candidate.TargetStacks, Candidate.FillRatio, Candidate.WaitingSeconds,
+            bPoolTruck ? TEXT("wait") : TEXT("starved"));
     }
     UE_LOG(LogDynamicTimeTableSubsystem, Verbose,
         TEXT("DISPATCH_LAP_PLANNED Truck='%s' Resource='%s' Open=%d Requesters=%d Deficit=%d DeficitBy=%s Cargo=%d OnBoard=%d Capacity=%d"),
@@ -5377,8 +5396,9 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
     PruneStaleRequesterClaims();
     RemoveInvalidTruckBookings();
 
-    // Every resource with at least one open, unclaimed requester; the most starved resource first.
-    struct FDemand { FString ResourceId; double Starved = 1.0; int32 Open = 0; FGuid TopRequester; };
+    // Every resource with at least one open, unclaimed requester, ranked by its first requester:
+    // an empty station first, then the request that has waited longest, starvation breaking ties.
+    struct FDemand { FString ResourceId; bool bEmpty = false; double Waiting = 0.0; double Starved = 1.0; int32 Open = 0; FGuid TopRequester; };
     TArray<FDemand> Demands;
     TSet<FString> Seen;
     for (const FDTTDispatchStation& Station : DispatchStations)
@@ -5394,12 +5414,15 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
             continue;
         }
         TArray<FDTTOpenRequester> Open;
-        CollectOpenRequesters(Station.ResourceId, ItemClass, nullptr, Open);
+        CollectOpenRequesters(Station.ResourceId, ItemClass, nullptr, Open, /*bByWaitTime*/ true);
         if (Open.Num() == 0) continue;
-        Demands.Add(FDemand{ Station.ResourceId, Open[0].FillRatio, Open.Num(), Open[0].Station->DockingPathNodeGuid });
+        Demands.Add(FDemand{ Station.ResourceId, Open[0].StockStacks <= 0, Open[0].WaitingSeconds,
+            Open[0].FillRatio, Open.Num(), Open[0].Station->DockingPathNodeGuid });
     }
     Demands.Sort([](const FDemand& A, const FDemand& B)
     {
+        if (A.bEmpty != B.bEmpty) return A.bEmpty;
+        if (FMath::Abs(A.Waiting - B.Waiting) >= 0.5) return A.Waiting > B.Waiting;
         if (!FMath::IsNearlyEqual(A.Starved, B.Starved)) return A.Starved < B.Starved;
         return A.ResourceId < B.ResourceId;
     });
@@ -5502,8 +5525,9 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
             const FGuid Balanced = ChooseProducerFromGroup(Chosen, Demand.ResourceId, Producer);
             if (Balanced.IsValid()) Producer = Balanced;
         }
-        UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_MATCH Truck='%s' Resource='%s' Producer='%s' Stock=%d Cost=%.3f Open=%d"),
-            *DTSVehicleName(Chosen), *Demand.ResourceId, *DockDisplayName(Producer), ProducerStock, BestCost, Demand.Open);
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_MATCH Truck='%s' Resource='%s' Producer='%s' Stock=%d Cost=%.3f Open=%d Waiting=%.0f Empty=%s"),
+            *DTSVehicleName(Chosen), *Demand.ResourceId, *DockDisplayName(Producer), ProducerStock, BestCost, Demand.Open,
+            Demand.Waiting, Demand.bEmpty ? TEXT("true") : TEXT("false"));
         if (AssignPoolTruck(Chosen, *ChosenState, Demand.ResourceId, ItemClass, Producer, Trigger))
         {
             ++Assigned;
@@ -6193,7 +6217,7 @@ void UDynamicTimeTableSubsystem::GetTruckWhyLines(const FString& TruckQuery, TAr
             const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(Station.ResourceId);
             if (!ItemClass) continue;
             TArray<FDTTOpenRequester> Open;
-            CollectOpenRequesters(Station.ResourceId, ItemClass, Vehicle, Open);
+            CollectOpenRequesters(Station.ResourceId, ItemClass, Vehicle, Open, /*bByWaitTime*/ true);
             if (Open.Num() == 0) continue;
             ++Demands;
 
@@ -6230,9 +6254,10 @@ void UDynamicTimeTableSubsystem::GetTruckWhyLines(const FString& TruckQuery, TAr
                     Verdict = TEXT("no LOAD producer of it has stock, and this truck carries none");
                 }
             }
-            OutLines.Add(FString::Printf(TEXT("  %s: %d open (worst '%s' %d/%d stacks) - %s"),
+            OutLines.Add(FString::Printf(TEXT("  %s: %d open (first '%s' %d/%d stacks%s, waiting %.0f s) - %s"),
                 *Station.ResourceId, Open.Num(), *Open[0].Station->DisplayName,
-                Open[0].StockStacks, Open[0].TriggerStacks, *Verdict));
+                Open[0].StockStacks, Open[0].TriggerStacks, Open[0].StockStacks <= 0 ? TEXT(", empty") : TEXT(""),
+                Open[0].WaitingSeconds, *Verdict));
         }
         if (Demands == 0)
         {
@@ -6240,7 +6265,7 @@ void UDynamicTimeTableSubsystem::GetTruckWhyLines(const FString& TruckQuery, TAr
         }
         else
         {
-            OutLines.Add(FString::Printf(TEXT("  the dispatcher runs every %.0f s and gives each request to the truck closest to it; \"ready\" above means this one is a candidate, not that it wins."),
+            OutLines.Add(FString::Printf(TEXT("  the dispatcher runs every %.0f s, serves an empty station first and then the request waiting longest, and gives each to the truck closest to it; \"ready\" above means this one is a candidate, not that it wins."),
                 Settings.PoolDispatchIntervalSeconds));
         }
     }

@@ -545,14 +545,17 @@ private:
         /** The dock's whole inventory in stacks: what a lap without exact quantities can leave here. */
         int32 CapacityStacks = 0;
         double FillRatio = 0.0;
+        /** Seconds the request has been open with nobody claiming it; 0 when unknown or just claimed. */
+        double WaitingSeconds = 0.0;
     };
     /**
      * Every UNLOAD requester of the resource below its threshold that is not claimed by another
-     * truck (ForVehicle's own claims count as free; null means any claim excludes), most starved
-     * first. Pure: claims nothing.
+     * truck (ForVehicle's own claims count as free; null means any claim excludes). Most starved
+     * first; with bByWaitTime (the pool's order) an empty station first, then the one that has
+     * waited longest, starvation only breaking ties. Pure: claims nothing.
      */
     void CollectOpenRequesters(const FString& ResourceId, TSubclassOf<class UFGItemDescriptor> ItemClass,
-        AFGWheeledVehicleIdentifier* ForVehicle, TArray<FDTTOpenRequester>& Out) const;
+        AFGWheeledVehicleIdentifier* ForVehicle, TArray<FDTTOpenRequester>& Out, bool bByWaitTime = false) const;
     /**
      * Selects and claims the open requesters for one lap, most starved first, until their summed
      * deficit (threshold minus stock) covers what the truck can deliver, at most MaxRequestersPerLap.
