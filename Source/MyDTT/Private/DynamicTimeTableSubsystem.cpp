@@ -280,7 +280,10 @@ namespace
         const FString Wanted = Text.TrimStartAndEnd();
         if (Wanted.IsEmpty() || !IsValid(Station)) return false;
 
-        TArray<FText> Defaults;
+        // The vanilla names in English first: a plain "Truck Station" is what an English client
+        // writes back when the player commits the untouched name field, whatever language the
+        // server itself runs in.
+        TArray<FText> Defaults = { FText::FromString(TEXT("Truck Station")), FText::FromString(TEXT("Fluid Truck Station")) };
         if (const FTextProperty* Property = FindFProperty<FTextProperty>(Station->GetClass(), TEXT("mDisplayName")))
         {
             Defaults.Add(Property->GetPropertyValue_InContainer(Station));
