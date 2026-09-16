@@ -1,5 +1,6 @@
 #include "DynamicTimeTableSubsystem.h"
 
+#include "DTTAutoName.h"
 #include "DTTSaveDataActor.h"
 #include "DynamicTimeTableChatCommand.h"
 #include "MyDTTHooks.h"
@@ -464,6 +465,427 @@ FString UDynamicTimeTableSubsystem::StripAllTags(const FString& FullName)
     if (ParseDepotTag(Name, Stripped)) Name = Stripped;
     Name = StripStationTag(Name).TrimStartAndEnd();
     return Name.IsEmpty() ? FullName.TrimStartAndEnd() : Name;
+}
+
+// ---------------------------------------------------------------------------
+// Auto-naming. The belts around a dock already say what it is for; this reads
+// them and writes the answer where the rest of the mod already looks - into the
+// station's name - and sets the station's own LOAD/UNLOAD switch to match.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+    /** Longer than this and the vanilla station UI truncates the interesting half. */
+    constexpr int32 DTSAutoNameMaxLength = 96;
+
+    FString DTSFormatRate(float Rate)
+    {
+        FString Text = FString::Printf(TEXT("%.1f"), Rate);
+        if (Text.EndsWith(TEXT(".0"))) Text.LeftChopInline(2);
+        return Text;
+    }
+
+    /** A product name lands in the tail, where a parenthesis would break the split. */
+    FString DTSSanitizeProductName(const FString& Name)
+    {
+        FString Clean = Name;
+        Clean.ReplaceInline(TEXT("("), TEXT(" "));
+        Clean.ReplaceInline(TEXT(")"), TEXT(" "));
+        Clean.ReplaceInline(TEXT(","), TEXT(" "));
+        return DTSNormalizeSpaces(MoveTemp(Clean));
+    }
+
+    FString DTSMakeAutoTail(const FDTTAutoNameResult& Result, bool bShared, int32 ProductCount, bool bEllipsis)
+    {
+        FString Tail = FString::Printf(TEXT("%s%s/m"),
+            Result.bRequester ? TEXT("-") : TEXT("+"), *DTSFormatRate(Result.RatePerMinute));
+        if (bShared) Tail += TEXT("*");
+        if (Result.bMixed) Tail += TEXT("?");
+
+        if (ProductCount > 0)
+        {
+            TArray<FString> Names;
+            for (int32 Index = 0; Index < ProductCount && Index < Result.Products.Num(); ++Index)
+            {
+                const FString Clean = DTSSanitizeProductName(Result.Products[Index]);
+                if (!Clean.IsEmpty()) Names.Add(Clean);
+            }
+            if (Names.Num() > 0)
+            {
+                Tail += FString::Printf(TEXT(" %s %s"), *DTSAutoArrow(), *FString::Join(Names, TEXT(", ")));
+                if (bEllipsis) Tail += FString::Printf(TEXT(" %s"), *DTSAutoEllipsis());
+            }
+        }
+        return Tail;
+    }
+
+    /**
+     * The new name for a station, player's text and all. The number a player wrote in "(Motor-40)"
+     * is theirs and survives; it is dropped only when the chain now carries something else, because
+     * it was a level for a different cargo.
+     */
+    FString DTSComposeAutoName(const FString& CurrentName, const FDTTAutoNameResult& Result, bool bShared, bool bSameResource)
+    {
+        FString OldBase, OldResource;
+        EDTTDispatchRole OldRole = EDTTDispatchRole::None;
+        int32 OldThreshold = 0;
+        const bool bHadTag = UDynamicTimeTableSubsystem::ParseDispatchTag(CurrentName, OldBase, OldResource, OldRole, OldThreshold);
+        const bool bKeepThreshold = bHadTag && Result.bRequester && OldRole == EDTTDispatchRole::Requester &&
+            OldThreshold != INDEX_NONE &&
+            (bSameResource || OldResource.Equals(Result.ResourceName, ESearchCase::IgnoreCase));
+
+        // The player's own word for the resource survives as long as it means the same item. The
+        // mod's item name is the game's, which is a different language on a Russian save and would
+        // rewrite "(Боксит)" as "(Bauxite)" on the first pass - and strip could never put it back,
+        // because by then nothing remembers it.
+        const FString Resource = bSameResource ? OldResource : Result.ResourceName;
+
+        const EDTTDispatchRole Role = bKeepThreshold ? EDTTDispatchRole::Requester : EDTTDispatchRole::ByStationMode;
+        const FString Head = UDynamicTimeTableSubsystem::MakeDispatchTaggedName(
+            CurrentName, Resource, Role, bKeepThreshold ? OldThreshold : 0);
+
+        // The tail is what gives way when the name gets long: the player's text and the tag carry
+        // the meaning, the product list is a hint.
+        int32 ProductCount = Result.Products.Num();
+        bool bEllipsis = Result.bMoreProducts;
+        FString Name;
+        for (;;)
+        {
+            Name = FString::Printf(TEXT("%s %s"), *Head, *DTSMakeAutoTail(Result, bShared, ProductCount, bEllipsis));
+            if (Name.Len() <= DTSAutoNameMaxLength || ProductCount <= 0) break;
+            --ProductCount;
+            bEllipsis = true;
+        }
+        return Name;
+    }
+}
+
+FString UDynamicTimeTableSubsystem::StripAutoBlock(const FString& FullName)
+{
+    FString Head, Tag, Tail;
+    if (!DTSSplitAutoBlock(FullName, Head, Tag, Tail)) return FullName.TrimStartAndEnd();
+
+    // Only the caption goes. The resource tag stays: it is what the dispatcher reads, it is usually
+    // the player's own word for the item, and a strip that unconfigured eighty stations would be a
+    // worse surprise than the caption ever was.
+    return Head.IsEmpty() ? Tag : Head + TEXT(" ") + Tag;
+}
+
+void UDynamicTimeTableSubsystem::MarkAllDocksForAutoName(const TCHAR* Reason)
+{
+    if (!IsServer() || !GetSettings().bAutoNameStations) return;
+    AFGVehicleSubsystem* Vehicles = AFGVehicleSubsystem::Get(GetWorld());
+    if (!IsValid(Vehicles)) return;
+
+    int32 Added = 0;
+    for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
+    {
+        if (!IsValid(Identifier)) continue;
+        bool bAlready = false;
+        AutoNameDirty.Add(Identifier->GetPathNodeGUID(), &bAlready);
+        if (!bAlready) ++Added;
+    }
+    if (Added > 0)
+    {
+        AutoNameDirtySinceSeconds = FPlatformTime::Seconds();
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("AUTONAME_DIRTY Reason=%s Added=%d Total=%d"),
+            Reason, Added, AutoNameDirty.Num());
+    }
+}
+
+bool UDynamicTimeTableSubsystem::ProcessAutoNameForStation(AFGDockingStationIdentifier* Identifier, bool bPreviewOnly, TArray<FString>* OutLines)
+{
+    if (!IsValid(Identifier)) return false;
+
+    const FString Current = Identifier->GetStationName().ToString();
+    const FGuid Guid = Identifier->GetPathNodeGUID();
+
+    auto Skip = [&](const TCHAR* Reason)
+    {
+        AutoNameMachines.Remove(Guid);
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("AUTONAME_SKIP Name=\"%s\" Reason=%s"), *Current, Reason);
+        if (OutLines) OutLines->Add(FString::Printf(TEXT("%s - skipped (%s)"), *Current, Reason));
+        return false;
+    };
+
+    // A name that ends in a full stop belongs to the player, completely.
+    if (Current.TrimStartAndEnd().EndsWith(TEXT("."))) return Skip(TEXT("player-owned-name"));
+
+    FString Ignored;
+    if (ParseFuelStopTag(Current, Ignored)) return Skip(TEXT("fuel-stop"));
+    if (ParseDepotTag(Current, Ignored)) return Skip(TEXT("depot"));
+
+    AFGBuildableDockingStation* Station = Identifier->GetStation();
+    if (!IsValid(Station)) return Skip(TEXT("station-not-loaded"));
+
+    FDTTAutoNameLimits Limits;
+    Limits.MaxNodes = GetSettings().AutoNameMaxNodes;
+    Limits.MaxProducts = GetSettings().AutoNameMaxProducts;
+
+    // What the station says about itself today, so an empty dock on a branching chain keeps its
+    // answer instead of drifting to whatever is biggest.
+    //
+    // A tag the mod itself wrote while unsure ('?') is not evidence of anything and is left out:
+    // reading back its own guess would erase the very mark that says it was one, and the name
+    // would keep flipping between marked and unmarked on every pass.
+    FString PrevHead, PrevTag, PrevTail;
+    const bool bHadAuto = DTSSplitAutoBlock(Current, PrevHead, PrevTag, PrevTail);
+    const bool bAutoWasUnsure = bHadAuto && PrevTail.Contains(TEXT("?"));
+
+    FString TagBase, TagResource;
+    EDTTDispatchRole TagRole = EDTTDispatchRole::None;
+    int32 TagThreshold = 0;
+    const bool bHasTag = ParseDispatchTag(Current, TagBase, TagResource, TagRole, TagThreshold);
+    const TSubclassOf<UFGItemDescriptor> PreferredItem =
+        (bHasTag && !bAutoWasUnsure) ? ResolveItemClassForResource(TagResource) : nullptr;
+
+    FDTTAutoNameResult Result;
+    if (!FDTTAutoNameScanner::Scan(Station, Limits, PreferredItem, Result)) return Skip(*Result.SkipReason);
+
+    // Two docks pouring into one chain both see the whole demand of that chain. Neither number is
+    // wrong and splitting them would invent a division the player never asked for, so both get the
+    // full figure and a '*' saying they are not alone.
+    FDTTAutoNameReach Reach;
+    Reach.ItemClass = Result.ItemClass;
+    Reach.bRequester = Result.bRequester;
+    for (const TWeakObjectPtr<AActor>& Machine : Result.Machines) Reach.Machines.Add(Machine);
+
+    bool bShared = false;
+    for (const TPair<FGuid, FDTTAutoNameReach>& Pair : AutoNameMachines)
+    {
+        if (Pair.Key == Guid) continue;
+        if (Pair.Value.ItemClass != Reach.ItemClass || Pair.Value.bRequester != Reach.bRequester) continue;
+        for (const TWeakObjectPtr<AActor>& Machine : Reach.Machines)
+        {
+            if (Pair.Value.Machines.Contains(Machine)) { bShared = true; break; }
+        }
+        if (bShared) break;
+    }
+
+    // The number a player wrote is kept while the cargo is the same thing - compared as an item
+    // class, not as text, or the first pass would drop it just because the tag was written in
+    // another language than the server's.
+    const bool bSameResource = bHasTag && PreferredItem && Result.ItemClass && PreferredItem == Result.ItemClass;
+    const FString NewName = DTSComposeAutoName(Current, Result, bShared, bSameResource);
+
+    // The sign already in the name is the memory of the last topology, so no separate "we have
+    // been here" flag is needed: the mod sets the switch when it first names a station and again
+    // when the belts turned around, and leaves a player's own click alone in between.
+    const bool bWasRequester = bHadAuto && PrevTail.StartsWith(TEXT("-"));
+    const bool bModeShouldChange = !bHadAuto || bWasRequester != Result.bRequester;
+    const bool bWantsLoadMode = !Result.bRequester;
+    const bool bModeWrong = Station->GetIsInLoadMode() != bWantsLoadMode;
+
+    const bool bNameChanges = NewName != Current;
+    const bool bChanges = bNameChanges || (bModeShouldChange && bModeWrong);
+
+    // Which machines a dock reaches is a measurement, not a decision, so a preview records it too:
+    // the '*' mark is only found by comparing docks, and a preview that hid it would disagree with
+    // the apply that follows.
+    AutoNameMachines.Add(Guid, MoveTemp(Reach));
+
+    if (bPreviewOnly)
+    {
+        if (OutLines)
+        {
+            OutLines->Add(bChanges
+                ? FString::Printf(TEXT("%s %s %s%s"), *Current, *DTSAutoArrow(), *NewName,
+                    bModeShouldChange && bModeWrong ? (bWantsLoadMode ? TEXT(" [+LOAD]") : TEXT(" [+UNLOAD]")) : TEXT(""))
+                : FString::Printf(TEXT("%s - already current"), *Current));
+        }
+        return bChanges;
+    }
+
+    if (bModeShouldChange && bModeWrong)
+    {
+        Station->SetIsInLoadMode(bWantsLoadMode);
+        UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("AUTONAME_MODE_SET Name=\"%s\" Mode=%s"),
+            *Current, bWantsLoadMode ? TEXT("LOAD") : TEXT("UNLOAD"));
+    }
+
+    if (bNameChanges && RenameDockGuarded(Identifier, NewName))
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("AUTONAME_RENAMED Old=\"%s\" New=\"%s\" Rate=%.1f Machines=%d%s"),
+            *Current, *NewName, Result.RatePerMinute, Result.Machines.Num(), bShared ? TEXT(" shared") : TEXT(""));
+        if (OutLines) OutLines->Add(FString::Printf(TEXT("%s %s %s"), *Current, *DTSAutoArrow(), *NewName));
+    }
+    else
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("AUTONAME_RESULT Name=\"%s\" Resource=\"%s\" Rate=%.1f Role=%s"),
+            *Current, *Result.ResourceName, Result.RatePerMinute, Result.bRequester ? TEXT("requester") : TEXT("producer"));
+    }
+    return bChanges;
+}
+
+int32 UDynamicTimeTableSubsystem::RunAutoNamePass(bool bApplyAll, bool bPreviewOnly, TArray<FString>* OutLines)
+{
+    if (!IsServer()) return 0;
+    AFGVehicleSubsystem* Vehicles = AFGVehicleSubsystem::Get(GetWorld());
+    if (!IsValid(Vehicles)) return 0;
+
+    // A timed pass takes a few stations at a time: one walk is bounded, a hundred of them in one
+    // tick is not.
+    constexpr int32 DocksPerTimedPass = 8;
+    int32 Changed = 0;
+    const bool bWholeWorld = bApplyAll || bPreviewOnly;
+    int32 Budget = bWholeWorld ? MAX_int32 : DocksPerTimedPass;
+
+    // A dock only learns it shares a chain by finding another dock already in the map, so the one
+    // walked first would miss the '*' and pick it up a pass later. A pass over the whole world
+    // therefore walks twice: once to fill the map, once to name from it. The timed pass needs no
+    // such thing - it walks what changed, and the map is already full from before.
+    if (bWholeWorld)
+    {
+        for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
+        {
+            if (IsValid(Identifier)) ProcessAutoNameForStation(Identifier, true, nullptr);
+        }
+    }
+
+    for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
+    {
+        if (Budget <= 0) break;
+        if (!IsValid(Identifier)) continue;
+        const int32 LinesBefore = OutLines ? OutLines->Num() : 0;
+
+        const FGuid Guid = Identifier->GetPathNodeGUID();
+        if (!bApplyAll && !bPreviewOnly && !AutoNameDirty.Contains(Guid)) continue;
+
+        --Budget;
+        if (!bPreviewOnly) AutoNameDirty.Remove(Guid);
+        if (ProcessAutoNameForStation(Identifier, bPreviewOnly, OutLines)) ++Changed;
+
+        // Chat drops a long burst, so whatever a pass reports also goes to the log.
+        if (OutLines)
+        {
+            for (int32 Line = LinesBefore; Line < OutLines->Num(); ++Line)
+                UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("AUTONAME_LINE %s"), *(*OutLines)[Line]);
+        }
+    }
+
+    if (Changed > 0 && !bPreviewOnly) RebuildGroupsFromNames();
+    return Changed;
+}
+
+int32 UDynamicTimeTableSubsystem::StripAutoNames(TArray<FString>* OutLines)
+{
+    if (!IsServer()) return 0;
+    AFGVehicleSubsystem* Vehicles = AFGVehicleSubsystem::Get(GetWorld());
+    if (!IsValid(Vehicles)) return 0;
+
+    int32 Stripped = 0;
+    for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
+    {
+        if (!IsValid(Identifier)) continue;
+        const FString Current = Identifier->GetStationName().ToString();
+        const FString Bare = StripAutoBlock(Current);
+        if (Bare == Current.TrimStartAndEnd()) continue;
+        if (RenameDockGuarded(Identifier, Bare))
+        {
+            ++Stripped;
+            if (OutLines) OutLines->Add(FString::Printf(TEXT("%s %s %s"), *Current, *DTSAutoArrow(), *Bare));
+        }
+    }
+    AutoNameMachines.Reset();
+    AutoNameDirty.Reset();
+    if (Stripped > 0) RebuildGroupsFromNames();
+    return Stripped;
+}
+
+bool UDynamicTimeTableSubsystem::DescribeAutoName(const FString& StationQuery, TArray<FString>& OutLines) const
+{
+    AFGVehicleSubsystem* Vehicles = AFGVehicleSubsystem::Get(GetWorld());
+    if (!IsValid(Vehicles)) return false;
+
+    AFGDockingStationIdentifier* Identifier = FindDockByName(StationQuery);
+    if (!IsValid(Identifier))
+    {
+        for (AFGDockingStationIdentifier* Candidate : Vehicles->GetDockingStations())
+        {
+            if (!IsValid(Candidate)) continue;
+            if (Candidate->GetStationName().ToString().Contains(StationQuery, ESearchCase::IgnoreCase))
+            {
+                Identifier = Candidate;
+                break;
+            }
+        }
+    }
+    if (!IsValid(Identifier))
+    {
+        OutLines.Add(FString::Printf(TEXT("dTT: no docking station matches \"%s\"."), *StationQuery));
+        return false;
+    }
+
+    const FString Current = Identifier->GetStationName().ToString();
+    AFGBuildableDockingStation* Station = Identifier->GetStation();
+    if (!IsValid(Station))
+    {
+        OutLines.Add(FString::Printf(TEXT("%s: station not loaded"), *Current));
+        return false;
+    }
+
+    FDTTAutoNameLimits Limits;
+    Limits.MaxNodes = GetSettings().AutoNameMaxNodes;
+    Limits.MaxProducts = GetSettings().AutoNameMaxProducts;
+
+    FString PrevHead, PrevTag, PrevTail;
+    const bool bAutoWasUnsure = DTSSplitAutoBlock(Current, PrevHead, PrevTag, PrevTail) && PrevTail.Contains(TEXT("?"));
+
+    FString TagBase, TagResource;
+    EDTTDispatchRole TagRole = EDTTDispatchRole::None;
+    int32 TagThreshold = 0;
+    const TSubclassOf<UFGItemDescriptor> PreferredItem =
+        (!bAutoWasUnsure && ParseDispatchTag(Current, TagBase, TagResource, TagRole, TagThreshold))
+            ? ResolveItemClassForResource(TagResource) : nullptr;
+
+    FDTTAutoNameResult Result;
+    if (!FDTTAutoNameScanner::Scan(Station, Limits, PreferredItem, Result))
+    {
+        OutLines.Add(FString::Printf(TEXT("%s: %s"), *Current, *Result.SkipReason));
+        return false;
+    }
+
+    OutLines.Add(FString::Printf(TEXT("%s: %s %s, %s/min, %d machine(s)"),
+        *Current, Result.bRequester ? TEXT("consumes") : TEXT("produces"), *Result.ResourceName,
+        *DTSFormatRate(Result.RatePerMinute), Result.Machines.Num()));
+    OutLines.Add(FString::Printf(TEXT("  mode now %s, auto-name wants %s"),
+        Station->GetIsInLoadMode() ? TEXT("LOAD") : TEXT("UNLOAD"),
+        Result.bRequester ? TEXT("UNLOAD") : TEXT("LOAD")));
+    if (Result.Products.Num() > 0)
+    {
+        OutLines.Add(FString::Printf(TEXT("  ends as %s%s"), *FString::Join(Result.Products, TEXT(", ")),
+            Result.bMoreProducts ? TEXT(" ...") : TEXT("")));
+    }
+    if (Result.bMixed) OutLines.Add(TEXT("  mixed flow: the biggest item won"));
+    OutLines.Add(FString::Printf(TEXT("  name would be: %s"),
+        *DTSComposeAutoName(Current, Result, false, PreferredItem && PreferredItem == Result.ItemClass)));
+
+    // Same reason a pass logs its lines: chat is lossy, and this is the answer to "why that name".
+    for (const FString& Line : OutLines)
+        UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("AUTONAME_LINE %s"), *Line);
+    return true;
+}
+
+void UDynamicTimeTableSubsystem::TickAutoName()
+{
+    if (!IsServer() || !bWorldStationsReady) return;
+    const FDTTSettings& Current = GetSettings();
+    if (!Current.bAutoNameStations) return;
+
+    const double Now = FPlatformTime::Seconds();
+
+    // The sweep is the floor this feature stands on: it needs no hook to fire and it is what picks
+    // up an overclock change, which has no hookable setter at all.
+    if (Now - LastAutoNameSweepSeconds >= Current.AutoNameSweepSeconds)
+    {
+        LastAutoNameSweepSeconds = Now;
+        MarkAllDocksForAutoName(TEXT("sweep"));
+    }
+
+    if (AutoNameDirty.Num() == 0) return;
+    if (Now - AutoNameDirtySinceSeconds < Current.AutoNameDebounceSeconds) return;
+
+    RunAutoNamePass(false, false, nullptr);
 }
 
 void UDynamicTimeTableSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -1562,6 +1984,17 @@ void UDynamicTimeTableSubsystem::HandleDockingStationNameChanged(AFGDockingStati
     if (!IsServer() || !IsValid(Id) || InternalNameChanges.Contains(Id)) return;
     UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("STATION_RENAMED Kind=Truck Station='%s'"), *DTSDockName(Id));
     if (!bWorldStationsReady) return;
+
+    // Typing a name is how a player meets this feature: they put a station down, name it, and the
+    // caption should appear while they are still looking at the panel. Waiting for the next sweep
+    // reads as "it does not work".
+    if (GetSettings().bAutoNameStations)
+    {
+        bool bAlready = false;
+        AutoNameDirty.Add(Id->GetPathNodeGUID(), &bAlready);
+        if (!bAlready) AutoNameDirtySinceSeconds = FPlatformTime::Seconds();
+    }
+
     RebuildGroupsFromNames();
 }
 
@@ -2956,6 +3389,7 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
     // Building or demolishing a station fires no hook at all, and the train half has no timer of
     // its own, so both kinds are checked here.
     RebuildGroupsIfStationsChanged(TEXT("poll"));
+    TickAutoName();
     PruneStaleRequesterClaims();
     UpdateRequesterWaitTimes();
 

@@ -8,6 +8,8 @@
 #include "FGRailroadTimeTable.h"
 #include "FGTrainStationIdentifier.h"
 #include "Buildables/FGBuildableRailroadStation.h"
+#include "FGBuildableSubsystem.h"
+#include "Buildables/FGBuildableManufacturer.h"
 #include "WheeledVehicles/FGDockingStationIdentifier.h"
 #include "WheeledVehicles/FGWheeledVehicleIdentifier.h"
 #include "DynamicTimeTableSubsystem.h"
@@ -19,6 +21,29 @@
 #include "TimerManager.h"
 #endif
 DEFINE_LOG_CATEGORY_STATIC(LogDynamicTimeTableModule,Log,All);
+#if !WITH_EDITOR
+namespace
+{
+    /** A building appeared, vanished or changed recipe: every belt chain around a dock may differ now. */
+    void NotifyWorldChanged(const AActor* Source,const TCHAR* Reason)
+    {
+        if(!IsValid(Source))return;
+        UWorld* World=Source->GetWorld();
+        if(!IsValid(World))return;
+        UDynamicTimeTableSubsystem* Subsystem=World->GetSubsystem<UDynamicTimeTableSubsystem>();
+        if(!IsValid(Subsystem))return;
+
+        // Said once per reason per session: this is the evidence that the hook is alive at all.
+        static TSet<FString> Announced;
+        if(!Announced.Contains(Reason))
+        {
+            Announced.Add(Reason);
+            UE_LOG(LogDynamicTimeTableModule,Log,TEXT("AUTONAME_HOOK_ALIVE Reason=%s"),Reason);
+        }
+        Subsystem->MarkAllDocksForAutoName(Reason);
+    }
+}
+#endif
 void FDynamicTimeTableModule::StartupModule(){UE_LOG(LogDynamicTimeTableModule,Log,TEXT("DynamicTimeTable module started."));
 #if WITH_EDITOR
 UE_LOG(LogDynamicTimeTableModule,Log,TEXT("Editor build: runtime registration disabled."));
@@ -41,6 +66,15 @@ SUBSCRIBE_METHOD_AFTER(AFGTrain::SetSelfDrivingEnabled,[](AFGTrain* Train,bool E
 SUBSCRIBE_METHOD_AFTER(AFGWheeledVehicleIdentifier::SetVehicleRoute,[](AFGWheeledVehicleIdentifier* V,const TArray<FGuid>& Route){(void)Route;if(IsValid(V)&&IsValid(V->GetWorld()))if(auto* S=V->GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())S->HandleVehicleRouteChanged(V);});
 SUBSCRIBE_METHOD_AFTER(AFGWheeledVehicleIdentifier::SetAutopilotEnabled,[](AFGWheeledVehicleIdentifier* V,bool Enabled){if(IsValid(V)&&IsValid(V->GetWorld()))if(auto* S=V->GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())S->HandleAutopilotChanged(V,Enabled);});
 SUBSCRIBE_METHOD_AFTER(AFGDockingStationIdentifier::SetStationName,[](AFGDockingStationIdentifier* Id,const FText& Name){(void)Name;if(IsValid(Id)&&IsValid(Id->GetWorld()))if(auto* S=Id->GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())S->HandleDockingStationNameChanged(Id);});
+// Auto-naming responsiveness. These three only make the answer arrive in seconds instead of within
+// the sweep interval: the feature stands on the timed sweep, which needs no hook at all. Two hooks
+// in this mod already turned out to be dead (SetCurrentTargetWaypoint, SetIsCurrentlyDocking), so
+// each of these says so in the log the first time it fires and is not trusted until it has.
+SUBSCRIBE_METHOD_AFTER(AFGBuildableSubsystem::AddBuildable,[](AFGBuildableSubsystem* S,AFGBuildable* B){NotifyWorldChanged(B,TEXT("buildable-added"));});
+SUBSCRIBE_METHOD_AFTER(AFGBuildableSubsystem::RemoveBuildable,[](AFGBuildableSubsystem* S,AFGBuildable* B){NotifyWorldChanged(B,TEXT("buildable-removed"));});
+SUBSCRIBE_METHOD_AFTER(AFGBuildableManufacturer::SetRecipe,[](AFGBuildableManufacturer* M,TSubclassOf<UFGRecipe> R){(void)R;NotifyWorldChanged(M,TEXT("recipe-changed"));});
+// Overclocking has no hookable setter: AFGBuildableFactory::SetPendingPotential is virtual, and SML
+// refuses a virtual without an instance to resolve the implementation from. The sweep covers it.
 // Docking-station side: the transfer cap, the depot hold and the real docking events. See MyDTTHooks.
 FMyDTTHooks::Install();
 #endif

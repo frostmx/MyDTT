@@ -18,7 +18,7 @@ ADynamicTimeTableChatCommand::ADynamicTimeTableChatCommand()
     Usage = NSLOCTEXT(
         "DynamicTimeTable",
         "ChatCommand.DTT.Usage",
-        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt trucks [resource] - list dispatch and pool trucks; /dtt why <truck> - what one truck is doing and what stands in its way; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt settings - show the settings; /dtt set <field> <value> - change one setting; /dtt recalc - rebuild active bookings");
+        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt trucks [resource] - list dispatch and pool trucks; /dtt why <truck> - what one truck is doing and what stands in its way; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt settings - show the settings; /dtt set <field> <value> - change one setting; /dtt autoname [apply|strip|<station>] - name stations from their belts; /dtt recalc - rebuild active bookings");
     Aliases.Add(TEXT("dynamictimetable"));
 }
 
@@ -197,6 +197,53 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
             : Subsystem->CommandReleaseTruck(Query, Message);
         Sender->SendChatMessage(Message, bOk ? FLinearColor(0.20f, 0.80f, 1.00f) : FLinearColor::Red);
         return bOk ? EExecutionStatus::COMPLETED : EExecutionStatus::UNCOMPLETED;
+    }
+
+    if (Arguments.Num() >= 1 && Arguments[0].Equals(TEXT("autoname"), ESearchCase::IgnoreCase))
+    {
+        const FString Verb = Arguments.Num() >= 2 ? Arguments[1] : FString();
+        TArray<FString> Lines;
+
+        if (Verb.Equals(TEXT("apply"), ESearchCase::IgnoreCase))
+        {
+            const int32 Changed = Subsystem->RunAutoNamePass(true, false, &Lines);
+            Lines.Add(FString::Printf(TEXT("dTT: %d station(s) renamed."), Changed));
+        }
+        else if (Verb.Equals(TEXT("strip"), ESearchCase::IgnoreCase))
+        {
+            const int32 Stripped = Subsystem->StripAutoNames(&Lines);
+            Lines.Add(FString::Printf(TEXT("dTT: %d station(s) stripped."), Stripped));
+        }
+        else if (!Verb.IsEmpty())
+        {
+            // The station name may contain spaces; everything after the verb is the query.
+            FString Query;
+            for (int32 Index = 1; Index < Arguments.Num(); ++Index)
+            {
+                if (!Query.IsEmpty()) Query += TEXT(" ");
+                Query += Arguments[Index];
+            }
+            Subsystem->DescribeAutoName(Query, Lines);
+        }
+        else
+        {
+            const int32 Changed = Subsystem->RunAutoNamePass(true, true, &Lines);
+            Lines.Add(FString::Printf(TEXT("dTT: %d station(s) would change. /dtt autoname apply writes them."), Changed));
+        }
+
+        // Chat drops long bursts, and a big factory has a lot of docks.
+        constexpr int32 MaxChatLines = 40;
+        for (int32 Index = 0; Index < Lines.Num() && Index < MaxChatLines; ++Index)
+        {
+            Sender->SendChatMessage(Lines[Index], FLinearColor(0.20f, 0.80f, 1.00f));
+        }
+        if (Lines.Num() > MaxChatLines)
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("dTT: %d more line(s) in the log (LogDynamicTimeTableSubsystem)."), Lines.Num() - MaxChatLines),
+                FLinearColor(0.20f, 0.80f, 1.00f));
+        }
+        return EExecutionStatus::COMPLETED;
     }
 
     if (Arguments.Num() >= 1 &&

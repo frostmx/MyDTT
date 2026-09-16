@@ -119,6 +119,26 @@ public:
     /** The name a player recognises: no group, dispatch, fuel or depot tag. */
     static FString StripAllTags(const FString& FullName);
 
+    /**
+     * Auto-naming: what the belts around a dock say, written into its name and its LOAD/UNLOAD
+     * switch. "Factory-2 (Iron Ore) -240/m -> Ingots" - the text left of the tag is the player's
+     * and is kept, a name ending in '.' is the player's entirely and is never touched.
+     * Plan: C:\Users\frost\.claude\plans\mydtt-autoname-stations.md.
+     */
+    static FString StripAutoBlock(const FString& FullName);  // caption only; the tag survives
+    /** Everything the auto-namer would write for one station, without touching it. */
+    bool DescribeAutoName(const FString& StationQuery, TArray<FString>& OutLines) const;
+    /**
+     * One pass. bApplyAll walks every dock and ignores both the setting and the dirty set;
+     * bPreviewOnly writes nothing and fills OutLines with "old -> new". Returns how many stations
+     * changed (or would change).
+     */
+    int32 RunAutoNamePass(bool bApplyAll, bool bPreviewOnly, TArray<FString>* OutLines);
+    /** /dtt autoname strip: takes the mod's block back off every name. */
+    int32 StripAutoNames(TArray<FString>* OutLines);
+    /** Something was built, dismantled or re-piped: every chain may have changed. */
+    void MarkAllDocksForAutoName(const TCHAR* Reason);
+
     /** Pool trucks for ADTTSaveDataActor to write into the save. */
     void ExportPoolTrucks(TArray<FDTTSavedPoolTruck>& OutTrucks) const;
     /** /dtt depots: one line per depot with its claim, plus the pool trucks. */
@@ -155,6 +175,26 @@ private:
     bool bStationFingerprintValid = false;
     /** Renames this mod makes itself, so the rename hook does not treat them as player edits. */
     TSet<AActor*> InternalNameChanges;
+    /** Docks whose chain has to be walked again, by path node guid. Runtime only. */
+    TSet<FGuid> AutoNameDirty;
+    /**
+     * What one dock's last walk reached. Two docks share a chain only when they carry the same item
+     * into the same machines: a rotor dock and a stator dock feeding one assembler are not two
+     * halves of anything, and marking them would put a '*' on every mixed factory in the world.
+     */
+    struct FDTTAutoNameReach
+    {
+        TSubclassOf<class UFGItemDescriptor> ItemClass;
+        bool bRequester = false;
+        TSet<TWeakObjectPtr<AActor>> Machines;
+    };
+    TMap<FGuid, FDTTAutoNameReach> AutoNameMachines;
+    double AutoNameDirtySinceSeconds = 0.0;
+    double LastAutoNameSweepSeconds = 0.0;
+    /** Called once a second from PollTruckStates; debounces, sweeps and renames. */
+    void TickAutoName();
+    /** Walks one dock and writes the result; returns true when the name or the mode changed. */
+    bool ProcessAutoNameForStation(class AFGDockingStationIdentifier* Identifier, bool bPreviewOnly, TArray<FString>* OutLines);
     int32 MigrationAttempts = 0;
     /**
      * Raised by a timer a few seconds after persistence is initialised. At OnWorldBeginPlay the
