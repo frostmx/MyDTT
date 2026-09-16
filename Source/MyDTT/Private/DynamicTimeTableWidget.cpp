@@ -2,6 +2,7 @@
 
 #include "DynamicTimeTableSubsystem.h"
 #include "DynamicTimeTableRemoteCallObject.h"
+#include "DTTItemNames.h"
 #include "FGPlayerController.h"
 #include "Engine/Texture2D.h"
 #include "Resources/FGItemDescriptor.h"
@@ -119,6 +120,7 @@ void UDynamicTimeTableWidget::NativeConstruct()
     {
         if (Check) Check->OnCheckStateChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingCheckChanged);
     }
+    if (SettingNamingLanguage) SettingNamingLanguage->OnSelectionChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingComboChanged);
     SetDefaultFocusWidget(CloseButton);
 
     if (UDynamicTimeTableSubsystem* Subsystem = GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())
@@ -409,6 +411,18 @@ void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
     SettingAutoNameSweep = Spin(TEXT("Full sweep every, seconds"), TEXT("Every station is checked this often. This is what notices an overclock change, which no hook reports."), 10, 600, 10);
     SettingAutoNameMaxNodes = Spin(TEXT("Walk at most, buildings"), TEXT("A chain longer than this leaves the station unnamed instead of costing a frame."), 50, 5000, 50);
     SettingAutoNameMaxProducts = Spin(TEXT("Products in the name"), TEXT("How many final products the name lists before it ends in an ellipsis."), 1, 8, 1);
+    // Built from this client's own language list: exactly what its options menu offers.
+    SettingNamingLanguage = WidgetTree->ConstructWidget<UComboBoxString>();
+    NamingLanguageCodes.Reset();
+    for (const FDTTLanguageOption& Language : FDTTItemNames::ListLanguages())
+    {
+        SettingNamingLanguage->AddOption(Language.Label);
+        NamingLanguageCodes.Add(Language.Code);
+    }
+    {
+        USizeBox* Size = WidgetTree->ConstructWidget<USizeBox>(); Size->SetWidthOverride(220); Size->SetContent(SettingNamingLanguage);
+        Row(TEXT("Language of the names"), TEXT("Which of the game's languages item names are written in; English by default. A word of your own for a resource is kept. A game name written in another language is rewritten in this one when you change this setting or run /dtt autoname apply."), Size);
+    }
 
     UHorizontalBox* Buttons = WidgetTree->ConstructWidget<UHorizontalBox>(); Box->AddChildToVerticalBox(Buttons)->SetPadding(FMargin(0,6,0,0));
     SettingsSaveButton = MakeButton(WidgetTree,TEXT("Save")); AddRowItem(Buttons,SettingsSaveButton);
@@ -453,6 +467,18 @@ void UDynamicTimeTableWidget::RefreshSettingsControls(bool bForce)
     SettingAutoNameSweep->SetValue(V.AutoNameSweepSeconds);
     SettingAutoNameMaxNodes->SetValue(float(V.AutoNameMaxNodes));
     SettingAutoNameMaxProducts->SetValue(float(V.AutoNameMaxProducts));
+    if (SettingNamingLanguage)
+    {
+        int32 Index = NamingLanguageCodes.IndexOfByKey(V.NamingLanguage);
+        if (Index == INDEX_NONE)
+        {
+            // A language this client does not know is shown by its code, so Save keeps it as is.
+            SettingNamingLanguage->AddOption(V.NamingLanguage);
+            NamingLanguageCodes.Add(V.NamingLanguage);
+            Index = NamingLanguageCodes.Num() - 1;
+        }
+        SettingNamingLanguage->SetSelectedIndex(Index);
+    }
     bRefreshingControls = false;
     bSettingsEdited = false;
 }
@@ -486,12 +512,17 @@ FDTTSettings UDynamicTimeTableWidget::ReadSettingsControls() const
     V.AutoNameSweepSeconds = SettingAutoNameSweep->GetValue();
     V.AutoNameMaxNodes = FMath::RoundToInt(SettingAutoNameMaxNodes->GetValue());
     V.AutoNameMaxProducts = FMath::RoundToInt(SettingAutoNameMaxProducts->GetValue());
+    if (SettingNamingLanguage && NamingLanguageCodes.IsValidIndex(SettingNamingLanguage->GetSelectedIndex()))
+    {
+        V.NamingLanguage = NamingLanguageCodes[SettingNamingLanguage->GetSelectedIndex()];
+    }
     V.Sanitize();
     return V;
 }
 
 void UDynamicTimeTableWidget::HandleSettingSpinChanged(float) { if (!bRefreshingControls) bSettingsEdited = true; }
 void UDynamicTimeTableWidget::HandleSettingCheckChanged(bool) { if (!bRefreshingControls) bSettingsEdited = true; }
+void UDynamicTimeTableWidget::HandleSettingComboChanged(FString, ESelectInfo::Type) { if (!bRefreshingControls) bSettingsEdited = true; }
 void UDynamicTimeTableWidget::HandleSettingsTabClicked() { SetActiveTab(3); RefreshSettingsControls(true); }
 void UDynamicTimeTableWidget::HandleSettingsSaveClicked()
 {
@@ -530,6 +561,7 @@ void UDynamicTimeTableWidget::HandleSettingsDefaultsClicked()
     SettingIdleRecheck->SetValue(Defaults.IdleDispatchRecheckSeconds);
     SettingFuelCritical->SetValue(Defaults.FuelCriticalMarginLaps);
     SettingFuelSkip->SetValue(Defaults.FuelSkipMarginLaps);
+    if (SettingNamingLanguage) SettingNamingLanguage->SetSelectedIndex(FMath::Max(0, NamingLanguageCodes.IndexOfByKey(Defaults.NamingLanguage)));
     bRefreshingControls = false;
     bSettingsEdited = true;
     SetEditorStatus(TEXT("Defaults loaded into the controls; Save to apply."), false);

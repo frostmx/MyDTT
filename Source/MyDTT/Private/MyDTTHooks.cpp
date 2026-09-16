@@ -3,6 +3,8 @@
 #include "Buildables/FGBuildableDockingStation.h"
 #include "WheeledVehicles/FGDockingStationIdentifier.h"
 #include "FGInventoryComponent.h"
+#include "FGFactoryConnectionComponent.h"
+#include "FGPipeConnectionComponent.h"
 #include "Resources/FGItemDescriptor.h"
 #include "HAL/CriticalSection.h"
 #include "Misc/ScopeLock.h"
@@ -108,6 +110,43 @@ int32 FMyDTTHooks::TransferNow(const AFGBuildableDockingStation* Station, UFGInv
 {
     if (!IsInGameThread() || !IsValid(Station) || Station->IsLoadUnloading()) return 0;
     return CappedLoadUnload(Station, Docked, Plan, TEXT("XFER_TOPUP"), bQuiet);
+}
+
+void FMyDTTHooks::GetDockPorts(const AFGBuildableDockingStation* Station,
+    TArray<UFGConnectionComponent*>& OutIns, TArray<UFGConnectionComponent*>& OutOuts)
+{
+    OutIns.Reset();
+    OutOuts.Reset();
+    if (!IsValid(Station)) return;
+
+    for (const TObjectPtr<UFGFactoryConnectionComponent>& Conn : Station->mStorageInputConnections)
+    {
+        if (IsValid(Conn) && Conn->IsConnected()) OutIns.Add(Conn);
+    }
+
+    TArray<UFGFactoryConnectionComponent*> Belts;
+    Station->GetComponents<UFGFactoryConnectionComponent>(Belts);
+    for (UFGFactoryConnectionComponent* Conn : Belts)
+    {
+        if (!IsValid(Conn) || !Conn->IsConnected()) continue;
+        if (Conn->GetDirection() == EFactoryConnectionDirection::FCD_OUTPUT) OutOuts.Add(Conn);
+        // A blueprint that never filled the storage list: every input that is not a fuel input.
+        else if (Station->mStorageInputConnections.Num() == 0 &&
+                 Conn->GetDirection() == EFactoryConnectionDirection::FCD_INPUT &&
+                 !Station->mFuelConnections.Contains(Conn))
+        {
+            OutIns.Add(Conn);
+        }
+    }
+
+    for (const FDockingStationTaggedFluidConnection& Tagged : Station->mFluidInputConnections)
+    {
+        if (IsValid(Tagged.Connection) && Tagged.Connection->IsConnected()) OutIns.Add(Tagged.Connection);
+    }
+    for (const FDockingStationTaggedFluidConnection& Tagged : Station->mFluidOutputConnections)
+    {
+        if (IsValid(Tagged.Connection) && Tagged.Connection->IsConnected()) OutOuts.Add(Tagged.Connection);
+    }
 }
 
 int32 FMyDTTHooks::CappedLoadUnload(const AFGBuildableDockingStation* Self, UFGInventoryComponent* Docked, const FDTTTransferPlan& Plan,

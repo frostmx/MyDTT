@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "DynamicTimeTableTypes.h"
+#include "DTTItemNames.h"
 #include "DynamicTimeTableSubsystem.generated.h"
 
 class AFGTrain;
@@ -195,6 +196,12 @@ private:
     void TickAutoName();
     /** Walks one dock and writes the result; returns true when the name or the mode changed. */
     bool ProcessAutoNameForStation(class AFGDockingStationIdentifier* Identifier, bool bPreviewOnly, TArray<FString>* OutLines, bool bExplainAll = false);
+    /** The item's name in the naming language from the settings. */
+    FString ItemNameForNaming(TSubclassOf<class UFGItemDescriptor> ItemClass) const;
+    /** The scanner answers in classes; this writes their names, in the naming language, into the result. */
+    void LocalizeAutoNameResult(struct FDTTAutoNameResult& Result) const;
+    /** The naming language changed: game words in tags are rewritten in it on the next pass, once. */
+    bool AutoNameRelabelPending = false;
     int32 MigrationAttempts = 0;
     /**
      * Raised by a timer a few seconds after persistence is initialised. At OnWorldBeginPlay the
@@ -313,8 +320,9 @@ private:
     bool IsCargoDrainedAtDepot(const FDTTPoolTruckState& State) const;
     /** "Plastic x3, Screws x1" for what the truck carries. */
     FString DescribeCargo(AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<class UFGItemDescriptor>* OutSingleClass = nullptr) const;
-    // Built once from UFGBlueprintFunctionLibrary::GetAllDescriptorsSorted, not per poll tick.
-    mutable TMap<FString, TSubclassOf<class UFGItemDescriptor>> ItemClassByNameCache;
+    // Item names in every language the game ships, built on demand. Mutable because resolving a
+    // tag is a read of the world that happens to fill a cache.
+    mutable FDTTItemNames ItemNames;
     // Producer is always Route[0]. A dedicated fuel anchor is optional and comes only from an
     // explicit (F) tag; it is remembered because a lap that does not need it leaves it out of the
     // live route. The one exception to "nothing here is SaveGame": ADTTSaveDataActor stores these,

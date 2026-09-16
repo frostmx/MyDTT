@@ -63,6 +63,14 @@ namespace
         return true;
     }
 
+    /** Text without [From, To): a tag cut from the middle leaves one space, not two. */
+    FString DTSCutOut(const FString& Text, int32 From, int32 To)
+    {
+        const FString Left = Text.Left(From).TrimEnd();
+        const FString Right = Text.Mid(To).TrimStart();
+        return Left.IsEmpty() ? Right : Right.IsEmpty() ? Left : Left + TEXT(" ") + Right;
+    }
+
     TArray<FString> DTSExtractParenthesizedTags(const FString& Text)
     {
         TArray<FString> Tags;
@@ -145,21 +153,35 @@ namespace
         return Ellipsis;
     }
 
+    /** The mark of a warehouse station: a box, in place of the rate it does not have. */
+    const FString& DTSAutoStore()
+    {
+        static const FString Store = FString::Chr(0x25A1);
+        return Store;
+    }
+
     bool DTSIsAutoTail(const FString& Tail)
     {
-        if (Tail.Len() < 4 || (Tail[0] != TEXT('+') && Tail[0] != TEXT('-'))) return false;
+        if (Tail.Len() < 2 || (Tail[0] != TEXT('+') && Tail[0] != TEXT('-'))) return false;
 
         int32 At = 1;
-        while (At < Tail.Len() && FChar::IsDigit(Tail[At])) ++At;
-        if (At == 1) return false;
-        if (At < Tail.Len() && Tail[At] == TEXT('.'))
+        if (Tail[1] == DTSAutoStore()[0])
         {
-            const int32 Dot = At++;
-            while (At < Tail.Len() && FChar::IsDigit(Tail[At])) ++At;
-            if (At == Dot + 1) return false;
+            At = 2;
         }
-        if (!Tail.Mid(At).StartsWith(TEXT("/m"), ESearchCase::CaseSensitive)) return false;
-        At += 2;
+        else
+        {
+            while (At < Tail.Len() && FChar::IsDigit(Tail[At])) ++At;
+            if (At == 1) return false;
+            if (At < Tail.Len() && Tail[At] == TEXT('.'))
+            {
+                const int32 Dot = At++;
+                while (At < Tail.Len() && FChar::IsDigit(Tail[At])) ++At;
+                if (At == Dot + 1) return false;
+            }
+            if (!Tail.Mid(At).StartsWith(TEXT("/m"), ESearchCase::CaseSensitive)) return false;
+            At += 2;
+        }
         while (At < Tail.Len() && (Tail[At] == TEXT('*') || Tail[At] == TEXT('?'))) ++At;
 
         FString Rest = Tail.Mid(At).TrimStartAndEnd();
@@ -397,7 +419,7 @@ bool UDynamicTimeTableSubsystem::ParseDispatchTag(const FString& InFullName, FSt
 
         if (Role != EDTTDispatchRole::None)
         {
-            OutBaseName = (FullName.Left(Open) + FullName.Mid(Close + 1)).TrimStartAndEnd();
+            OutBaseName = DTSCutOut(FullName, Open, Close + 1).TrimStartAndEnd();
             OutResourceId = Resource;
             OutRole = Role;
             OutThreshold = Threshold;
@@ -440,7 +462,7 @@ bool UDynamicTimeTableSubsystem::ParseFuelStopTag(const FString& InFullName, FSt
     static const FString Tag = TEXT("(F)");
     const int32 TagIndex = FullName.Find(Tag, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
     if (TagIndex == INDEX_NONE) return false;
-    OutBaseName = (FullName.Left(TagIndex) + FullName.Mid(TagIndex + Tag.Len())).TrimStartAndEnd();
+    OutBaseName = DTSCutOut(FullName, TagIndex, TagIndex + Tag.Len()).TrimStartAndEnd();
     return true;
 }
 
@@ -453,7 +475,7 @@ bool UDynamicTimeTableSubsystem::ParseDepotTag(const FString& InFullName, FStrin
     static const FString Tag = TEXT("(D)");
     const int32 TagIndex = FullName.Find(Tag, ESearchCase::IgnoreCase, ESearchDir::FromEnd);
     if (TagIndex == INDEX_NONE) return false;
-    OutBaseName = (FullName.Left(TagIndex) + FullName.Mid(TagIndex + Tag.Len())).TrimStartAndEnd();
+    OutBaseName = DTSCutOut(FullName, TagIndex, TagIndex + Tag.Len()).TrimStartAndEnd();
     return true;
 }
 
@@ -497,34 +519,37 @@ namespace
 
     FString DTSMakeAutoTail(const FDTTAutoNameResult& Result, bool bShared, int32 ProductCount, bool bEllipsis)
     {
-        FString Tail = FString::Printf(TEXT("%s%s/m"),
-            Result.bRequester ? TEXT("-") : TEXT("+"), *DTSFormatRate(Result.RatePerMinute));
+        // A warehouse has no rate: the belt ends in a container and nothing consumes anything.
+        FString Tail = Result.bRequester ? TEXT("-") : TEXT("+");
+        Tail += Result.bWarehouse ? DTSAutoStore() : FString::Printf(TEXT("%s/m"), *DTSFormatRate(Result.RatePerMinute));
         if (bShared) Tail += TEXT("*");
         if (Result.bMixed) Tail += TEXT("?");
 
-        if (ProductCount > 0)
+        TArray<FString> Names;
+        for (int32 Index = 0; Index < ProductCount && Index < Result.Products.Num(); ++Index)
         {
-            TArray<FString> Names;
-            for (int32 Index = 0; Index < ProductCount && Index < Result.Products.Num(); ++Index)
-            {
-                const FString Clean = DTSSanitizeProductName(Result.Products[Index]);
-                if (!Clean.IsEmpty()) Names.Add(Clean);
-            }
-            if (Names.Num() > 0)
-            {
-                Tail += FString::Printf(TEXT(" %s %s"), *DTSAutoArrow(), *FString::Join(Names, TEXT(", ")));
-                if (bEllipsis) Tail += FString::Printf(TEXT(" %s"), *DTSAutoEllipsis());
-            }
+            const FString Clean = DTSSanitizeProductName(Result.Products[Index]);
+            if (!Clean.IsEmpty()) Names.Add(Clean);
         }
+        FString List = FString::Join(Names, TEXT(", "));
+        if (bEllipsis && Names.Num() > 0) List += FString::Printf(TEXT(" %s"), *DTSAutoEllipsis());
+        // Generators at the end of the chain: their capacity, which needs no translating.
+        if (Result.PowerMW > KINDA_SMALL_NUMBER)
+        {
+            List += FString::Printf(TEXT("%s%s MW"), List.IsEmpty() ? TEXT("") : TEXT(", "), *DTSFormatRate(Result.PowerMW));
+        }
+        if (!List.IsEmpty()) Tail += FString::Printf(TEXT(" %s %s"), *DTSAutoArrow(), *List);
         return Tail;
     }
 
     /**
      * The new name for a station, player's text and all. The number a player wrote in "(Motor-40)"
      * is theirs and survives; it is dropped only when the chain now carries something else, because
-     * it was a level for a different cargo.
+     * it was a level for a different cargo. bKeepWord says whether the player's word for the
+     * resource stays too: normally yes while it means the same item, no when the naming language
+     * was just changed and the word is one of the game's own.
      */
-    FString DTSComposeAutoName(const FString& CurrentName, const FDTTAutoNameResult& Result, bool bShared, bool bSameResource)
+    FString DTSComposeAutoName(const FString& CurrentName, const FDTTAutoNameResult& Result, bool bShared, bool bSameResource, bool bKeepWord)
     {
         FString OldBase, OldResource;
         EDTTDispatchRole OldRole = EDTTDispatchRole::None;
@@ -538,7 +563,7 @@ namespace
         // mod's item name is the game's, which is a different language on a Russian save and would
         // rewrite "(Боксит)" as "(Bauxite)" on the first pass - and strip could never put it back,
         // because by then nothing remembers it.
-        const FString Resource = bSameResource ? OldResource : Result.ResourceName;
+        const FString Resource = bKeepWord ? OldResource : Result.ResourceName;
 
         const EDTTDispatchRole Role = bKeepThreshold ? EDTTDispatchRole::Requester : EDTTDispatchRole::ByStationMode;
         const FString Head = UDynamicTimeTableSubsystem::MakeDispatchTaggedName(
@@ -642,6 +667,8 @@ bool UDynamicTimeTableSubsystem::ProcessAutoNameForStation(AFGDockingStationIden
 
     FDTTAutoNameResult Result;
     if (!FDTTAutoNameScanner::Scan(Station, Limits, PreferredItem, Result)) return Skip(*Result.SkipReason);
+    LocalizeAutoNameResult(Result);
+    if (Result.ResourceName.IsEmpty()) return Skip(TEXT("resource-has-no-name"));
 
     // Two docks pouring into one chain both see the whole demand of that chain. Neither number is
     // wrong and splitting them would invent a division the player never asked for, so both get the
@@ -667,7 +694,13 @@ bool UDynamicTimeTableSubsystem::ProcessAutoNameForStation(AFGDockingStationIden
     // class, not as text, or the first pass would drop it just because the tag was written in
     // another language than the server's.
     const bool bSameResource = bHasTag && PreferredItem && Result.ItemClass && PreferredItem == Result.ItemClass;
-    const FString NewName = DTSComposeAutoName(Current, Result, bShared, bSameResource);
+    // ... except on a pass over the whole world (apply, and the preview that mirrors it) or right
+    // after the naming language changed: a word that is the game's own name for the item in some
+    // language is then rewritten in the chosen one, and only a word the game does not know at all
+    // survives as it was typed. The timed sweep never does this on its own.
+    const bool bRelabel = bExplainAll || AutoNameRelabelPending;
+    const bool bKeepWord = bSameResource && !(bRelabel && ResolveItemClassByName(TagResource));
+    const FString NewName = DTSComposeAutoName(Current, Result, bShared, bSameResource, bKeepWord);
 
     // The sign already in the name is the memory of the last topology, so no separate "we have
     // been here" flag is needed: the mod sets the switch when it first names a station and again
@@ -765,6 +798,9 @@ int32 UDynamicTimeTableSubsystem::RunAutoNamePass(bool bApplyAll, bool bPreviewO
     }
 
     if (Changed > 0 && !bPreviewOnly) RebuildGroupsFromNames();
+    // The relabel after a language change is a one-off: done once the world was written, or once
+    // the dirty set the change filled has been worked through.
+    if (!bPreviewOnly && (bApplyAll || AutoNameDirty.Num() == 0)) AutoNameRelabelPending = false;
     return Changed;
 }
 
@@ -846,32 +882,48 @@ bool UDynamicTimeTableSubsystem::DescribeAutoName(const FString& StationQuery, T
         OutLines.Add(FString::Printf(TEXT("%s: %s"), *Current, *Result.SkipReason));
         return false;
     }
+    LocalizeAutoNameResult(Result);
 
-    OutLines.Add(FString::Printf(TEXT("%s: %s %s, %s/min, %d machine(s)"),
-        *Current, Result.bRequester ? TEXT("consumes") : TEXT("produces"), *Result.ResourceName,
-        *DTSFormatRate(Result.RatePerMinute), Result.Machines.Num()));
+    if (Result.bWarehouse)
+    {
+        OutLines.Add(FString::Printf(TEXT("%s: %s %s, no machines - %d store(s) holding %d kind(s) of item"),
+            *Current, Result.bRequester ? TEXT("delivers") : TEXT("collects"), *Result.ResourceName,
+            Result.StoreCount, Result.HeldKinds));
+    }
+    else
+    {
+        OutLines.Add(FString::Printf(TEXT("%s: %s %s, %s/min, %d machine(s)%s"),
+            *Current, Result.bRequester ? TEXT("consumes") : TEXT("produces"), *Result.ResourceName,
+            *DTSFormatRate(Result.RatePerMinute), Result.Machines.Num(), Result.bFluidDock ? TEXT(", by pipe") : TEXT("")));
+    }
     OutLines.Add(FString::Printf(TEXT("  mode now %s, auto-name wants %s"),
         Station->GetIsInLoadMode() ? TEXT("LOAD") : TEXT("UNLOAD"),
         Result.bRequester ? TEXT("UNLOAD") : TEXT("LOAD")));
-    if (Result.Products.Num() > 0)
+    if (Result.Products.Num() > 0 || Result.PowerMW > KINDA_SMALL_NUMBER)
     {
-        OutLines.Add(FString::Printf(TEXT("  ends as %s%s"), *FString::Join(Result.Products, TEXT(", ")),
-            Result.bMoreProducts ? TEXT(" ...") : TEXT("")));
+        FString Ends = FString::Join(Result.Products, TEXT(", "));
+        if (Result.PowerMW > KINDA_SMALL_NUMBER)
+        {
+            Ends += FString::Printf(TEXT("%s%s MW of generators"), Ends.IsEmpty() ? TEXT("") : TEXT(", "), *DTSFormatRate(Result.PowerMW));
+        }
+        OutLines.Add(FString::Printf(TEXT("  ends as %s%s"), *Ends, Result.bMoreProducts ? TEXT(" ...") : TEXT("")));
     }
     OutLines.Add(FString::Printf(TEXT("  decided by: %s"), *Result.DecidedBy));
-    if (Result.bRequester)
+    if (Result.bRequester && !Result.bWarehouse)
     {
         OutLines.Add(FString::Printf(TEXT("  nobody else brings: %s"),
-            Result.UnsuppliedCount == 1 ? *UFGItemDescriptor::GetItemName(Result.UnsuppliedItem).ToString()
+            Result.UnsuppliedCount == 1 ? *ItemNameForNaming(Result.UnsuppliedItem)
                                         : *FString::Printf(TEXT("%d candidates"), Result.UnsuppliedCount)));
         OutLines.Add(FString::Printf(TEXT("  the ports say: %s"),
-            Result.PortVoteCount == 1 ? *UFGItemDescriptor::GetItemName(Result.PortItem).ToString()
+            Result.PortVoteCount == 1 ? *ItemNameForNaming(Result.PortItem)
                                       : *FString::Printf(TEXT("%d different ones"), Result.PortVoteCount)));
     }
     if (Result.bFromPort) OutLines.Add(TEXT("  nothing delivered here yet: taken from the port the belt lands on"));
-    else if (Result.bMixed) OutLines.Add(TEXT("  mixed flow: the biggest item won"));
+    else if (Result.bMixed) OutLines.Add(Result.bWarehouse ? TEXT("  the stores hold several things: the most numerous won") : TEXT("  mixed flow: the biggest item won"));
+    // Same rule as a pass over the whole world: a game word in the tag shows in the naming language.
+    const bool bSameResource = PreferredItem && PreferredItem == Result.ItemClass;
     OutLines.Add(FString::Printf(TEXT("  name would be: %s"),
-        *DTSComposeAutoName(Current, Result, false, PreferredItem && PreferredItem == Result.ItemClass)));
+        *DTSComposeAutoName(Current, Result, false, bSameResource, bSameResource && !ResolveItemClassByName(TagResource))));
 
     // Same reason a pass logs its lines: chat is lossy, and this is the answer to "why that name".
     for (const FString& Line : OutLines)
@@ -915,7 +967,7 @@ void UDynamicTimeTableSubsystem::Deinitialize()
     DispatchFuelStopGuids.Reset();
     RequesterClaims.Reset();
     RequesterClaimedAtWorldSeconds.Reset();
-    ItemClassByNameCache.Reset();
+    ItemNames = FDTTItemNames();
     DispatchTruckAnchors.Reset();
     DispatchDepotGuids.Reset();
     DepotClaims.Reset();
@@ -3861,26 +3913,25 @@ void UDynamicTimeTableSubsystem::ScheduleWorldStationsReady()
 
 TSubclassOf<UFGItemDescriptor> UDynamicTimeTableSubsystem::ResolveItemClassByName(const FString& Name) const
 {
-    const FString Key = Name.ToLower();
-    if (const auto* Found = ItemClassByNameCache.Find(Key)) return *Found;
+    // Any language the game ships, not only the one the process runs in: a tag written on a
+    // Russian client has to mean the same item on an English server.
+    return ItemNames.Resolve(Name, Settings.NamingLanguage, const_cast<UDynamicTimeTableSubsystem*>(this));
+}
 
-    // Populated once, not per lookup: GetAllDescriptorsSorted walks every item descriptor in the game.
-    if (ItemClassByNameCache.Num() == 0)
+FString UDynamicTimeTableSubsystem::ItemNameForNaming(TSubclassOf<UFGItemDescriptor> ItemClass) const
+{
+    return ItemNames.NameOf(ItemClass, Settings.NamingLanguage, const_cast<UDynamicTimeTableSubsystem*>(this)).TrimStartAndEnd();
+}
+
+void UDynamicTimeTableSubsystem::LocalizeAutoNameResult(FDTTAutoNameResult& Result) const
+{
+    Result.ResourceName = ItemNameForNaming(Result.ItemClass);
+    Result.Products.Reset();
+    for (const TSubclassOf<UFGItemDescriptor>& Product : Result.ProductClasses)
     {
-        TArray<TSubclassOf<UFGItemDescriptor>> All;
-        // Fluids included: fluid trucks and fluid truck stations exist, and without this a
-        // "(Crude Oil)" tag could only ever resolve through the producer-cargo fallback.
-        UFGBlueprintFunctionLibrary::GetAllDescriptorsSorted(const_cast<UDynamicTimeTableSubsystem*>(this), All,
-            /*includeFluids*/ true, /*includeBuildings*/ false, /*onlyUnlocked*/ false);
-        for (const TSubclassOf<UFGItemDescriptor>& Class : All)
-        {
-            if (!Class) continue;
-            ItemClassByNameCache.Add(UFGItemDescriptor::GetItemName(Class).ToString().ToLower(), Class);
-        }
+        const FString Name = ItemNameForNaming(Product);
+        if (!Name.IsEmpty()) Result.Products.Add(Name);
     }
-
-    const auto* Found = ItemClassByNameCache.Find(Key);
-    return Found ? *Found : nullptr;
 }
 
 TSubclassOf<UFGItemDescriptor> UDynamicTimeTableSubsystem::ResolveItemClassForResource(const FString& ResourceId) const
@@ -4302,16 +4353,27 @@ bool UDynamicTimeTableSubsystem::ApplySettings(const FDTTSettings& NewSettings, 
     }
     FDTTSettings Clean = NewSettings;
     Clean.Sanitize();
+    // A language the game cannot name items in falls back to English rather than to an empty name.
+    Clean.NamingLanguage = FDTTItemNames::NormalizeLanguage(Clean.NamingLanguage);
     if (Clean == Settings)
     {
         if (OutMessage) *OutMessage = TEXT("dTT: settings unchanged.");
         return false;
     }
+    const bool bLanguageChanged = Clean.NamingLanguage != Settings.NamingLanguage;
     Settings = Clean;
     ++ConfigurationRevision;
     SyncConfigurationToSaveActor();
     UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("SETTINGS_APPLIED Source=%s %s"), Source, *Settings.Describe());
     if (OutMessage) *OutMessage = FString::Printf(TEXT("dTT: settings applied: %s"), *Settings.Describe());
+    if (bLanguageChanged)
+    {
+        // Every game word in every tag is rewritten in the new language on the next pass; the
+        // player's own words are not game words and stay. Nothing happens while naming is off,
+        // apart from /dtt autoname apply, which always writes the chosen language.
+        AutoNameRelabelPending = true;
+        MarkAllDocksForAutoName(TEXT("language"));
+    }
     OnGroupsChanged.Broadcast(); OnGroupsChangedNative.Broadcast();
     return true;
 }

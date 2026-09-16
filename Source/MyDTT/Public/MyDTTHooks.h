@@ -11,6 +11,7 @@ inline bool DTSIsFluidForm(EResourceForm Form)
 }
 
 class AFGBuildableDockingStation;
+class UFGConnectionComponent;
 class UFGInventoryComponent;
 class UFGItemDescriptor;
 
@@ -76,6 +77,15 @@ public:
      * moved, since it runs once a second.
      */
     static int32 TransferNow(const AFGBuildableDockingStation* Station, UFGInventoryComponent* Docked, const FDTTTransferPlan& Plan, bool bQuiet);
+
+    /**
+     * The dock's cargo ports, connected ones only: belts and pipes into its storage in OutIns,
+     * belts and pipes out of it in OutOuts. The fuel inputs are left out - a belt of coal into the
+     * fuel slot says nothing about what the trucks carry. Lives here because the arrays that tell
+     * the ports apart are protected, and this class is the station's friend.
+     */
+    static void GetDockPorts(const AFGBuildableDockingStation* Station,
+        TArray<UFGConnectionComponent*>& OutIns, TArray<UFGConnectionComponent*>& OutOuts);
 
 private:
     static bool FindTransferPlan(const AFGBuildableDockingStation* Station, FDTTTransferPlan& OutPlan);

@@ -3,7 +3,7 @@
 ## 3.0.0
 
 - Stations can name themselves. With *Name stations from their belts* on (Settings, off by
-  default), the mod walks the conveyors around every truck dock and writes what it found into the
+  default), the mod walks the conveyors and pipes around every truck dock and writes what it found into the
   station's name: `Factory-2 (Iron Ore) -240/m -> Ingots` - the resource, how much the chain
   behind it wants per minute, and what that chain finally makes. It also sets the station's own
   LOAD/UNLOAD switch, so a new dock needs no configuration at all.
@@ -11,7 +11,8 @@
   full stop is yours entirely and is never touched. `(F)` and `(D)` stations are left alone.
 - Your own word for a resource survives: `(Bauxite)` written in your language stays as you typed
   it for as long as the belt carries that item. The mod only writes the game's name where it
-  cannot tell what you meant.
+  cannot tell what you meant - or when you pick another naming language and the word is one of
+  the game's own (see below).
 - The number in a tag you wrote, as in `(Motor-40)`, survives a rewrite; it is dropped only when
   the chain starts carrying something else, because it was a level for a different cargo.
 - What the tail means: `-` the station feeds the factory (a truck brings this), `+` the station
@@ -33,7 +34,27 @@
   chain it feeds, every machine on it, the name it would get and which signal decided it.
 - Recalculated a couple of seconds after anything is built, dismantled, re-piped or renamed, and
   once a minute for everything else (that is what notices an overclock change).
-- Window protocol 12: the settings carry five new fields. Server and clients must match.
+- Pipes count too. The walk follows pipelines, junctions, pumps and valves the way it follows
+  belts, so a fluid truck station is named like a solid one - `Refinery-1 (Crude Oil) -600/m ->
+  Plastic`, rates in cubic metres per minute - and a fluid buffer is a buffer like a container.
+  Alumina reaching the foundries by pipe now counts as supplied, so the silica station is no
+  longer asked to bring it.
+- A generator is a consumer. The station feeding a row of fuel generators shows what they burn
+  and, at the end of the tail, what they make: `(Fuel) -20/m -> 1250 MW`. Water for coal and
+  nuclear plants is counted as well.
+- A station with no machine behind it - only a container or a train platform - is a warehouse. It
+  is named after its cargo with `+□` or `-□` in place of a rate: the sign says which way the
+  trucks go, the box says nothing is consumed or made here.
+- The names can be written in any language the game itself is translated into: *Language of the
+  names* in Settings, English by default, `/dtt set naminglanguage ?` for the codes. Only the item
+  names change and they are the game's own translations; the mod's window and chat stay English.
+  Changing the language rewrites the resource words that are the game's names for items, in any
+  language; a word of your own, which the game has in no language, stays as you typed it. An
+  ordinary sweep never touches those words - only `apply` and a language change do - so a world
+  full of tags in your language looks the same after the update until you ask.
+- Fixed: a belt on a station's fuel input was read as the station's cargo, so a coal belt into a
+  truck stop's fuel slot made it a coal collector. Only the storage inputs count now.
+- Window protocol 13: the settings carry six new fields. Server and clients must match.
 
 ## 2.5.0
 

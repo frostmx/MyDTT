@@ -1,16 +1,24 @@
 #include "DTTAutoName.h"
 
+#include "FGConnectionComponent.h"
 #include "FGFactoryConnectionComponent.h"
 #include "FGInventoryComponent.h"
+#include "FGPipeConnectionComponent.h"
 #include "FGRecipe.h"
+#include "MyDTTHooks.h"
 #include "Buildables/FGBuildableConveyorAttachment.h"
 #include "Buildables/FGBuildableConveyorBase.h"
 #include "Buildables/FGBuildableConveyorMonitor.h"
 #include "Buildables/FGBuildableDockingStation.h"
+#include "Buildables/FGBuildableGeneratorFuel.h"
 #include "Buildables/FGBuildableManufacturer.h"
+#include "Buildables/FGBuildablePipeReservoir.h"
+#include "Buildables/FGBuildablePipeline.h"
+#include "Buildables/FGBuildablePipelineAttachment.h"
 #include "Buildables/FGBuildableResourceExtractor.h"
 #include "Buildables/FGBuildableSplitterSmart.h"
 #include "Buildables/FGBuildableStorage.h"
+#include "Buildables/FGBuildableTrainPlatformCargo.h"
 #include "Resources/FGAnyUndefinedDescriptor.h"
 #include "Resources/FGExtractableResourceInterface.h"
 #include "Resources/FGItemDescriptor.h"
@@ -26,15 +34,30 @@ namespace
     using FDTSItem = TSubclassOf<UFGItemDescriptor>;
     using FDTSRates = TMap<FDTSItem, float>;
 
+    /**
+     * What a port is for, whichever kind it is. A belt connector says it outright; a pipe
+     * connector says it only on a machine (consumer or producer), and says nothing on pipes,
+     * junctions and pumps, where the fluid may run either way.
+     */
+    enum class EDTSPort : uint8 { Consumer, Producer, Any };
+
     bool DTSIsFluidItem(FDTSItem Item)
     {
         if (!Item) return false;
-        const EResourceForm Form = UFGItemDescriptor::GetForm(Item);
-        return Form == EResourceForm::RF_LIQUID || Form == EResourceForm::RF_GAS;
+        return DTSIsFluidForm(UFGItemDescriptor::GetForm(Item));
     }
 
     /**
-     * Only these carry items through without consuming them. Everything else - another station, a
+     * Fuel energy is stored per inventory unit, and a fluid's unit is a litre. Measured on the
+     * class defaults on 16.09.2026: Desc_LiquidFuel holds 0.75 and Desc_LiquidTurboFuel 2.0 -
+     * per litre, the 750 MJ/m3 of the wiki divided by a thousand - while Desc_Coal holds 300 per
+     * lump. So the value is used as it is and only the rate is scaled to cubic metres, like every
+     * other fluid figure here.
+     */
+    constexpr bool DTSFluidEnergyIsPerCubicMetre = false;
+
+    /**
+     * Only these carry goods through without consuming them. Everything else - another station, a
      * train platform, the sink, anything unknown - ends the branch. A container looks exactly like
      * a splitter from the outside, so this has to be a whitelist, not "has two connections".
      */
@@ -42,24 +65,94 @@ namespace
     {
         return Actor->IsA<AFGBuildableConveyorBase>() ||
                Actor->IsA<AFGBuildableConveyorAttachment>() ||
-               Actor->IsA<AFGBuildableConveyorMonitor>();
+               Actor->IsA<AFGBuildableConveyorMonitor>() ||
+               Actor->IsA<AFGBuildablePipeline>() ||
+               Actor->IsA<AFGBuildablePipelineAttachment>();   // junctions, pumps, valves
     }
 
     /**
      * A container between a station and its factory is a buffer, not a consumer: measured in the
      * live world, most docks feed or are fed through one, and stopping there answered "no machines"
      * for almost every station. It stays a terminator for the final-product hunt, where passing
-     * through it would wander into the next factory over.
+     * through it would wander into the next factory over. A fluid buffer is the same thing for pipes.
      */
     bool DTSIsBuffer(const AActor* Actor)
     {
-        return Actor->IsA<AFGBuildableStorage>();
+        return Actor->IsA<AFGBuildableStorage>() || Actor->IsA<AFGBuildablePipeReservoir>();
     }
 
-    void DTSGetFactoryConnections(AActor* Actor, TArray<UFGFactoryConnectionComponent*>& Out)
+    /** What the walk counts: things that eat or make items. A generator eats. */
+    bool DTSIsMachine(const AActor* Actor)
+    {
+        return Actor->IsA<AFGBuildableManufacturer>() ||
+               Actor->IsA<AFGBuildableResourceExtractor>() ||
+               Actor->IsA<AFGBuildableGeneratorFuel>();
+    }
+
+    EDTSPort DTSPortKind(const UFGConnectionComponent* Port)
+    {
+        if (const UFGFactoryConnectionComponent* Belt = Cast<UFGFactoryConnectionComponent>(Port))
+        {
+            switch (Belt->GetDirection())
+            {
+            case EFactoryConnectionDirection::FCD_INPUT: return EDTSPort::Consumer;
+            case EFactoryConnectionDirection::FCD_OUTPUT: return EDTSPort::Producer;
+            default: return EDTSPort::Any;
+            }
+        }
+        if (const UFGPipeConnectionComponent* Pipe = Cast<UFGPipeConnectionComponent>(Port))
+        {
+            switch (Pipe->GetPipeConnectionType())
+            {
+            case EPipeConnectionType::PCT_CONSUMER: return EDTSPort::Consumer;
+            case EPipeConnectionType::PCT_PRODUCER: return EDTSPort::Producer;
+            default: return EDTSPort::Any;
+            }
+        }
+        return EDTSPort::Any;
+    }
+
+    bool DTSIsConnected(const UFGConnectionComponent* Port)
+    {
+        if (const UFGFactoryConnectionComponent* Belt = Cast<UFGFactoryConnectionComponent>(Port)) return Belt->IsConnected();
+        if (const UFGPipeConnectionComponentBase* Pipe = Cast<UFGPipeConnectionComponentBase>(Port)) return Pipe->IsConnected();
+        return false;
+    }
+
+    /** The port on the building at the other end of this port's belt or pipe link. */
+    UFGConnectionComponent* DTSFarEnd(const UFGConnectionComponent* Port)
+    {
+        if (const UFGFactoryConnectionComponent* Belt = Cast<UFGFactoryConnectionComponent>(Port)) return Belt->GetConnection();
+        if (const UFGPipeConnectionComponentBase* Pipe = Cast<UFGPipeConnectionComponentBase>(Port)) return Pipe->GetConnection();
+        return nullptr;
+    }
+
+    void DTSCollectPorts(AActor* Actor, TArray<UFGConnectionComponent*>& Out)
     {
         Out.Reset();
-        if (IsValid(Actor)) Actor->GetComponents<UFGFactoryConnectionComponent>(Out);
+        if (!IsValid(Actor)) return;
+        TArray<UFGFactoryConnectionComponent*> Belts;
+        Actor->GetComponents<UFGFactoryConnectionComponent>(Belts);
+        for (UFGFactoryConnectionComponent* Belt : Belts) Out.Add(Belt);
+        TArray<UFGPipeConnectionComponent*> Pipes;
+        Actor->GetComponents<UFGPipeConnectionComponent>(Pipes);
+        for (UFGPipeConnectionComponent* Pipe : Pipes) Out.Add(Pipe);
+    }
+
+    /** A belt or a pipe has exactly two ends; this is the one we did not come in by. */
+    UFGConnectionComponent* DTSOtherEnd(AActor* Node, const UFGConnectionComponent* Entered)
+    {
+        if (AFGBuildableConveyorBase* Belt = Cast<AFGBuildableConveyorBase>(Node))
+        {
+            UFGFactoryConnectionComponent* Zero = Belt->GetConnection0();
+            return Entered == Zero ? Belt->GetConnection1() : Zero;
+        }
+        if (AFGBuildablePipeline* Pipe = Cast<AFGBuildablePipeline>(Node))
+        {
+            UFGPipeConnectionComponent* Zero = Pipe->GetPipeConnection0();
+            return Entered == Zero ? Pipe->GetPipeConnection1() : Zero;
+        }
+        return nullptr;
     }
 
     /**
@@ -120,8 +213,57 @@ namespace
         return !bHasOwnRule;                          // an output nobody filtered carries everything
     }
 
+    /** Megajoules in one inventory unit of this fuel: an item, or a litre of a fluid. */
+    float DTSEnergyPerUnit(FDTSItem Fuel)
+    {
+        float Energy = UFGItemDescriptor::GetEnergyValue(Fuel);
+        if (DTSIsFluidItem(Fuel) && DTSFluidEnergyIsPerCubicMetre) Energy /= 1000.0f;
+        return Energy;
+    }
+
     /**
-     * Everything this manufacturer eats, per minute, by item.
+     * Everything this generator burns, per minute, by item. Capacity times sixty over the energy of
+     * one unit: a 75 MW coal generator on 300 MJ coal is 15 a minute. A generator that has never
+     * been fed names no fuel yet, so every fuel it accepts goes in as a candidate and the name
+     * carries a '?' until the first delivery settles it.
+     */
+    void DTSAddGeneratorDemand(AFGBuildableGeneratorFuel* Generator, FDTSRates& Out)
+    {
+        const float MW = Generator->CalcPowerProductionCapacityForPotential(Generator->GetPendingPotential());
+        if (MW <= KINDA_SMALL_NUMBER) return;
+
+        TArray<FDTSItem> Fuels;
+        if (const FDTSItem Current = Generator->GetCurrentFuelClass()) Fuels.Add(Current);
+        else
+        {
+            for (const TSoftClassPtr<UFGItemDescriptor>& Soft : Generator->GetDefaultFuelClasses())
+            {
+                if (UClass* Loaded = Soft.Get()) Fuels.Add(Loaded);
+            }
+        }
+        for (const FDTSItem& Fuel : Fuels)
+        {
+            const float Energy = DTSEnergyPerUnit(Fuel);
+            if (Energy <= KINDA_SMALL_NUMBER) continue;
+            float Rate = MW * 60.0f / Energy;
+            if (DTSIsFluidItem(Fuel)) Rate /= 1000.0f;
+            Out.FindOrAdd(Fuel) += Rate;
+        }
+
+        // Water for a coal or nuclear plant. It arrives by pipe from pumps and is never trucked,
+        // but it has to be in the count so that the supply check can see it covered.
+        if (Generator->GetRequiresSupplementalResource())
+        {
+            if (const FDTSItem Water = Generator->GetSupplementalResourceClass())
+            {
+                const float Rate = Generator->GetSupplementalConsumptionRateMaximum() * 60.0f;
+                if (Rate > KINDA_SMALL_NUMBER) Out.FindOrAdd(Water) += Rate;
+            }
+        }
+    }
+
+    /**
+     * Everything this machine eats, per minute, by item.
      *
      * Deliberately not asked per port. The plan assumed an input connection's
      * GetInventoryAccessIndex() names the ingredient that arrives on that belt; measured in the live
@@ -131,8 +273,15 @@ namespace
      * wanting all of its ingredients, and which one a station actually carries is decided by the
      * dock's own cargo.
      */
-    void DTSAddDemand(AFGBuildableManufacturer* Manufacturer, FDTSRates& Out)
+    void DTSAddDemand(AActor* Machine, FDTSRates& Out)
     {
+        if (AFGBuildableGeneratorFuel* Generator = Cast<AFGBuildableGeneratorFuel>(Machine))
+        {
+            DTSAddGeneratorDemand(Generator, Out);
+            return;
+        }
+
+        AFGBuildableManufacturer* Manufacturer = Cast<AFGBuildableManufacturer>(Machine);
         if (!IsValid(Manufacturer)) return;
 
         const TSubclassOf<UFGRecipe> Recipe = Manufacturer->GetCurrentRecipe();
@@ -152,7 +301,7 @@ namespace
         }
     }
 
-    /** Everything this machine makes, per minute, by item. */
+    /** Everything this machine makes, per minute, by item. A generator makes power, not items. */
     void DTSAddSupply(AActor* Machine, FDTSRates& Out)
     {
         if (AFGBuildableManufacturer* Manufacturer = Cast<AFGBuildableManufacturer>(Machine))
@@ -201,12 +350,113 @@ namespace
         bool bOverflow = false;
     };
 
-    /** The connection on the far end of a belt, whichever end we came in by. */
-    UFGFactoryConnectionComponent* DTSBeltFarSide(AFGBuildableConveyorBase* Belt, const UFGFactoryConnectionComponent* Entered)
+    /** How one walk moves through the network. */
+    struct FDTSWalkSpec
     {
-        UFGFactoryConnectionComponent* Zero = Belt->GetConnection0();
-        UFGFactoryConnectionComponent* One = Belt->GetConnection1();
-        return Entered == Zero ? One : Zero;
+        /** The ports a pass-through node is left by: outputs going downstream, inputs going up. */
+        EDTSPort Forward = EDTSPort::Producer;
+        /** The port a machine has to be reached by to count: its input downstream, its output up. */
+        EDTSPort MachinePort = EDTSPort::Consumer;
+        /** Smart-splitter filter, belts only. Null on the first pass, when the item is unknown. */
+        FDTSItem Filter = nullptr;
+        bool bThroughBuffers = true;
+        /** Shared between seeds when given: one chain, one budget, one set of visited buildings. */
+        TSet<AActor*>* Visited = nullptr;
+    };
+
+    /**
+     * The one walk. Belts carry a direction on every connector; pipes carry one only on machines,
+     * so a pipe network is explored in every direction and sorted out at the machines it reaches:
+     * a demand walk that runs into a refinery's output has found a producer on the same pipe, not a
+     * consumer, and leaves it to the supply check. Machines are handed to OnMachine with the port
+     * they were reached by; buffers passed and train platforms hit are collected in OutStores.
+     */
+    void DTSWalk(const TArray<UFGConnectionComponent*>& Seeds, const FDTSWalkSpec& Spec, FDTSWalk& Walk,
+        TFunctionRef<void(AActor*, UFGConnectionComponent*)> OnMachine, TSet<AActor*>* OutStores)
+    {
+        TSet<AActor*> LocalVisited;
+        TSet<AActor*>& Visited = Spec.Visited ? *Spec.Visited : LocalVisited;
+        TArray<UFGConnectionComponent*> Frontier = Seeds;
+
+        while (Frontier.Num() > 0)
+        {
+            UFGConnectionComponent* In = Frontier.Pop(EAllowShrinking::No);
+            if (!IsValid(In)) continue;
+
+            AActor* Node = In->GetOwner();
+            if (!IsValid(Node) || Visited.Contains(Node)) continue;
+            Visited.Add(Node);
+
+            if (--Walk.NodeBudget <= 0) { Walk.bOverflow = true; return; }
+
+            if (DTSIsMachine(Node))
+            {
+                // An untyped port on a machine would be a blueprint this code has not met; it is
+                // taken rather than dropped, and logged so the measurement shows it.
+                const EDTSPort Kind = DTSPortKind(In);
+                if (Kind == EDTSPort::Any)
+                {
+                    UE_LOG(LogDTTAutoName, Verbose, TEXT("AUTONAME_UNTYPED_PORT Machine=%s Port=%s"), *Node->GetName(), *In->GetName());
+                }
+                if (Kind == Spec.MachinePort || Kind == EDTSPort::Any) OnMachine(Node, In);
+                continue;
+            }
+
+            if (Node->IsA<AFGBuildableTrainPlatformCargo>())
+            {
+                if (OutStores) OutStores->Add(Node);
+                continue;
+            }
+
+            const bool bBuffer = Spec.bThroughBuffers && DTSIsBuffer(Node);
+            if (bBuffer && OutStores) OutStores->Add(Node);
+            if (!bBuffer && !DTSIsPassThrough(Node)) continue;
+
+            if (Node->IsA<AFGBuildableConveyorBase>() || Node->IsA<AFGBuildablePipeline>())
+            {
+                UFGConnectionComponent* Far = DTSOtherEnd(Node, In);
+                if (IsValid(Far) && DTSIsConnected(Far)) Frontier.Add(DTSFarEnd(Far));
+                continue;
+            }
+
+            TArray<UFGConnectionComponent*> Ports;
+            DTSCollectPorts(Node, Ports);
+            for (UFGConnectionComponent* Port : Ports)
+            {
+                if (Port == In || !IsValid(Port) || !DTSIsConnected(Port)) continue;
+                const EDTSPort Kind = DTSPortKind(Port);
+                if (Kind != Spec.Forward && Kind != EDTSPort::Any) continue;
+                if (!bBuffer && Spec.Filter)
+                {
+                    const UFGFactoryConnectionComponent* Belt = Cast<UFGFactoryConnectionComponent>(Port);
+                    if (Belt && !DTSSplitterAllows(Node, Belt, Spec.Filter)) continue;
+                }
+                Frontier.Add(DTSFarEnd(Port));
+            }
+        }
+    }
+
+    /** The far ends of these ports, as seeds for a walk. */
+    TArray<UFGConnectionComponent*> DTSSeeds(const TArray<UFGConnectionComponent*>& Ports)
+    {
+        TArray<UFGConnectionComponent*> Seeds;
+        for (UFGConnectionComponent* Port : Ports)
+        {
+            if (IsValid(Port) && DTSIsConnected(Port)) Seeds.Add(DTSFarEnd(Port));
+        }
+        return Seeds;
+    }
+
+    /** The machine's own ports of one kind, connected ones only. */
+    TArray<UFGConnectionComponent*> DTSMachinePorts(AActor* Machine, EDTSPort Kind)
+    {
+        TArray<UFGConnectionComponent*> Ports, Out;
+        DTSCollectPorts(Machine, Ports);
+        for (UFGConnectionComponent* Port : Ports)
+        {
+            if (IsValid(Port) && DTSIsConnected(Port) && DTSPortKind(Port) == Kind) Out.Add(Port);
+        }
+        return Out;
     }
 
     /**
@@ -230,181 +480,56 @@ namespace
     }
 
     /**
-     * Downstream from a connection, collecting the machines at the far end.
-     * Filter null on the first pass (the item is still unknown), set on the second.
-     * OutPortVotes, when given, gathers what the ports say - see DTSPortIngredient.
-     */
-    void DTSWalkDemand(UFGFactoryConnectionComponent* Start, FDTSItem Filter, FDTSWalk& Walk,
-        TSet<AActor*>& OutMachines, bool bThroughBuffers = true, TSet<FDTSItem>* OutPortVotes = nullptr)
-    {
-        TSet<AActor*> Visited;
-        TArray<UFGFactoryConnectionComponent*> Frontier;
-        Frontier.Add(Start);
-
-        while (Frontier.Num() > 0)
-        {
-            UFGFactoryConnectionComponent* In = Frontier.Pop(EAllowShrinking::No);
-            if (!IsValid(In)) continue;
-
-            AActor* Node = In->GetOwner();
-            if (!IsValid(Node) || Visited.Contains(Node)) continue;
-            Visited.Add(Node);
-
-            if (--Walk.NodeBudget <= 0) { Walk.bOverflow = true; return; }
-
-            if (AFGBuildableManufacturer* Manufacturer = Cast<AFGBuildableManufacturer>(Node))
-            {
-                OutMachines.Add(Manufacturer);
-                if (OutPortVotes)
-                {
-                    if (const FDTSItem Voted = DTSPortIngredient(Manufacturer, In)) OutPortVotes->Add(Voted);
-                }
-                continue;
-            }
-
-            const bool bBuffer = bThroughBuffers && DTSIsBuffer(Node);
-            if (!bBuffer && !DTSIsPassThrough(Node)) continue;
-
-            if (AFGBuildableConveyorBase* Belt = Cast<AFGBuildableConveyorBase>(Node))
-            {
-                UFGFactoryConnectionComponent* Far = DTSBeltFarSide(Belt, In);
-                if (IsValid(Far) && Far->IsConnected()) Frontier.Add(Far->GetConnection());
-                continue;
-            }
-
-            TArray<UFGFactoryConnectionComponent*> Conns;
-            DTSGetFactoryConnections(Node, Conns);
-            for (UFGFactoryConnectionComponent* Conn : Conns)
-            {
-                if (!IsValid(Conn) || !Conn->IsConnected()) continue;
-                if (Conn->GetDirection() != EFactoryConnectionDirection::FCD_OUTPUT) continue;
-                if (!bBuffer && Filter && !DTSSplitterAllows(Node, Conn, Filter)) continue;
-                Frontier.Add(Conn->GetConnection());
-            }
-        }
-    }
-
-    /** Upstream from a connection, collecting the machines behind it. */
-    void DTSWalkSupply(UFGFactoryConnectionComponent* Start, FDTSWalk& Walk, TSet<AActor*>& OutMachines)
-    {
-        TSet<AActor*> Visited;
-        TArray<UFGFactoryConnectionComponent*> Frontier;
-        Frontier.Add(Start);
-
-        while (Frontier.Num() > 0)
-        {
-            UFGFactoryConnectionComponent* OutConn = Frontier.Pop(EAllowShrinking::No);
-            if (!IsValid(OutConn)) continue;
-
-            AActor* Node = OutConn->GetOwner();
-            if (!IsValid(Node) || Visited.Contains(Node)) continue;
-            Visited.Add(Node);
-
-            if (--Walk.NodeBudget <= 0) { Walk.bOverflow = true; return; }
-
-            if (Node->IsA<AFGBuildableManufacturer>() || Node->IsA<AFGBuildableResourceExtractor>())
-            {
-                OutMachines.Add(Node);
-                continue;
-            }
-
-            if (!DTSIsBuffer(Node) && !DTSIsPassThrough(Node)) continue;
-
-            if (AFGBuildableConveyorBase* Belt = Cast<AFGBuildableConveyorBase>(Node))
-            {
-                UFGFactoryConnectionComponent* Far = DTSBeltFarSide(Belt, OutConn);
-                if (IsValid(Far) && Far->IsConnected()) Frontier.Add(Far->GetConnection());
-                continue;
-            }
-
-            TArray<UFGFactoryConnectionComponent*> Conns;
-            DTSGetFactoryConnections(Node, Conns);
-            for (UFGFactoryConnectionComponent* Conn : Conns)
-            {
-                if (!IsValid(Conn) || !Conn->IsConnected()) continue;
-                if (Conn->GetDirection() != EFactoryConnectionDirection::FCD_INPUT) continue;
-                Frontier.Add(Conn->GetConnection());
-            }
-        }
-    }
-
-    /**
-     * What already arrives at these machines on a belt from something that makes it.
+     * What already arrives at these machines from something that makes it, by belt or by pipe.
      *
      * The strongest thing that can be said about an empty dock: whatever the chain needs and
      * nobody else delivers is what this dock is for. A truck station upstream ends the walk
      * silently and supplies nothing, so two docks feeding one assembler stay ambiguous - which is
      * honest, that case really is a coin flip.
      */
-    void DTSCollectBeltSupply(const TSet<AActor*>& Machines, FDTSWalk& Walk, FDTSRates& Out)
+    void DTSCollectSupply(const TSet<AActor*>& Machines, FDTSWalk& Walk, FDTSRates& Out)
     {
         // One walk for the whole chain, not one per machine: twenty foundries share the belts
         // behind them, and walking each separately spends the node budget on the same conveyors
         // twenty times over - which made the answer "I cannot tell" on exactly the big factories
         // this is for.
         TSet<AActor*> Visited;
-        TArray<UFGFactoryConnectionComponent*> Frontier;
+        TArray<UFGConnectionComponent*> Seeds;
         for (AActor* Machine : Machines)
         {
             Visited.Add(Machine);
-            TArray<UFGFactoryConnectionComponent*> Conns;
-            DTSGetFactoryConnections(Machine, Conns);
-            for (UFGFactoryConnectionComponent* Conn : Conns)
-            {
-                if (!IsValid(Conn) || !Conn->IsConnected()) continue;
-                if (Conn->GetDirection() != EFactoryConnectionDirection::FCD_INPUT) continue;
-                Frontier.Add(Conn->GetConnection());
-            }
+            Seeds.Append(DTSSeeds(DTSMachinePorts(Machine, EDTSPort::Consumer)));
         }
 
-        while (Frontier.Num() > 0)
+        FDTSWalkSpec Spec;
+        Spec.Forward = EDTSPort::Consumer;
+        Spec.MachinePort = EDTSPort::Producer;
+        Spec.Visited = &Visited;
+        DTSWalk(Seeds, Spec, Walk, [&Out](AActor* Machine, UFGConnectionComponent*)
         {
-            UFGFactoryConnectionComponent* OutConn = Frontier.Pop(EAllowShrinking::No);
-            if (!IsValid(OutConn)) continue;
-
-            AActor* Node = OutConn->GetOwner();
-            if (!IsValid(Node) || Visited.Contains(Node)) continue;
-            Visited.Add(Node);
-
-            if (--Walk.NodeBudget <= 0) { Walk.bOverflow = true; return; }
-
-            if (Node->IsA<AFGBuildableManufacturer>() || Node->IsA<AFGBuildableResourceExtractor>())
-            {
-                FDTSRates Made;
-                DTSAddSupply(Node, Made);
-                for (const TPair<FDTSItem, float>& Pair : Made) Out.FindOrAdd(Pair.Key) += Pair.Value;
-                continue;
-            }
-
-            if (!DTSIsBuffer(Node) && !DTSIsPassThrough(Node)) continue;
-
-            if (AFGBuildableConveyorBase* Belt = Cast<AFGBuildableConveyorBase>(Node))
-            {
-                UFGFactoryConnectionComponent* Far = DTSBeltFarSide(Belt, OutConn);
-                if (IsValid(Far) && Far->IsConnected()) Frontier.Add(Far->GetConnection());
-                continue;
-            }
-
-            TArray<UFGFactoryConnectionComponent*> Conns;
-            DTSGetFactoryConnections(Node, Conns);
-            for (UFGFactoryConnectionComponent* Conn : Conns)
-            {
-                if (!IsValid(Conn) || !Conn->IsConnected()) continue;
-                if (Conn->GetDirection() != EFactoryConnectionDirection::FCD_INPUT) continue;
-                Frontier.Add(Conn->GetConnection());
-            }
-        }
+            FDTSRates Made;
+            DTSAddSupply(Machine, Made);
+            for (const TPair<FDTSItem, float>& Pair : Made) Out.FindOrAdd(Pair.Key) += Pair.Value;
+        }, nullptr);
     }
 
     /**
      * From a machine forward to whatever the chain finally makes. A branch that reaches another
      * manufacturer keeps going; a branch that dies at a container, a station or a bare belt end
-     * makes the last manufacturer on it the final one.
+     * makes the last manufacturer on it the final one. A generator is final by nature and adds its
+     * capacity instead of an item.
      */
-    void DTSCollectFinalProducts(AActor* Machine, FDTSWalk& Walk, FDTSRates& Out, TSet<AActor*>& VisitedMachines, int32 Depth)
+    void DTSCollectFinalProducts(AActor* Machine, FDTSWalk& Walk, FDTSRates& Out, float& OutPowerMW,
+        TSet<AActor*>& VisitedMachines, int32 Depth)
     {
         if (Depth > 16 || !IsValid(Machine) || VisitedMachines.Contains(Machine)) return;
         VisitedMachines.Add(Machine);
+
+        if (AFGBuildableGeneratorFuel* Generator = Cast<AFGBuildableGeneratorFuel>(Machine))
+        {
+            OutPowerMW += Generator->CalcPowerProductionCapacityForPotential(Generator->GetPendingPotential());
+            return;
+        }
 
         AFGBuildableManufacturer* Manufacturer = Cast<AFGBuildableManufacturer>(Machine);
         if (!Manufacturer) return;
@@ -412,23 +537,22 @@ namespace
         FDTSRates OwnProducts;
         DTSAddSupply(Manufacturer, OwnProducts);
 
-        TArray<UFGFactoryConnectionComponent*> Conns;
-        DTSGetFactoryConnections(Machine, Conns);
-
         bool bFedAnother = false;
-        for (UFGFactoryConnectionComponent* Conn : Conns)
+        FDTSWalkSpec Spec;
+        Spec.bThroughBuffers = false;
+        for (UFGConnectionComponent* Port : DTSMachinePorts(Machine, EDTSPort::Producer))
         {
-            if (!IsValid(Conn) || !Conn->IsConnected()) continue;
-            if (Conn->GetDirection() != EFactoryConnectionDirection::FCD_OUTPUT) continue;
-
             TSet<AActor*> Downstream;
-            DTSWalkDemand(Conn->GetConnection(), nullptr, Walk, Downstream, false);
+            DTSWalk({ DTSFarEnd(Port) }, Spec, Walk, [&Downstream](AActor* Next, UFGConnectionComponent*) { Downstream.Add(Next); }, nullptr);
+            // A walk cut short by the budget has not seen where this port leads; calling the
+            // machine final on that evidence would print an intermediate as a product.
+            if (Walk.bOverflow) return;
             for (AActor* Next : Downstream)
             {
                 bFedAnother = true;
-                DTSCollectFinalProducts(Next, Walk, Out, VisitedMachines, Depth + 1);
+                DTSCollectFinalProducts(Next, Walk, Out, OutPowerMW, VisitedMachines, Depth + 1);
+                if (Walk.bOverflow) return;
             }
-            if (Walk.bOverflow) break;
         }
 
         if (!bFedAnother)
@@ -437,31 +561,70 @@ namespace
         }
     }
 
-    /**
-     * What this dock handles, according to itself. The station's inventory is the witness that
-     * cannot be argued with: it holds what trucks bring or what the factory sent, and it is the
-     * only thing that tells two ingredients of one recipe apart.
-     */
-    FDTSItem DTSDockCargoItem(AFGBuildableDockingStation* Station)
+    /** The most numerous item in an inventory, or null. */
+    void DTSTallyInventory(UFGInventoryComponent* Inventory, TMap<FDTSItem, int64>& Out)
     {
-        UFGInventoryComponent* Inventory = Station->GetInventory();
-        if (!IsValid(Inventory)) return nullptr;
-
-        FDTSItem Best = nullptr;
-        int32 BestNum = 0;
+        if (!IsValid(Inventory)) return;
         const int32 Size = Inventory->GetSizeLinear();
         for (int32 Index = 0; Index < Size; ++Index)
         {
             FInventoryStack Stack;
             if (!Inventory->GetStackFromIndex(Index, Stack)) continue;
             if (!Stack.HasItems() || !Stack.Item.GetItemClass()) continue;
-            if (Stack.NumItems > BestNum)
-            {
-                BestNum = Stack.NumItems;
-                Best = Stack.Item.GetItemClass();
-            }
+            Out.FindOrAdd(Stack.Item.GetItemClass()) += Stack.NumItems;
+        }
+    }
+
+    FDTSItem DTSMostHeld(const TMap<FDTSItem, int64>& Held)
+    {
+        FDTSItem Best = nullptr;
+        int64 BestNum = 0;
+        for (const TPair<FDTSItem, int64>& Pair : Held)
+        {
+            if (Pair.Value > BestNum) { BestNum = Pair.Value; Best = Pair.Key; }
         }
         return Best;
+    }
+
+    /**
+     * What this dock handles, according to itself. The station's inventory is the witness that
+     * cannot be argued with: it holds what trucks bring or what the factory sent, and it is the
+     * only thing that tells two ingredients of one recipe apart. A fluid dock has two more
+     * witnesses of the same rank: the fluid it currently holds, and the fluid its pipe network
+     * carries - a network keeps its fluid type even when every tank on it is empty.
+     */
+    FDTSItem DTSDockCargoItem(AFGBuildableDockingStation* Station, const TArray<UFGConnectionComponent*>& Ports)
+    {
+        TMap<FDTSItem, int64> Held;
+        DTSTallyInventory(Station->GetInventory(), Held);
+        if (const FDTSItem Best = DTSMostHeld(Held)) return Best;
+
+        if (const FDTSItem Fluid = Station->GetCurrentFluidDescriptor()) return Fluid;
+        for (UFGConnectionComponent* Port : Ports)
+        {
+            const UFGPipeConnectionComponent* Pipe = Cast<UFGPipeConnectionComponent>(Port);
+            if (!Pipe) continue;
+            if (const FDTSItem Fluid = Pipe->GetFluidDescriptor()) return Fluid;
+        }
+        return nullptr;
+    }
+
+    /** What the stores behind a warehouse dock hold, by item, counted in inventory units. */
+    void DTSTallyStores(const TSet<AActor*>& Stores, TMap<FDTSItem, int64>& Out)
+    {
+        for (AActor* Store : Stores)
+        {
+            if (AFGBuildableStorage* Storage = Cast<AFGBuildableStorage>(Store)) DTSTallyInventory(Storage->GetStorageInventory(), Out);
+            else if (AFGBuildableTrainPlatformCargo* Platform = Cast<AFGBuildableTrainPlatformCargo>(Store)) DTSTallyInventory(Platform->GetInventory(), Out);
+            else if (AFGBuildablePipeReservoir* Reservoir = Cast<AFGBuildablePipeReservoir>(Store))
+            {
+                if (const FDTSItem Fluid = Reservoir->GetFluidDescriptor())
+                {
+                    // Litres, so that a tank compares with the solid stacks next to it.
+                    Out.FindOrAdd(Fluid) += FMath::Max<int64>(1, int64(Reservoir->GetFluidContent() * 1000.0f));
+                }
+            }
+        }
     }
 
     void DTSPickDominant(const FDTSRates& Rates, FDTSItem& OutItem, float& OutRate)
@@ -473,6 +636,17 @@ namespace
             if (Pair.Value > OutRate) { OutItem = Pair.Key; OutRate = Pair.Value; }
         }
     }
+
+    /** The entries a dock of this form can carry at all: solids over belts, fluids through pipes. */
+    FDTSRates DTSOfForm(const FDTSRates& Rates, bool bFluidDock)
+    {
+        FDTSRates Out;
+        for (const TPair<FDTSItem, float>& Pair : Rates)
+        {
+            if (DTSIsFluidItem(Pair.Key) == bFluidDock) Out.Add(Pair.Key, Pair.Value);
+        }
+        return Out;
+    }
 }
 
 bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAutoNameLimits& Limits,
@@ -481,85 +655,125 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
     Out = FDTTAutoNameResult();
     if (!IsValid(Station)) { Out.SkipReason = TEXT("no-station"); return false; }
 
-    TArray<UFGFactoryConnectionComponent*> Conns;
-    DTSGetFactoryConnections(Station, Conns);
+    const bool bFluidDock = DTSIsFluidForm(Station->GetDockingStationResourceForm());
+    Out.bFluidDock = bFluidDock;
 
     // A vanilla truck station carries several connectors of each kind and players do use more than
-    // one, so every connected belt is walked, not the first one found.
-    TArray<UFGFactoryConnectionComponent*> DockOuts, DockIns;
-    for (UFGFactoryConnectionComponent* Conn : Conns)
-    {
-        if (!IsValid(Conn) || !Conn->IsConnected()) continue;
-        if (Conn->GetDirection() == EFactoryConnectionDirection::FCD_OUTPUT) DockOuts.Add(Conn);
-        else if (Conn->GetDirection() == EFactoryConnectionDirection::FCD_INPUT) DockIns.Add(Conn);
-    }
+    // one, so every connected belt or pipe is walked, not the first one found. The fuel inputs are
+    // not among them: a belt of coal into the fuel slot says nothing about the cargo.
+    TArray<UFGConnectionComponent*> DockIns, DockOuts;
+    FMyDTTHooks::GetDockPorts(Station, DockIns, DockOuts);
 
     // Both sides wired says nothing about which way the goods travel, and the switch is the
     // player's in that case.
-    if (DockOuts.Num() > 0 && DockIns.Num() > 0) { Out.SkipReason = TEXT("belts-on-both-sides"); return false; }
-    if (DockOuts.Num() == 0 && DockIns.Num() == 0) { Out.SkipReason = TEXT("no-belt"); return false; }
+    if (DockOuts.Num() > 0 && DockIns.Num() > 0) { Out.SkipReason = TEXT("both-sides"); return false; }
+    if (DockOuts.Num() == 0 && DockIns.Num() == 0) { Out.SkipReason = bFluidDock ? TEXT("no-pipe") : TEXT("no-belt"); return false; }
 
     const bool bRequester = DockOuts.Num() > 0;
-    const FDTSItem Cargo = DTSDockCargoItem(Station);
+    const TArray<UFGConnectionComponent*>& DockPorts = bRequester ? DockOuts : DockIns;
+    FDTSItem Cargo = DTSDockCargoItem(Station, DockPorts);
+    if (Cargo && DTSIsFluidItem(Cargo) != bFluidDock) Cargo = nullptr;
+    if (Preferred && DTSIsFluidItem(Preferred) != bFluidDock) Preferred = nullptr;
 
     FDTSWalk Walk;
     Walk.NodeBudget = FMath::Max(16, Limits.MaxNodes);
 
-    TSet<AActor*> Machines;
+    TSet<AActor*> Machines, Stores;
     TSet<FDTSItem> PortVotes;
-    if (bRequester)
+    FDTSWalkSpec Spec;
+    Spec.Forward = bRequester ? EDTSPort::Producer : EDTSPort::Consumer;
+    Spec.MachinePort = bRequester ? EDTSPort::Consumer : EDTSPort::Producer;
+    // The first pass runs unfiltered, because a smart splitter's filter can only be asked about a
+    // known item; once the item is decided the walk is taken again with the filters on.
+    DTSWalk(DTSSeeds(DockPorts), Spec, Walk, [&](AActor* Machine, UFGConnectionComponent* Port)
     {
-        // The first pass runs unfiltered, because a smart splitter's filter can only be asked about
-        // a known item; once the item is decided the walk is taken again with the filters on.
-        for (UFGFactoryConnectionComponent* DockOut : DockOuts)
-            DTSWalkDemand(DockOut->GetConnection(), nullptr, Walk, Machines, true, &PortVotes);
-    }
-    else
-    {
-        for (UFGFactoryConnectionComponent* DockIn : DockIns) DTSWalkSupply(DockIn->GetConnection(), Walk, Machines);
-    }
+        Machines.Add(Machine);
+        if (bRequester)
+        {
+            if (const FDTSItem Voted = DTSPortIngredient(Cast<AFGBuildableManufacturer>(Machine), Cast<UFGFactoryConnectionComponent>(Port)))
+                PortVotes.Add(Voted);
+        }
+    }, &Stores);
     if (Walk.bOverflow) { Out.SkipReason = TEXT("chain-too-large"); return false; }
-    if (Machines.Num() == 0) { Out.SkipReason = TEXT("no-machines"); return false; }
+
+    if (Machines.Num() == 0)
+    {
+        if (Stores.Num() == 0) { Out.SkipReason = TEXT("no-machines"); return false; }
+
+        // A warehouse: the belt or pipe ends in storage, so nothing consumes or produces and there
+        // is no rate to show. What it carries is what the dock or the stores hold, in that order,
+        // with the player's tag between them - and the tag is kept even over an empty store.
+        TMap<FDTSItem, int64> Held;
+        DTSTallyStores(Stores, Held);
+        for (auto It = Held.CreateIterator(); It; ++It)
+        {
+            if (DTSIsFluidItem(It.Key()) != bFluidDock) It.RemoveCurrent();
+        }
+
+        FDTSItem Item = nullptr;
+        FString Source;
+        if (Cargo) { Item = Cargo; Source = TEXT("cargo"); }
+        else if (Preferred) { Item = Preferred; Source = TEXT("tag"); }
+        else if (const FDTSItem Most = DTSMostHeld(Held)) { Item = Most; Source = TEXT("held"); Out.bMixed = Held.Num() > 1; }
+        if (!Item) { Out.SkipReason = TEXT("warehouse-empty"); return false; }
+
+        Out.bValid = true;
+        Out.bWarehouse = true;
+        Out.bRequester = bRequester;
+        Out.ItemClass = Item;
+        Out.RatePerMinute = 0.0f;
+        Out.DecidedBy = Source;
+        Out.StoreCount = Stores.Num();
+        Out.HeldKinds = Held.Num();
+        for (AActor* Store : Stores) Out.Machines.Add(Store);
+        return true;
+    }
 
     FDTSRates Rates;
     for (AActor* Machine : Machines)
     {
-        if (bRequester) DTSAddDemand(Cast<AFGBuildableManufacturer>(Machine), Rates);
+        if (bRequester) DTSAddDemand(Machine, Rates);
         else DTSAddSupply(Machine, Rates);
     }
 
+    // A solid dock cannot carry the water a refinery also wants, and a fluid dock cannot carry its
+    // bauxite: only the entries of the dock's own form are candidates for its name.
+    const FDTSRates Wanted = DTSOfForm(Rates, bFluidDock);
+    if (Wanted.Num() == 0) { Out.SkipReason = TEXT("form-mismatch"); return false; }
+
     FDTSItem Item = nullptr;
     float Rate = 0.0f;
-    DTSPickDominant(Rates, Item, Rate);
-    bool bMixed = Rates.Num() > 1;
+    DTSPickDominant(Wanted, Item, Rate);
+    bool bMixed = Wanted.Num() > 1;
     FString Source = bMixed ? TEXT("dominant") : TEXT("only-one");
 
     // The cargo wins over the arithmetic whenever the chain has a use for it: a station feeding an
     // assembler with two ingredients carries exactly one of them, and only the station knows which.
     bool bDecided = false;
-    if (Cargo && Rates.Contains(Cargo))
+    if (Cargo && Wanted.Contains(Cargo))
     {
         Item = Cargo;
-        Rate = Rates[Cargo];
+        Rate = Wanted[Cargo];
         bMixed = false;
         Source = TEXT("cargo");
         bDecided = true;
     }
-    else if (Preferred && Rates.Contains(Preferred))
+    else if (Preferred && Wanted.Contains(Preferred))
     {
         // An empty dock says nothing, but its tag does. Keeping the player's answer beats picking
         // the biggest number on a chain that feeds several things.
         Item = Preferred;
-        Rate = Rates[Preferred];
+        Rate = Wanted[Preferred];
         bMixed = false;
         Source = TEXT("tag");
         bDecided = true;
     }
 
-    // Ask the factory itself: whatever this chain needs and no belt already brings is what the
-    // trucks are for. A foundry fed scrap by its own refineries and silica by nobody is a silica
-    // station, and that is a fact about the world rather than a guess about wiring. Two docks
-    // feeding one assembler leave two ingredients unsupplied and stay ambiguous, which is honest.
+    // Ask the factory itself: whatever this chain needs and no belt or pipe already brings is what
+    // the trucks are for. A foundry fed scrap by its own refineries and silica by nobody is a
+    // silica station, and that is a fact about the world rather than a guess about wiring. Two
+    // docks feeding one assembler leave two ingredients unsupplied and stay ambiguous, which is
+    // honest.
     //
     // The walk backwards is not cheap, so it runs when the answer is still open - or when someone
     // asked to be told everything, which is what /dtt autoname and its preview do.
@@ -567,21 +781,16 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
     {
         FDTSWalk Back;
         Back.NodeBudget = FMath::Max(16, Limits.MaxNodes);
-        FDTSRates ByBelt;
-        DTSCollectBeltSupply(Machines, Back, ByBelt);
+        FDTSRates Supplied;
+        DTSCollectSupply(Machines, Back, Supplied);
 
         // Covered means covered by the numbers, not merely present: an aluminium plant makes some
         // of its own silica as a by-product and still lives on trucks for the rest, and an
         // ingredient that arrives half-fed is exactly the one a station is there to carry.
-        for (const TPair<FDTSItem, float>& Pair : Rates)
+        for (const TPair<FDTSItem, float>& Pair : Wanted)
         {
-            // A fluid arrives by pipe, which this walk cannot see at all, so it would always look
-            // unsupplied. Trucks do not carry it either - naming stops at solids - so it is not a
-            // candidate and must not stand in the way of the one that is.
-            if (DTSIsFluidItem(Pair.Key)) continue;
-
-            const float* Supplied = ByBelt.Find(Pair.Key);
-            if (Supplied && *Supplied >= Pair.Value * 0.99f) continue;
+            const float* Have = Supplied.Find(Pair.Key);
+            if (Have && *Have >= Pair.Value * 0.99f) continue;
             Out.UnsuppliedItem = Pair.Key;
             ++Out.UnsuppliedCount;
         }
@@ -589,7 +798,7 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
         if (!bDecided && Out.UnsuppliedCount == 1)
         {
             Item = Out.UnsuppliedItem;
-            Rate = Rates[Out.UnsuppliedItem];
+            Rate = Wanted[Out.UnsuppliedItem];
             bMixed = false;
             Source = TEXT("unsupplied");
             bDecided = true;
@@ -601,10 +810,10 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
         // Nothing left but the wiring: the port a belt lands on carries the slot, and so the
         // ingredient, it reaches. Taken, and marked as the guess it is.
         const FDTSItem Voted = *PortVotes.CreateConstIterator();
-        if (const float* Wanted = Rates.Find(Voted))
+        if (const float* Asked = Wanted.Find(Voted))
         {
             Item = Voted;
-            Rate = *Wanted;
+            Rate = *Asked;
             Out.bFromPort = true;
             Source = TEXT("port");
         }
@@ -615,14 +824,14 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
     if (PortVotes.Num() == 1) Out.PortItem = *PortVotes.CreateConstIterator();
     Out.PortVoteCount = PortVotes.Num();
     if (!Item) { Out.SkipReason = TEXT("no-machines"); return false; }
-    if (DTSIsFluidItem(Item)) { Out.SkipReason = TEXT("fluid-not-supported"); return false; }
 
     if (bRequester)
     {
         // Now that the item is known the filters can speak, so the reachable set is taken again.
         Machines.Reset();
         Walk.NodeBudget = FMath::Max(16, Limits.MaxNodes);
-        for (UFGFactoryConnectionComponent* DockOut : DockOuts) DTSWalkDemand(DockOut->GetConnection(), Item, Walk, Machines);
+        Spec.Filter = Item;
+        DTSWalk(DTSSeeds(DockPorts), Spec, Walk, [&Machines](AActor* Machine, UFGConnectionComponent*) { Machines.Add(Machine); }, nullptr);
         if (Walk.bOverflow) { Out.SkipReason = TEXT("chain-too-large"); return false; }
 
         // Only the machines that actually want this item belong to this station's chain.
@@ -631,28 +840,38 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
         for (AActor* Machine : Machines)
         {
             FDTSRates One;
-            DTSAddDemand(Cast<AFGBuildableManufacturer>(Machine), One);
-            if (const float* Wanted = One.Find(Item))
+            DTSAddDemand(Machine, One);
+            if (const float* Asked = One.Find(Item))
             {
-                Rate += *Wanted;
+                Rate += *Asked;
                 Consumers.Add(Machine);
             }
         }
         if (Consumers.Num() == 0 || Rate <= 0.0f) { Out.SkipReason = TEXT("no-machines"); return false; }
 
+        // Every machine walks its own way out, so a manifold shared by ten refineries is crossed
+        // ten times over; the products get a budget of their own, wide enough for that, and running
+        // out of it shortens the list instead of failing the station.
         FDTSRates Products;
         TSet<AActor*> VisitedMachines;
+        FDTSWalk ProductWalk;
+        ProductWalk.NodeBudget = FMath::Max(16, Limits.MaxNodes) * 16;
         for (AActor* Machine : Consumers)
         {
-            if (VisitedMachines.Num() >= Limits.MaxMachines) break;
-            DTSCollectFinalProducts(Machine, Walk, Products, VisitedMachines, 0);
+            if (VisitedMachines.Num() >= Limits.MaxMachines || ProductWalk.bOverflow) break;
+            DTSCollectFinalProducts(Machine, ProductWalk, Products, Out.PowerMW, VisitedMachines, 0);
+        }
+        if (ProductWalk.bOverflow)
+        {
+            Out.bMoreProducts = true;
+            UE_LOG(LogDTTAutoName, Verbose, TEXT("AUTONAME_PRODUCTS_CUT Station=%s Machines=%d"), *Station->GetName(), VisitedMachines.Num());
         }
 
         Products.ValueSort([](float A, float B) { return A > B; });
         for (const TPair<FDTSItem, float>& Pair : Products)
         {
-            if (Out.Products.Num() >= FMath::Max(1, Limits.MaxProducts)) { Out.bMoreProducts = true; break; }
-            Out.Products.Add(UFGItemDescriptor::GetItemName(Pair.Key).ToString());
+            if (Out.ProductClasses.Num() >= FMath::Max(1, Limits.MaxProducts)) { Out.bMoreProducts = true; break; }
+            Out.ProductClasses.Add(Pair.Key);
         }
 
         for (AActor* Machine : Consumers) Out.Machines.Add(Machine);
@@ -687,9 +906,6 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
         Out.PortVoteCount,
         Out.UnsuppliedItem ? *UFGItemDescriptor::GetItemName(Out.UnsuppliedItem).ToString() : TEXT("-"),
         Out.UnsuppliedCount);
-
-    Out.ResourceName = UFGItemDescriptor::GetItemName(Item).ToString().TrimStartAndEnd();
-    if (Out.ResourceName.IsEmpty()) { Out.SkipReason = TEXT("resource-has-no-name"); return false; }
 
     Out.bValid = true;
     return true;

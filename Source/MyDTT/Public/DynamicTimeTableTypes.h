@@ -405,9 +405,17 @@ struct FDTTSettings
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 AutoNameMaxNodes = 500;
     /** How many final products the name lists before it ends in an ellipsis. */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") int32 AutoNameMaxProducts = 3;
+    /**
+     * The game language item names are written in: "en", or one of the culture codes the options
+     * menu offers. A dedicated server has no language of its own and a name is read by everyone,
+     * so this is a setting rather than whatever culture the process happens to run in.
+     */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") FString NamingLanguage = TEXT("en");
 
     void Sanitize()
     {
+        NamingLanguage = NamingLanguage.TrimStartAndEnd();
+        if (NamingLanguage.IsEmpty()) NamingLanguage = TEXT("en");
         SolidRequestStacks = FMath::Clamp(SolidRequestStacks, 0, 200);
         FluidRequestStacks = FMath::Clamp(FluidRequestStacks, 0, 200);
         RequestBufferStacks = FMath::Clamp(RequestBufferStacks, 0, 64);
@@ -443,7 +451,7 @@ struct FDTTSettings
             FuelLegMarginFactor == Other.FuelLegMarginFactor && FuelReachFraction == Other.FuelReachFraction &&
             bAutoNameStations == Other.bAutoNameStations && AutoNameDebounceSeconds == Other.AutoNameDebounceSeconds &&
             AutoNameSweepSeconds == Other.AutoNameSweepSeconds && AutoNameMaxNodes == Other.AutoNameMaxNodes &&
-            AutoNameMaxProducts == Other.AutoNameMaxProducts;
+            AutoNameMaxProducts == Other.AutoNameMaxProducts && NamingLanguage == Other.NamingLanguage;
     }
     bool operator!=(const FDTTSettings& Other) const { return !(*this == Other); }
     FString Describe() const
@@ -452,7 +460,7 @@ struct FDTTSettings
             "LeftoverHoldSeconds=%.0f StayUntilEmpty=%s TopUpIntervalSeconds=%.0f UnloadAtDepot=%s SkipProducerWhenCargoCovers=%s "
             "PoolDispatchIntervalSeconds=%.0f MaxRequestersPerLap=%d RequesterClaimTimeoutSeconds=%.0f OverdueRequestMinutes=%d "
             "IdleDispatchRecheckSeconds=%.0f FuelCriticalMarginLaps=%.2f FuelSkipMarginLaps=%.2f FuelLegMarginFactor=%.2f FuelReachFraction=%.2f "
-            "AutoNameStations=%s AutoNameDebounceSeconds=%.0f AutoNameSweepSeconds=%.0f AutoNameMaxNodes=%d AutoNameMaxProducts=%d"),
+            "AutoNameStations=%s AutoNameDebounceSeconds=%.0f AutoNameSweepSeconds=%.0f AutoNameMaxNodes=%d AutoNameMaxProducts=%d NamingLanguage=%s"),
             bExactQuantities ? TEXT("true") : TEXT("false"),
             SolidRequestStacks, FluidRequestStacks, RequestBufferStacks, bFluidFullLoad ? TEXT("true") : TEXT("false"),
             bDrainLeftovers ? TEXT("true") : TEXT("false"),
@@ -462,7 +470,7 @@ struct FDTTSettings
             RequesterClaimTimeoutSeconds, OverdueRequestMinutes, IdleDispatchRecheckSeconds, FuelCriticalMarginLaps, FuelSkipMarginLaps,
             FuelLegMarginFactor, FuelReachFraction,
             bAutoNameStations ? TEXT("true") : TEXT("false"), AutoNameDebounceSeconds, AutoNameSweepSeconds,
-            AutoNameMaxNodes, AutoNameMaxProducts);
+            AutoNameMaxNodes, AutoNameMaxProducts, *NamingLanguage);
     }
     /** "/dtt set <field> <value>": true when the field exists and parsed. */
     bool SetByName(const FString& Field, const FString& Value)
@@ -501,6 +509,7 @@ struct FDTTSettings
         if (F == TEXT("autonamesweepseconds")) return AsFloat(AutoNameSweepSeconds);
         if (F == TEXT("autonamemaxnodes")) return AsInt(AutoNameMaxNodes);
         if (F == TEXT("autonamemaxproducts")) return AsInt(AutoNameMaxProducts);
+        if (F == TEXT("naminglanguage")) { NamingLanguage = Value.TrimStartAndEnd(); return !NamingLanguage.IsEmpty(); }
         return false;
     }
 };

@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "UI/FGInteractWidget.h"
+#include "DynamicTimeTableTypes.h"
 #include "DynamicTimeTableWidget.generated.h"
 
 class UBorder;
@@ -90,6 +91,9 @@ private:
     UPROPERTY() TObjectPtr<USpinBox> SettingAutoNameSweep;
     UPROPERTY() TObjectPtr<USpinBox> SettingAutoNameMaxNodes;
     UPROPERTY() TObjectPtr<USpinBox> SettingAutoNameMaxProducts;
+    UPROPERTY() TObjectPtr<UComboBoxString> SettingNamingLanguage;
+    /** Culture codes behind SettingNamingLanguage's options, in the same order. */
+    TArray<FString> NamingLanguageCodes;
     UPROPERTY() TObjectPtr<UButton> SettingsSaveButton;
     UPROPERTY() TObjectPtr<UButton> SettingsDefaultsButton;
     UPROPERTY() TObjectPtr<UTextBlock> SettingsStatusText;
@@ -190,6 +194,7 @@ private:
     UFUNCTION() void HandleSettingsDefaultsClicked();
     UFUNCTION() void HandleSettingSpinChanged(float Value);
     UFUNCTION() void HandleSettingCheckChanged(bool bChecked);
+    UFUNCTION() void HandleSettingComboChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
     UFUNCTION() void HandleRecalculateClicked();
     UFUNCTION() void HandleCreateGroupClicked();
     UFUNCTION() void HandleRenameGroupClicked();

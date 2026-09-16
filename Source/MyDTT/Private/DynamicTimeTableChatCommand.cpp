@@ -161,6 +161,24 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
             Sender->SendChatMessage(TEXT("dTT: /dtt set <field> <value> - see /dtt settings for the fields."), FLinearColor::Red);
             return EExecutionStatus::BAD_ARGUMENTS;
         }
+        if (Arguments[1].Equals(TEXT("naminglanguage"), ESearchCase::IgnoreCase) &&
+            (Arguments[2] == TEXT("?") || Arguments[2].Equals(TEXT("list"), ESearchCase::IgnoreCase)))
+        {
+            TArray<FString> Parts;
+            for (const FDTTLanguageOption& Language : FDTTItemNames::ListLanguages())
+            {
+                Parts.Add(FString::Printf(TEXT("%s = %s"), *Language.Code, *Language.Label));
+            }
+            // A chat line holds about ten of these.
+            constexpr int32 PerLine = 10;
+            for (int32 Index = 0; Index < Parts.Num(); Index += PerLine)
+            {
+                TArray<FString> Chunk;
+                for (int32 J = Index; J < Parts.Num() && J < Index + PerLine; ++J) Chunk.Add(Parts[J]);
+                Sender->SendChatMessage(FString::Printf(TEXT("dTT languages: %s"), *FString::Join(Chunk, TEXT(", "))), FLinearColor(0.20f, 0.80f, 1.00f));
+            }
+            return EExecutionStatus::COMPLETED;
+        }
         FDTTSettings Wanted = Subsystem->GetSettings();
         if (!Wanted.SetByName(Arguments[1], Arguments[2]))
         {
