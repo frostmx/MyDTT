@@ -6074,6 +6074,13 @@ bool UDynamicTimeTableSubsystem::CommandParkTruck(const FString& TruckQuery, FSt
     if (!IsServer()) { OutMessage = TEXT("dTT: only the server can park trucks."); return false; }
     AFGWheeledVehicleIdentifier* Vehicle = FindVehicleByQuery(TruckQuery);
     if (!IsValid(Vehicle)) { OutMessage = FString::Printf(TEXT("dTT: no truck matches '%s' (use the Name#number from /dtt depots or the display name)."), *TruckQuery); return false; }
+    return ParkTruck(Vehicle, OutMessage);
+}
+
+bool UDynamicTimeTableSubsystem::ParkTruck(AFGWheeledVehicleIdentifier* Vehicle, FString& OutMessage)
+{
+    if (!IsServer()) { OutMessage = TEXT("dTT: only the server can park trucks."); return false; }
+    if (!IsValid(Vehicle)) { OutMessage = TEXT("dTT: that truck is gone."); return false; }
     if (!Vehicle->IsAutopilotEnabled()) { OutMessage = FString::Printf(TEXT("dTT: '%s' has its autopilot off."), *DTSVehicleName(Vehicle)); return false; }
     if (DispatchDepotGuids.Num() == 0) { OutMessage = TEXT("dTT: there is no depot; add \"(D)\" to a truck station name."); return false; }
 
@@ -6113,6 +6120,13 @@ bool UDynamicTimeTableSubsystem::CommandReleaseTruck(const FString& TruckQuery, 
     if (!IsServer()) { OutMessage = TEXT("dTT: only the server can release trucks."); return false; }
     AFGWheeledVehicleIdentifier* Vehicle = FindVehicleByQuery(TruckQuery);
     if (!IsValid(Vehicle)) { OutMessage = FString::Printf(TEXT("dTT: no truck matches '%s'."), *TruckQuery); return false; }
+    return ReleaseTruck(Vehicle, OutMessage);
+}
+
+bool UDynamicTimeTableSubsystem::ReleaseTruck(AFGWheeledVehicleIdentifier* Vehicle, FString& OutMessage)
+{
+    if (!IsServer()) { OutMessage = TEXT("dTT: only the server can release trucks."); return false; }
+    if (!IsValid(Vehicle)) { OutMessage = TEXT("dTT: that truck is gone."); return false; }
     FDTTPoolTruckState* State = PoolTrucks.Find(Vehicle);
     if (!State || State->Phase != EDTTTruckPhase::Parked)
     {
@@ -6126,6 +6140,51 @@ bool UDynamicTimeTableSubsystem::CommandReleaseTruck(const FString& TruckQuery, 
         return false;
     }
     OutMessage = FString::Printf(TEXT("dTT: '%s' released; it drives one loop and parks again at %s."), *DTSVehicleName(Vehicle), *DockDisplayName(State->DepotGuid));
+    return true;
+}
+
+bool UDynamicTimeTableSubsystem::SetTruckAutopilot(AFGWheeledVehicleIdentifier* Vehicle, bool bEnabled, FString& OutMessage)
+{
+    if (!IsServer()) { OutMessage = TEXT("dTT: only the server can switch an autopilot."); return false; }
+    if (!IsValid(Vehicle)) { OutMessage = TEXT("dTT: that truck is gone."); return false; }
+    const TCHAR* Wanted = bEnabled ? TEXT("on") : TEXT("off");
+    if (Vehicle->IsAutopilotEnabled() == bEnabled)
+    {
+        OutMessage = FString::Printf(TEXT("dTT: '%s' already has its autopilot %s."), *DTSVehicleName(Vehicle), Wanted);
+        return false;
+    }
+    if (bEnabled && !Vehicle->CanEnableAutopilot())
+    {
+        OutMessage = FString::Printf(TEXT("dTT: the game will not start the autopilot of '%s' right now."), *DTSVehicleName(Vehicle));
+        return false;
+    }
+    // Nothing else to do here: this mod hooks SetAutopilotEnabled, and that hook plans the route
+    // or drops the truck out of the pool. Writing anything ourselves would fight it.
+    Vehicle->SetAutopilotEnabled(bEnabled);
+    OutMessage = FString::Printf(TEXT("dTT: autopilot %s for '%s'."), Wanted, *DTSVehicleName(Vehicle));
+    return true;
+}
+
+bool UDynamicTimeTableSubsystem::RebuildTruckLap(AFGWheeledVehicleIdentifier* Vehicle, FString& OutMessage)
+{
+    if (!IsServer()) { OutMessage = TEXT("dTT: only the server can rebuild a lap."); return false; }
+    if (!IsValid(Vehicle)) { OutMessage = TEXT("dTT: that truck is gone."); return false; }
+    if (!Vehicle->IsAutopilotEnabled())
+    {
+        OutMessage = FString::Printf(TEXT("dTT: '%s' has its autopilot off, so it has no lap to rebuild."), *DTSVehicleName(Vehicle));
+        return false;
+    }
+    // The game keeps its own copy of the route across a docking and writes it back afterwards
+    // (ROUTE_REVERTED_BY_GAME), so a rebuild now would be undone without a word.
+    if (Vehicle->IsCurrentlyDocking())
+    {
+        OutMessage = FString::Printf(TEXT("dTT: '%s' is docking; its lap is rebuilt when it leaves."), *DTSVehicleName(Vehicle));
+        return false;
+    }
+    // The same entry point the arrival hook uses, so pool, dispatch and load balancing are all
+    // decided exactly as they would be on reaching the current waypoint.
+    ProcessCurrentTruckTarget(Vehicle, TEXT("window rebuild"));
+    OutMessage = FString::Printf(TEXT("dTT: rebuilt the lap of '%s'."), *DTSVehicleName(Vehicle));
     return true;
 }
 

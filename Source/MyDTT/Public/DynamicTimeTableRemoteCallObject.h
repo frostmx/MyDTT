@@ -72,6 +72,17 @@ public:
      * the station's name, which the game replicates by itself, so the client reads it from there.
      */
     void RequestSetStationStay(class AFGBuildableDockingStation* Station, bool bOn);
+    /**
+     * The window's truck buttons. A truck is named by its identifier actor, which the game
+     * replicates to every client at all times - the vehicle itself only comes to a client
+     * standing near it, so it is no use for a table of the whole map. What comes back is the
+     * usual result plus the Trucks section, so the row that changed redraws at once instead of
+     * staying stale until the next poll.
+     */
+    void RequestParkTruck(class AFGWheeledVehicleIdentifier* Truck);
+    void RequestReleaseTruck(class AFGWheeledVehicleIdentifier* Truck);
+    void RequestSetAutopilot(class AFGWheeledVehicleIdentifier* Truck, bool bEnabled);
+    void RequestRebuildLap(class AFGWheeledVehicleIdentifier* Truck);
     UFUNCTION(Client, Reliable)
     void Client_OpenWindow();
 private:
@@ -87,9 +98,15 @@ private:
     UFUNCTION(Server, Reliable) void Server_Recalculate(int32 ClientProtocol);
     UFUNCTION(Server, Reliable) void Server_SetSettings(const FDTTSettings& Settings, int32 ClientProtocol);
     UFUNCTION(Server, Reliable) void Server_SetStationStay(class AFGBuildableDockingStation* Station, bool bOn, int32 ClientProtocol);
+    UFUNCTION(Server, Reliable) void Server_ParkTruck(class AFGWheeledVehicleIdentifier* Truck, int32 ClientProtocol);
+    UFUNCTION(Server, Reliable) void Server_ReleaseTruck(class AFGWheeledVehicleIdentifier* Truck, int32 ClientProtocol);
+    UFUNCTION(Server, Reliable) void Server_SetAutopilot(class AFGWheeledVehicleIdentifier* Truck, bool bEnabled, int32 ClientProtocol);
+    UFUNCTION(Server, Reliable) void Server_RebuildLap(class AFGWheeledVehicleIdentifier* Truck, int32 ClientProtocol);
     UFUNCTION(Client, Reliable) void Client_ReceiveSnapshot(const FDTTClientSnapshot& Snapshot);
     UFUNCTION(Client, Reliable) void Client_OperationResult(bool bSuccess, const FString& Message);
     bool Check(int32 ClientProtocol);
+    /** The tail every truck operation shares: the result, then the rows the player is looking at. */
+    void FinishTruckOperation(bool bSuccess, const FString& Message);
     void SendSnapshot(int32 Sections);
     void StartLiveUpdates();
     void PollLiveSnapshot();

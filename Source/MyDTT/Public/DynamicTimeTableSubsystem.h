@@ -193,6 +193,16 @@ public:
     bool CommandParkTruck(const FString& TruckQuery, FString& OutMessage);
     /** /dtt release <truck>: lets a parked truck go on a [Depot, Depot] loop; it parks again on return. */
     bool CommandReleaseTruck(const FString& TruckQuery, FString& OutMessage);
+    /**
+     * The truck operations behind both the chat commands above and the window's row buttons:
+     * the commands resolve a name and then come through here, so a button and a command cannot
+     * answer differently. Server only; OutMessage is what the player is told either way.
+     */
+    bool ParkTruck(AFGWheeledVehicleIdentifier* Vehicle, FString& OutMessage);
+    bool ReleaseTruck(AFGWheeledVehicleIdentifier* Vehicle, FString& OutMessage);
+    bool SetTruckAutopilot(AFGWheeledVehicleIdentifier* Vehicle, bool bEnabled, FString& OutMessage);
+    /** Runs the planner over this truck again, as if it had just reached its current waypoint. */
+    bool RebuildTruckLap(AFGWheeledVehicleIdentifier* Vehicle, FString& OutMessage);
 
     UPROPERTY(BlueprintAssignable, Category = "Dynamic Time Table")
     FDTTGroupsChangedDelegate OnGroupsChanged;
