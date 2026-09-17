@@ -129,14 +129,15 @@ namespace
         // block of settings instead of as a row that wandered off down the panel.
         ApplyPadding(Control, FMargin(0.0f, GRowGap, 0.0f, 0.0f));
         // That block sits on a canvas and grows downward from a fixed point, so the row just added
-        // would hang over the bottom edge of the panel. The block is moved up by what the row
-        // takes, which puts our switch where the game's own one stood and everything above it a
-        // row higher. Done once, when the row is added, and only for a block placed this way.
+        // would hang over the bottom edge of the panel. The block is moved up by half of what the
+        // row takes: the two switches then share the space the one of them used to have, which
+        // keeps the block clear of the edge without pulling it up off its own place. Done once,
+        // when the row is added, and only for a block placed this way.
         if (UCanvasPanelSlot* BoxSlot = Cast<UCanvasPanelSlot>(Parent->Slot))
         {
             const float Height = Anchor->GetCachedGeometry().GetLocalSize().Y;
             FMargin Offsets = BoxSlot->GetOffsets();
-            Offsets.Top -= (Height > 1.0f ? Height : GRowHeightFallback) + GRowGap;
+            Offsets.Top -= ((Height > 1.0f ? Height : GRowHeightFallback) + GRowGap) * 0.5f;
             BoxSlot->SetOffsets(Offsets);
         }
         Control->Attach(Station);
@@ -284,9 +285,7 @@ void UDTTStationStayControl::Refresh()
         ButtonLabel->SetText(FText::FromString(bStayUntilEmpty ? TEXT("Full unload: on") : TEXT("Full unload: off")));
 
     SetToolTipText(FText::FromString(TEXT(
-        "FULL: a truck unloading here stands until its cargo is gone, topping the station up as it "
-        "consumes. It is written as the = in the station's own tag, so the name always says what "
-        "it does. A station that stops consuming keeps the truck.")));
+        "FULL: the truck stands here until its cargo is gone. It is the = in the station's tag.")));
 }
 
 void UDTTStationStayControl::HandleSwitchChanged(bool bIsOn)
