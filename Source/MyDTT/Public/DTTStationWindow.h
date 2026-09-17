@@ -60,6 +60,13 @@ private:
     bool bHasDispatchTag = false;
     /** What was last written into the switch, for a window whose switch cannot be read back. */
     bool bSwitchShows = false;
+
+    /** The name the two flags above were read out of; the same string is not parsed twice. */
+    FString LastName;
+
+    /** The window's own name field, kept in step with the station - see SyncNameField. */
+    UPROPERTY()
+    TWeakObjectPtr<class UWidget> NameField;
 };
 
 /**

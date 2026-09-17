@@ -7,6 +7,8 @@
 #include "Buildables/FGBuildableDockingStation.h"
 #include "Components/Button.h"
 #include "Components/CanvasPanelSlot.h"
+#include "Components/EditableText.h"
+#include "Components/EditableTextBox.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/PanelWidget.h"
@@ -35,6 +37,14 @@ namespace
     bool GAnchorReported = false;
 
     /**
+     * The window the control was last found in. The watcher comes back three times a second while a
+     * station window is open, and without this every pass walked the whole widget tree looking for
+     * a control that is already known.
+     */
+    TWeakObjectPtr<UFGInteractWidget> GLastWindow;
+    TWeakObjectPtr<UDTTStationStayControl> GLastControl;
+
+    /**
      * Where the control goes: right under the UNLOAD/LOAD switch, in the box that holds the
      * vehicle settings. That switch is a BPW_OnOffSwitch, and so is the fuel one above it in a
      * fluid station - they are told apart by name, the fuel one being mForceFluidSwitch.
@@ -61,6 +71,40 @@ namespace
             else if (!ByClass) ByClass = Widget;
         });
         return ByName ? ByName : ByClass;
+    }
+
+    /**
+     * The window's name field, which is where the trouble was: it keeps the text the window opened
+     * with and writes that text back to the station whenever it loses focus - and a click on the
+     * switch below is enough to do that. So a name changed underneath it came back a second later
+     * as the old one, and the marker this switch had just set was gone again.
+     */
+    UWidget* FindNameField(UWidgetTree* Tree)
+    {
+        if (UWidget* ByName = Tree->FindWidget(TEXT("mStationNameTextObject"))) return ByName;
+
+        UWidget* Found = nullptr;
+        Tree->ForEachWidget([&Found](UWidget* Widget)
+        {
+            if (Found || !IsValid(Widget)) return;
+            if (Widget->IsA<UEditableText>() || Widget->IsA<UEditableTextBox>()) Found = Widget;
+        });
+        return Found;
+    }
+
+    /** Puts the station's name into that field, unless the player is typing their own in it. */
+    void SyncNameField(UWidget* Field, const FString& Name)
+    {
+        if (!IsValid(Field) || Name.IsEmpty() || Field->HasKeyboardFocus()) return;
+        if (UEditableText* Text = Cast<UEditableText>(Field))
+        {
+            if (!Text->GetText().ToString().Equals(Name)) Text->SetText(FText::FromString(Name));
+            return;
+        }
+        if (UEditableTextBox* Box = Cast<UEditableTextBox>(Field))
+        {
+            if (!Box->GetText().ToString().Equals(Name)) Box->SetText(FText::FromString(Name));
+        }
     }
 
     void ApplyPadding(UWidget* Widget, const FMargin& Margin)
@@ -101,9 +145,17 @@ namespace
         UWidgetTree* Tree = Widget->WidgetTree;
         if (!IsValid(Tree)) return;
 
+        if (GLastWindow.Get() == Widget && GLastControl.IsValid())
+        {
+            GLastControl->Attach(Station);
+            return;
+        }
+
         // The game caches its interact widgets, so the control usually survives the last station.
         if (UDTTStationStayControl* Existing = Cast<UDTTStationStayControl>(Tree->FindWidget(GControlName)))
         {
+            GLastWindow = Widget;
+            GLastControl = Existing;
             Existing->Attach(Station);
             return;
         }
@@ -128,6 +180,8 @@ namespace
         // The same gap the window leaves around its own divider, so the two switches read as one
         // block of settings instead of as a row that wandered off down the panel.
         ApplyPadding(Control, FMargin(0.0f, GRowGap, 0.0f, 0.0f));
+        GLastWindow = Widget;
+        GLastControl = Control;
         // That block sits on a canvas and grows downward from a fixed point, so the row just added
         // would hang over the bottom edge of the panel. The block is moved up by half of what the
         // row takes: the two switches then share the space the one of them used to have, which
@@ -211,6 +265,10 @@ void UDTTStationStayControl::Build(UWidgetTree* Tree, UClass* SwitchClass)
 {
     if (!IsValid(Tree)) return;
 
+    SetToolTipText(FText::FromString(TEXT(
+        "FULL: the truck stands here until its cargo is gone. It is the = in the station's tag.")));
+    NameField = FindNameField(Tree);
+
     // The game's own switch, by the class of the one above it: no asset path to go stale, and the
     // animation, the sound and the styling come with it.
     if (SwitchClass && SwitchClass->IsChildOf(UUserWidget::StaticClass()))
@@ -257,19 +315,38 @@ void UDTTStationStayControl::Refresh()
 {
     const AFGBuildableDockingStation* Dock = Station.Get();
     const AFGDockingStationIdentifier* Identifier = IsValid(Dock) ? Dock->GetStationIdentifier() : nullptr;
+    const FString Name = IsValid(Identifier) ? Identifier->GetStationName().ToString() : FString();
 
-    FString Base, Resource;
-    EDTTDispatchRole Role = EDTTDispatchRole::None;
-    int32 Threshold = 0;
-    bool bStay = false;
-    bHasDispatchTag = IsValid(Identifier) &&
-        UDynamicTimeTableSubsystem::ParseDispatchTag(Identifier->GetStationName().ToString(), Base, Resource, Role, Threshold, &bStay) &&
-        Role != EDTTDispatchRole::Producer;
-    bStayUntilEmpty = bHasDispatchTag && bStay;
+    // The name is the state, and this runs three times a second: taking the same string apart again
+    // tells us what we already know. Which station it came from does not matter - the same name
+    // parses to the same thing. What is never skipped is the switch below: that comparison is what
+    // takes a flip back when the server refuses it.
+    if (Name != LastName)
+    {
+        LastName = Name;
 
-    // A station with no dispatch tag has nothing to say here, and the window keeps the shape the
-    // game gave it.
-    SetVisibility(bHasDispatchTag ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+        FString Base, Resource;
+        EDTTDispatchRole Role = EDTTDispatchRole::None;
+        int32 Threshold = 0;
+        bool bStay = false;
+        bHasDispatchTag = !Name.IsEmpty() &&
+            UDynamicTimeTableSubsystem::ParseDispatchTag(Name, Base, Resource, Role, Threshold, &bStay) &&
+            Role != EDTTDispatchRole::Producer;
+        bStayUntilEmpty = bHasDispatchTag && bStay;
+
+        // A station with no dispatch tag has nothing to say here, and the window keeps the shape
+        // the game gave it.
+        const ESlateVisibility Wanted = bHasDispatchTag
+            ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed;
+        if (GetVisibility() != Wanted) SetVisibility(Wanted);
+
+        if (IsValid(ButtonLabel))
+            ButtonLabel->SetText(FText::FromString(bStayUntilEmpty ? TEXT("Full unload: on") : TEXT("Full unload: off")));
+
+        // The name moved - by this switch, by auto-naming, by another player - so the field that
+        // will write it back has to hear about it.
+        SyncNameField(NameField.Get(), Name);
+    }
 
     // Written on every pass, not only on a click: the name is the state, so a flip the server
     // refused is taken back here within a third of a second. Only when it really differs, though -
@@ -281,11 +358,6 @@ void UDTTStationStayControl::Refresh()
         CallBoolFunction(Switch, TEXT("SetIsOn"), bStayUntilEmpty);
         bSwitchShows = bStayUntilEmpty;
     }
-    if (IsValid(ButtonLabel))
-        ButtonLabel->SetText(FText::FromString(bStayUntilEmpty ? TEXT("Full unload: on") : TEXT("Full unload: off")));
-
-    SetToolTipText(FText::FromString(TEXT(
-        "FULL: the truck stands here until its cargo is gone. It is the = in the station's tag.")));
 }
 
 void UDTTStationStayControl::HandleSwitchChanged(bool bIsOn)
