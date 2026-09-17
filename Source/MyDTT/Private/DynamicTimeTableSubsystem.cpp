@@ -1,4 +1,4 @@
-#include "DynamicTimeTableSubsystem.h"
+﻿#include "DynamicTimeTableSubsystem.h"
 
 #include "DTTAutoName.h"
 #include "DTTCargoPaint.h"
@@ -215,19 +215,25 @@ namespace
      * suffix that reads as one - and the tag is taken from the front. A name written before the
      * tag moved to the front, with the tag just ahead of the tail, is still read.
      */
+    /** Where a trailing auto tail begins, or INDEX_NONE: the shortest suffix that reads as one. */
+    int32 DTSFindAutoTail(const FString& Name)
+    {
+        for (int32 At = Name.Len() - 1; At > 0; --At)
+        {
+            if (Name[At] != TEXT('+') && Name[At] != TEXT('-')) continue;
+            if (!FChar::IsWhitespace(Name[At - 1])) continue;
+            if (DTSIsAutoTail(Name.Mid(At))) return At;
+        }
+        return INDEX_NONE;
+    }
+
     bool DTSSplitAutoBlock(const FString& FullName, FString& OutHead, FString& OutTag, FString& OutTail)
     {
         OutHead = FullName.TrimStartAndEnd();
         OutTag.Reset();
         OutTail.Reset();
 
-        int32 TailAt = INDEX_NONE;
-        for (int32 At = OutHead.Len() - 1; At > 0; --At)
-        {
-            if (OutHead[At] != TEXT('+') && OutHead[At] != TEXT('-')) continue;
-            if (!FChar::IsWhitespace(OutHead[At - 1])) continue;
-            if (DTSIsAutoTail(OutHead.Mid(At))) { TailAt = At; break; }
-        }
+        const int32 TailAt = DTSFindAutoTail(OutHead);
         if (TailAt == INDEX_NONE) return false;
         const FString Front = OutHead.Left(TailAt).TrimEnd();
 
@@ -786,9 +792,22 @@ namespace
         const FString Resource = bKeepWord ? OldResource
             : (WorldWord && !WorldWord->IsEmpty()) ? *WorldWord : Result.ResourceName;
 
+        // A name can lose its tag and keep the tail - a player rewrites it by hand, or the station
+        // window writes back the text it was opened with. The block is only ever found as tag plus
+        // tail, so such a name would read as if the player's own text ended in "-1500/m -> Ingot",
+        // and this pass would write a second tail after the first. The stray tail is cut instead;
+        // the one written below says the same thing about today's chain.
+        FString Source = CurrentName;
+        FString BlockHead, BlockTag, BlockTail;
+        if (!DTSSplitAutoBlock(Source, BlockHead, BlockTag, BlockTail))
+        {
+            const int32 StrayTail = DTSFindAutoTail(Source);
+            if (StrayTail != INDEX_NONE) Source = Source.Left(StrayTail).TrimEnd();
+        }
+
         const EDTTDispatchRole Role = bKeepThreshold ? EDTTDispatchRole::Requester : EDTTDispatchRole::ByStationMode;
         const FString Head = UDynamicTimeTableSubsystem::MakeDispatchTaggedName(
-            CurrentName, Resource, Role, bKeepThreshold ? OldThreshold : 0, bKeepStayUntilEmpty);
+            Source, Resource, Role, bKeepThreshold ? OldThreshold : 0, bKeepStayUntilEmpty);
 
         // The tail is what gives way when the name gets long: the player's text and the tag carry
         // the meaning, the product list is a hint.
