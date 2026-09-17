@@ -1,4 +1,4 @@
-# Changelog
+﻿# Changelog
 
 ## 3.1.0
 
@@ -8,13 +8,22 @@
   world, asked here by one station, so the two or three lines that want a whole truckload no
   longer force it on all of them. A station that stops consuming keeps the truck, which is why
   this is written per station and off unless the name says otherwise.
-- The game's own station window carries a "Full unload" button under the vehicle settings that
-  turns the marker on and off. The marker lives in the station's name, so the button only ever
-  shows what the station is called, and typing the "=" by hand does exactly the same thing.
+- The game's own station window carries a NORMAL/FULL switch under the vehicle settings that turns
+  the marker on and off - the game's own kind of switch, under its UNLOAD/LOAD one. The marker
+  lives in the station's name, so the switch only ever shows what the station is called, and typing
+  the "=" by hand does exactly the same thing. A station with no `(Resource)` tag has no switch.
 - Auto-naming keeps the marker when it rewrites a tag, the way it already keeps a hand-written
   limit. A station the belts turn into a producer loses it: standing until empty is a requester's
   business.
 - `/dtt why` says which of the two asked the truck to wait - the station's tag or the setting.
+- Fixed: the station window no longer writes back the name it was opened with. Its name field kept
+  that text and gave it to the station whenever it lost focus, so a name changed while the window
+  stood open - by auto-naming, by another player, by the new switch - came back as the old one a
+  moment later. The field now follows the station, unless you are typing your own name into it.
+- Fixed: auto-naming no longer writes a second caption after the first. A name that lost its tag
+  but kept its caption read as if the caption were your own text, and the pass added another one:
+  `(Silica) -200 for Aluminium -1500/m -> Aluminum Ingot -1500/m -> Aluminum Ingot`. A name already
+  spoiled that way is put right on the next pass.
 - Client build changed: `RemoteVersionRange` is now `>=3.1.0 <3.2.0`, window protocol 14.
 
 ## 3.0.2
