@@ -4703,7 +4703,10 @@ void UDynamicTimeTableSubsystem::TickCargoPaint(AFGWheeledVehicleIdentifier* Veh
     const TSubclassOf<UFGItemDescriptor> Cargo = DominantCargoClass(Vehicle);
     if (!Cargo)
     {
-        RestoreTruckPaint(Vehicle, TEXT("empty"));
+        // An empty hold keeps the colour of what the truck last carried. A truck spends half its
+        // lap empty, and a colour that came and went every lap said less about the truck's run
+        // than it did about where it happened to be. The paint goes back when the feature is
+        // switched off or the truck leaves autopilot, not between loads.
         return;
     }
 
