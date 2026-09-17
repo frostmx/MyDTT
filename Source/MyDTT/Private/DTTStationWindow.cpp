@@ -1,11 +1,14 @@
-#include "DTTStationWindow.h"
+﻿#include "DTTStationWindow.h"
 
 #include "DynamicTimeTableSubsystem.h"
 #include "DynamicTimeTableRemoteCallObject.h"
+#include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Buildables/FGBuildableDockingStation.h"
+#include "Components/Button.h"
+#include "Components/CanvasPanelSlot.h"
+#include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
-#include "Components/OverlaySlot.h"
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBoxSlot.h"
@@ -19,48 +22,61 @@ DEFINE_LOG_CATEGORY_STATIC(LogDTTStationWindow, Log, All);
 
 namespace
 {
-    const FName GStayButtonName(TEXT("DTTStayButton"));
-    const FName GStayLabelName(TEXT("DTTStayLabel"));
+    const FName GControlName(TEXT("DTTStayControl"));
+    const FName GSwitchName(TEXT("DTTStaySwitch"));
+    const FName GSwitchChangedProperty(TEXT("onSwitchChanged"));
+
+    /** The gap above our row, and what to assume its height is before the window has been drawn. */
+    constexpr float GRowGap = 8.0f;
+    constexpr float GRowHeightFallback = 30.0f;
 
     /** Said once per session: a window we cannot read is a thing to fix, not to report every 0.3 s. */
     bool GAnchorMissReported = false;
     bool GAnchorReported = false;
 
     /**
-     * Where the button goes. The window is the game's, so nothing here may be load-bearing: the
-     * hint under the vehicle settings is the first choice because it sits exactly where the button
-     * belongs, the LOAD/UNLOAD switch is the second, and a window that offers neither keeps the
-     * shape it shipped with.
+     * Where the control goes: right under the UNLOAD/LOAD switch, in the box that holds the
+     * vehicle settings. That switch is a BPW_OnOffSwitch, and so is the fuel one above it in a
+     * fluid station - they are told apart by name, the fuel one being mForceFluidSwitch.
+     *
+     * Only a box will do as a parent. The window is laid out on canvas panels, where a child needs
+     * coordinates of its own and a new one lands in the corner with no size at all - which is
+     * exactly where the first version of this put its button. A window that offers no box keeps
+     * the shape it shipped with.
      */
     UWidget* FindAnchor(UWidgetTree* Tree)
     {
-        UWidget* ByHint = nullptr;
-        UWidget* BySwitch = nullptr;
-        Tree->ForEachWidget([&ByHint, &BySwitch](UWidget* Widget)
+        UWidget* ByName = nullptr;
+        UWidget* ByClass = nullptr;
+        Tree->ForEachWidget([&ByName, &ByClass](UWidget* Widget)
         {
-            if (!IsValid(Widget) || Widget->IsA<UDTTStationStayButton>()) return;
+            if (!IsValid(Widget) || Widget->IsA<UDTTStationStayControl>()) return;
+            if (!GetNameSafe(Widget->GetClass()).Contains(TEXT("OnOffSwitch"))) return;
             const FString Name = Widget->GetName();
-            const FString Class = GetNameSafe(Widget->GetClass());
-            if (Name.Contains(TEXT("VehichleSettings")) || Name.Contains(TEXT("VehicleSettings")))
-            {
-                if (!ByHint && Widget->GetParent()) ByHint = Widget;
-            }
-            else if (Class.Contains(TEXT("OnOffSwitch")))
-            {
-                // The last one wins: the vehicle settings are the bottom of that column, and a
-                // fluid station carries another switch (the fuel one) above them.
-                if (Widget->GetParent()) BySwitch = Widget;
-            }
+            if (Name.Contains(TEXT("Fluid")) || Name.Contains(TEXT("Fuel"))) return;
+
+            UPanelWidget* Parent = Widget->GetParent();
+            if (!Parent || !(Parent->IsA<UVerticalBox>() || Parent->IsA<UHorizontalBox>())) return;
+            if (Name.Equals(TEXT("BPW_OnOffSwitch"))) { if (!ByName) ByName = Widget; }
+            else if (!ByClass) ByClass = Widget;
         });
-        return ByHint ? ByHint : BySwitch;
+        return ByName ? ByName : ByClass;
     }
 
     void ApplyPadding(UWidget* Widget, const FMargin& Margin)
     {
         if (!IsValid(Widget)) return;
-        if (UVerticalBoxSlot* V = Cast<UVerticalBoxSlot>(Widget->Slot)) { V->SetPadding(Margin); return; }
-        if (UHorizontalBoxSlot* H = Cast<UHorizontalBoxSlot>(Widget->Slot)) { H->SetPadding(Margin); return; }
-        if (UOverlaySlot* O = Cast<UOverlaySlot>(Widget->Slot)) O->SetPadding(Margin);
+        if (UVerticalBoxSlot* V = Cast<UVerticalBoxSlot>(Widget->Slot))
+        {
+            V->SetPadding(Margin);
+            V->SetHorizontalAlignment(HAlign_Fill);
+            return;
+        }
+        if (UHorizontalBoxSlot* H = Cast<UHorizontalBoxSlot>(Widget->Slot))
+        {
+            H->SetPadding(Margin);
+            H->SetVerticalAlignment(VAlign_Center);
+        }
     }
 
     /**
@@ -80,15 +96,15 @@ namespace
         return Property ? Cast<AFGBuildableDockingStation>(Property->GetObjectPropertyValue_InContainer(Widget)) : nullptr;
     }
 
-    void EnsureButton(UFGInteractWidget* Widget, AFGBuildableDockingStation* Station)
+    void EnsureControl(UFGInteractWidget* Widget, AFGBuildableDockingStation* Station)
     {
         UWidgetTree* Tree = Widget->WidgetTree;
         if (!IsValid(Tree)) return;
 
-        // The game caches its interact widgets, so the button usually survives the last station.
-        if (UDTTStationStayButton* Existing = Cast<UDTTStationStayButton>(Tree->FindWidget(GStayButtonName)))
+        // The game caches its interact widgets, so the control usually survives the last station.
+        if (UDTTStationStayControl* Existing = Cast<UDTTStationStayControl>(Tree->FindWidget(GControlName)))
         {
-            Existing->Attach(Station, Cast<UTextBlock>(Tree->FindWidget(GStayLabelName)));
+            Existing->Attach(Station);
             return;
         }
 
@@ -100,46 +116,144 @@ namespace
             {
                 GAnchorMissReported = true;
                 UE_LOG(LogDTTStationWindow, Warning,
-                    TEXT("STATION_WINDOW_NO_ANCHOR Widget='%s': nothing in this window is a place this mod recognises, its button is left out."),
+                    TEXT("STATION_WINDOW_NO_ANCHOR Widget='%s': nothing in this window is a place this mod recognises, its switch is left out."),
                     *GetNameSafe(Widget->GetClass()));
             }
             return;
         }
 
-        UDTTStationStayButton* Button = Tree->ConstructWidget<UDTTStationStayButton>(UDTTStationStayButton::StaticClass(), GStayButtonName);
-        UTextBlock* Label = Tree->ConstructWidget<UTextBlock>(UTextBlock::StaticClass(), GStayLabelName);
-        FSlateFontInfo Font = Label->GetFont();
-        Font.Size = 13;
-        Label->SetFont(Font);
-        Label->SetJustification(ETextJustify::Center);
-        Button->SetContent(Label);
-
-        Parent->InsertChildAt(Parent->GetChildIndex(Anchor) + 1, Button);
-        ApplyPadding(Button, FMargin(4.0f, 6.0f, 4.0f, 4.0f));
-        Button->Attach(Station, Label);
+        UDTTStationStayControl* Control = Tree->ConstructWidget<UDTTStationStayControl>(UDTTStationStayControl::StaticClass(), GControlName);
+        Control->Build(Tree, Anchor->GetClass());
+        Parent->InsertChildAt(Parent->GetChildIndex(Anchor) + 1, Control);
+        // The same gap the window leaves around its own divider, so the two switches read as one
+        // block of settings instead of as a row that wandered off down the panel.
+        ApplyPadding(Control, FMargin(0.0f, GRowGap, 0.0f, 0.0f));
+        // That block sits on a canvas and grows downward from a fixed point, so the row just added
+        // would hang over the bottom edge of the panel. The block is moved up by what the row
+        // takes, which puts our switch where the game's own one stood and everything above it a
+        // row higher. Done once, when the row is added, and only for a block placed this way.
+        if (UCanvasPanelSlot* BoxSlot = Cast<UCanvasPanelSlot>(Parent->Slot))
+        {
+            const float Height = Anchor->GetCachedGeometry().GetLocalSize().Y;
+            FMargin Offsets = BoxSlot->GetOffsets();
+            Offsets.Top -= (Height > 1.0f ? Height : GRowHeightFallback) + GRowGap;
+            BoxSlot->SetOffsets(Offsets);
+        }
+        Control->Attach(Station);
 
         if (!GAnchorReported)
         {
             GAnchorReported = true;
-            UE_LOG(LogDTTStationWindow, Display, TEXT("STATION_WINDOW_BUTTON Anchor='%s' AnchorClass='%s' Parent='%s'"),
+            UE_LOG(LogDTTStationWindow, Display, TEXT("STATION_WINDOW_CONTROL Anchor='%s' AnchorClass='%s' Parent='%s'"),
                 *Anchor->GetName(), *GetNameSafe(Anchor->GetClass()), *GetNameSafe(Parent->GetClass()));
         }
     }
+
+    /**
+     * What the switch is showing right now. SetIsOn is a Blueprint event that drives the check box
+     * underneath, which in turn plays the animation and the sound and broadcasts the change - so it
+     * is only ever called when this disagrees with the station's name. Called every pass, as the
+     * first version did, it re-triggered all of that three times a second.
+     */
+    bool ReadSwitchIsOn(const UUserWidget* Target, bool& bOutIsOn)
+    {
+        const FBoolProperty* Property = IsValid(Target)
+            ? FindFProperty<FBoolProperty>(Target->GetClass(), TEXT("mIsOn")) : nullptr;
+        if (!Property) return false;
+        bOutIsOn = Property->GetPropertyValue_InContainer(Target);
+        return true;
+    }
+
+    /** Calls a Blueprint function of one bool, the way SetIsOn is declared. */
+    void CallBoolFunction(UUserWidget* Target, const TCHAR* FunctionName, bool bValue)
+    {
+        UFunction* Function = IsValid(Target) ? Target->FindFunction(FName(FunctionName)) : nullptr;
+        if (!Function || Function->ParmsSize == 0) return;
+
+        TArray<uint8> Parameters;
+        Parameters.SetNumZeroed(Function->ParmsSize);
+        for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+        {
+            if (FBoolProperty* Bool = CastField<FBoolProperty>(*It))
+            {
+                Bool->SetPropertyValue_InContainer(Parameters.GetData(), bValue);
+                break;
+            }
+        }
+        Target->ProcessEvent(Function, Parameters.GetData());
+    }
+
+    /** SetOnOffTexts(FText mOnText, FText mOffText), filled in the order the parameters come. */
+    void CallSetOnOffTexts(UUserWidget* Target, const FText& OnText, const FText& OffText)
+    {
+        UFunction* Function = IsValid(Target) ? Target->FindFunction(TEXT("SetOnOffTexts")) : nullptr;
+        if (!Function || Function->ParmsSize == 0) return;
+
+        TArray<uint8> Parameters;
+        Parameters.SetNumZeroed(Function->ParmsSize);
+        int32 Index = 0;
+        for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+        {
+            if (FTextProperty* Text = CastField<FTextProperty>(*It))
+            {
+                Text->SetPropertyValue_InContainer(Parameters.GetData(), Index == 0 ? OnText : OffText);
+                ++Index;
+            }
+        }
+        Target->ProcessEvent(Function, Parameters.GetData());
+        for (TFieldIterator<FProperty> It(Function); It && It->HasAnyPropertyFlags(CPF_Parm); ++It)
+            It->DestroyValue_InContainer(Parameters.GetData());
+    }
 }
 
-void UDTTStationStayButton::Attach(AFGBuildableDockingStation* InStation, UTextBlock* InLabel)
+void UDTTStationStayControl::Build(UWidgetTree* Tree, UClass* SwitchClass)
 {
-    Label = InLabel;
+    if (!IsValid(Tree)) return;
+
+    // The game's own switch, by the class of the one above it: no asset path to go stale, and the
+    // animation, the sound and the styling come with it.
+    if (SwitchClass && SwitchClass->IsChildOf(UUserWidget::StaticClass()))
+    {
+        Switch = Tree->ConstructWidget<UUserWidget>(SwitchClass, GSwitchName);
+        if (FMulticastDelegateProperty* Changed = FindFProperty<FMulticastDelegateProperty>(SwitchClass, GSwitchChangedProperty))
+        {
+            FScriptDelegate Delegate;
+            Delegate.BindUFunction(this, GET_FUNCTION_NAME_CHECKED(UDTTStationStayControl, HandleSwitchChanged));
+            Changed->AddDelegate(MoveTemp(Delegate), Switch);
+        }
+        else
+        {
+            // A switch nobody can listen to would flip and do nothing at all.
+            Switch = nullptr;
+        }
+    }
+
+    if (Switch)
+    {
+        CallSetOnOffTexts(Switch, FText::FromString(TEXT("FULL")), FText::FromString(TEXT("NORMAL")));
+        if (UVerticalBoxSlot* SwitchSlot = Cast<UVerticalBoxSlot>(AddChildToVerticalBox(Switch)))
+            SwitchSlot->SetHorizontalAlignment(HAlign_Center);
+        return;
+    }
+
+    // No switch to be had: a plain button says the same thing and still works.
+    Button = Tree->ConstructWidget<UButton>(UButton::StaticClass(), GSwitchName);
+    ButtonLabel = Tree->ConstructWidget<UTextBlock>();
+    ButtonLabel->SetJustification(ETextJustify::Center);
+    Button->SetContent(ButtonLabel);
+    Button->OnClicked.AddDynamic(this, &UDTTStationStayControl::HandleButtonClicked);
+    if (UVerticalBoxSlot* ButtonSlot = Cast<UVerticalBoxSlot>(AddChildToVerticalBox(Button)))
+        ButtonSlot->SetHorizontalAlignment(HAlign_Center);
+}
+
+void UDTTStationStayControl::Attach(AFGBuildableDockingStation* InStation)
+{
     Station = InStation;
-    // Bound once and only once: a cached window comes back with the delegate still on it.
-    if (!OnClicked.IsAlreadyBound(this, &UDTTStationStayButton::HandleClicked))
-        OnClicked.AddDynamic(this, &UDTTStationStayButton::HandleClicked);
     Refresh();
 }
 
-void UDTTStationStayButton::Refresh()
+void UDTTStationStayControl::Refresh()
 {
-    if (!IsValid(Label)) return;
     const AFGBuildableDockingStation* Dock = Station.Get();
     const AFGDockingStationIdentifier* Identifier = IsValid(Dock) ? Dock->GetStationIdentifier() : nullptr;
 
@@ -152,22 +266,44 @@ void UDTTStationStayButton::Refresh()
         Role != EDTTDispatchRole::Producer;
     bStayUntilEmpty = bHasDispatchTag && bStay;
 
-    SetIsEnabled(bHasDispatchTag);
-    Label->SetText(FText::FromString(
-        !bHasDispatchTag ? TEXT("Full unload: needs a (Resource) tag")
-            : bStayUntilEmpty ? TEXT("Full unload: on") : TEXT("Full unload: off")));
+    // A station with no dispatch tag has nothing to say here, and the window keeps the shape the
+    // game gave it.
+    SetVisibility(bHasDispatchTag ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+
+    // Written on every pass, not only on a click: the name is the state, so a flip the server
+    // refused is taken back here within a third of a second. Only when it really differs, though -
+    // see ReadSwitchIsOn.
+    bool bShown = bSwitchShows;
+    ReadSwitchIsOn(Switch, bShown);
+    if (Switch && bShown != bStayUntilEmpty)
+    {
+        CallBoolFunction(Switch, TEXT("SetIsOn"), bStayUntilEmpty);
+        bSwitchShows = bStayUntilEmpty;
+    }
+    if (IsValid(ButtonLabel))
+        ButtonLabel->SetText(FText::FromString(bStayUntilEmpty ? TEXT("Full unload: on") : TEXT("Full unload: off")));
+
     SetToolTipText(FText::FromString(TEXT(
-        "On: a truck unloading here stands until its cargo is gone, topping the station up as it "
+        "FULL: a truck unloading here stands until its cargo is gone, topping the station up as it "
         "consumes. It is written as the = in the station's own tag, so the name always says what "
         "it does. A station that stops consuming keeps the truck.")));
 }
 
-void UDTTStationStayButton::HandleClicked()
+void UDTTStationStayControl::HandleSwitchChanged(bool bIsOn)
+{
+    Request(bIsOn);
+}
+
+void UDTTStationStayControl::HandleButtonClicked()
+{
+    Request(!bStayUntilEmpty);
+}
+
+void UDTTStationStayControl::Request(bool bOn)
 {
     AFGBuildableDockingStation* Dock = Station.Get();
     UWorld* World = GetWorld();
-    if (!IsValid(Dock) || !IsValid(World) || !bHasDispatchTag) return;
-    const bool bWanted = !bStayUntilEmpty;
+    if (!IsValid(Dock) || !IsValid(World) || !bHasDispatchTag || bOn == bStayUntilEmpty) return;
 
     if (World->GetNetMode() == NM_Client)
     {
@@ -175,16 +311,16 @@ void UDTTStationStayButton::HandleClicked()
         UDynamicTimeTableRemoteCallObject* RCO = IsValid(PC)
             ? Cast<UDynamicTimeTableRemoteCallObject>(PC->GetRemoteCallObjectOfClass(UDynamicTimeTableRemoteCallObject::StaticClass()))
             : nullptr;
-        // The name comes back replicated and the next refresh reads it: what the button shows is
+        // The name comes back replicated and the next refresh reads it: what the control shows is
         // always what the station is called, never what the click hoped for.
-        if (RCO) RCO->RequestSetStationStay(Dock, bWanted);
+        if (RCO) RCO->RequestSetStationStay(Dock, bOn);
         return;
     }
 
     FString Message;
     if (UDynamicTimeTableSubsystem* Subsystem = World->GetSubsystem<UDynamicTimeTableSubsystem>())
     {
-        Subsystem->SetStationStayUntilEmpty(Dock, bWanted, Message);
+        Subsystem->SetStationStayUntilEmpty(Dock, bOn, Message);
         Refresh();
     }
 }
@@ -198,6 +334,6 @@ void FDTTStationWindow::Tick(UWorld* World)
 
     for (UFGInteractWidget* Widget : GameUI->GetInteractWidgetStack())
     {
-        if (AFGBuildableDockingStation* Station = StationOf(Widget)) EnsureButton(Widget, Station);
+        if (AFGBuildableDockingStation* Station = StationOf(Widget)) EnsureControl(Widget, Station);
     }
 }
