@@ -44,6 +44,9 @@ namespace
     TWeakObjectPtr<UFGInteractWidget> GLastWindow;
     TWeakObjectPtr<UDTTStationStayControl> GLastControl;
 
+    /** The station window that was open on the last pass; null when there was none. */
+    TWeakObjectPtr<UFGInteractWidget> GOpenWindow;
+
     /**
      * Where the control goes: right under the UNLOAD/LOAD switch, in the box that holds the
      * vehicle settings. That switch is a BPW_OnOffSwitch, and so is the fuel one above it in a
@@ -140,14 +143,14 @@ namespace
         return Property ? Cast<AFGBuildableDockingStation>(Property->GetObjectPropertyValue_InContainer(Widget)) : nullptr;
     }
 
-    void EnsureControl(UFGInteractWidget* Widget, AFGBuildableDockingStation* Station)
+    void EnsureControl(UFGInteractWidget* Widget, AFGBuildableDockingStation* Station, bool bWindowOpened)
     {
         UWidgetTree* Tree = Widget->WidgetTree;
         if (!IsValid(Tree)) return;
 
         if (GLastWindow.Get() == Widget && GLastControl.IsValid())
         {
-            GLastControl->Attach(Station);
+            GLastControl->Attach(Station, bWindowOpened);
             return;
         }
 
@@ -156,7 +159,7 @@ namespace
         {
             GLastWindow = Widget;
             GLastControl = Existing;
-            Existing->Attach(Station);
+            Existing->Attach(Station, bWindowOpened);
             return;
         }
 
@@ -182,6 +185,7 @@ namespace
         ApplyPadding(Control, FMargin(0.0f, GRowGap, 0.0f, 0.0f));
         GLastWindow = Widget;
         GLastControl = Control;
+        const bool bFirstTime = true;
         // That block sits on a canvas and grows downward from a fixed point, so the row just added
         // would hang over the bottom edge of the panel. The block is moved up by half of what the
         // row takes: the two switches then share the space the one of them used to have, which
@@ -194,7 +198,7 @@ namespace
             Offsets.Top -= ((Height > 1.0f ? Height : GRowHeightFallback) + GRowGap) * 0.5f;
             BoxSlot->SetOffsets(Offsets);
         }
-        Control->Attach(Station);
+        Control->Attach(Station, bFirstTime);
 
         if (!GAnchorReported)
         {
@@ -305,9 +309,10 @@ void UDTTStationStayControl::Build(UWidgetTree* Tree, UClass* SwitchClass)
         ButtonSlot->SetHorizontalAlignment(HAlign_Center);
 }
 
-void UDTTStationStayControl::Attach(AFGBuildableDockingStation* InStation)
+void UDTTStationStayControl::Attach(AFGBuildableDockingStation* InStation, bool bWindowOpened)
 {
     Station = InStation;
+    if (bWindowOpened) bSwitchWritten = false;
     Refresh();
 }
 
@@ -351,12 +356,19 @@ void UDTTStationStayControl::Refresh()
     // Written on every pass, not only on a click: the name is the state, so a flip the server
     // refused is taken back here within a third of a second. Only when it really differs, though -
     // see ReadSwitchIsOn.
+    //
+    // Once per opened window it is written whatever it says, because a switch that has never been
+    // told anything is drawn in the state its Blueprint was saved in while its variable says the
+    // other one - the game writes its own switches on opening a window for the same reason. Left
+    // out, that showed as a switch painted on with its knob off, and as a first click that only
+    // brought the two together instead of doing anything.
     bool bShown = bSwitchShows;
     ReadSwitchIsOn(Switch, bShown);
-    if (Switch && bShown != bStayUntilEmpty)
+    if (Switch && (!bSwitchWritten || bShown != bStayUntilEmpty))
     {
         CallBoolFunction(Switch, TEXT("SetIsOn"), bStayUntilEmpty);
         bSwitchShows = bStayUntilEmpty;
+        bSwitchWritten = true;
     }
 }
 
@@ -403,8 +415,16 @@ void FDTTStationWindow::Tick(UWorld* World)
     UFGGameUI* GameUI = IsValid(PC) ? PC->GetGameUI() : nullptr;
     if (!IsValid(GameUI) || !GameUI->HasActiveInteractWidget()) return;
 
+    // Which window was up last pass, so one that has just been opened - a new one, or the same one
+    // opened again, since the game keeps its interact widgets - can be told from one left standing.
+    UFGInteractWidget* Open = nullptr;
     for (UFGInteractWidget* Widget : GameUI->GetInteractWidgetStack())
     {
-        if (AFGBuildableDockingStation* Station = StationOf(Widget)) EnsureControl(Widget, Station);
+        if (AFGBuildableDockingStation* Station = StationOf(Widget))
+        {
+            EnsureControl(Widget, Station, GOpenWindow.Get() != Widget);
+            Open = Widget;
+        }
     }
+    GOpenWindow = Open;
 }

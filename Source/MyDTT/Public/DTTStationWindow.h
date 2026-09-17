@@ -27,8 +27,12 @@ class MYDTT_API UDTTStationStayControl : public UVerticalBox
 public:
     /** Builds the switch once, from the class of the one it will sit under. */
     void Build(class UWidgetTree* Tree, UClass* SwitchClass);
-    /** Points the control at the station whose window it is in and draws its current state. */
-    void Attach(class AFGBuildableDockingStation* InStation);
+    /**
+     * Points the control at the station whose window it is in and draws its current state.
+     * bWindowOpened says the window has just been put up, which is when the switch is written
+     * whether or not it already agrees - see Refresh.
+     */
+    void Attach(class AFGBuildableDockingStation* InStation, bool bWindowOpened = false);
     /** Re-reads the station's name; called from the watcher, so a rename shows up by itself. */
     void Refresh();
 
@@ -60,6 +64,8 @@ private:
     bool bHasDispatchTag = false;
     /** What was last written into the switch, for a window whose switch cannot be read back. */
     bool bSwitchShows = false;
+    /** Cleared whenever the window goes up, so the switch is told its state at least once. */
+    bool bSwitchWritten = false;
 
     /** The name the two flags above were read out of; the same string is not parsed twice. */
     FString LastName;
