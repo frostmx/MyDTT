@@ -52,19 +52,24 @@ namespace
         return Swatch;
     }
 
+    /** Below this a pixel has no hue worth speaking of: it is black, grey or white. */
+    constexpr float DTPGreyThreshold = 0.25f;
+
     /**
-     * Saturated enough to read as a colour on a truck, bright enough to see in the rain.
+     * Readable on a truck without turning into a different colour.
      *
-     * The brightness is lifted rather than clamped: most item icons are dark, and taking their
-     * value as it stands made every truck a dark brown-grey. The curve keeps the order between
-     * items - coal still ends up darker than sulfur - while pulling the darkest ones up to where
-     * a hue is visible at all. All of it is linear space, where 0.2 is already a mid grey.
+     * A coloured item gets a saturation floor and a brightness lift, because item icons are dark
+     * and a hue has to survive rain and distance. A grey one is left grey: forcing saturation on
+     * black would make crude oil brown, which is exactly what it is not.
      */
     FLinearColor DTPReadable(const FLinearColor& In)
     {
         FLinearColor HSV = In.LinearRGBToHSV();
-        HSV.G = FMath::Clamp(HSV.G, 0.40f, 1.0f);   // saturation
-        HSV.B = FMath::Clamp(FMath::Pow(HSV.B, 0.55f), 0.22f, 0.90f);  // value
+        const bool bGrey = HSV.G < DTPGreyThreshold;
+        if (!bGrey) HSV.G = FMath::Clamp(HSV.G, 0.30f, 1.0f);
+        // Barely lifted: a stronger curve turned the near-black barrel of crude oil into a mid
+        // brown. Dark items are meant to look dark; only the very bottom is raised off zero.
+        HSV.B = FMath::Clamp(FMath::Pow(HSV.B, 0.85f), 0.015f, 0.92f);
         FLinearColor Out = HSV.HSVToLinearRGB();
         Out.A = 1.0f;
         return Out;
@@ -160,15 +165,6 @@ bool FDTTCargoPaint::IsPainted(const FFactoryCustomizationData& Data, const FDTT
 #if !UE_SERVER
 namespace
 {
-    /**
-     * The two colours of one icon.
-     *
-     * A flat mean is grey for almost every icon: most are a grey machine part with the telling
-     * colour in a corner. So the pixels are put into twelve hue buckets weighted by saturation
-     * squared, the heaviest bucket is the main colour, and the heaviest bucket at least a sixth of
-     * a circle away from it - and carrying at least a sixth of the weight - is the trim. An item
-     * that is really one colour has no such second bucket, and gets its own colour darkened.
-     */
     /** Draws the icon over a transparent target, filling it edge to edge. */
     void DTPDrawIcon(UObject* WorldContext, UTextureRenderTarget2D* Target, UTexture2D* Icon)
     {
@@ -189,6 +185,15 @@ namespace
         UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(WorldContext, Context);
     }
 
+    /**
+     * The two colours of one icon: the one that covers the most of it, and the most different
+     * other one that covers a decent share.
+     *
+     * Pixels are counted by area, not by how colourful they are - the colour of crude oil is the
+     * black of its barrel, not the copper of its rings. They fall into twelve hue buckets plus
+     * three for what has no hue at all (dark, mid, light grey), so black and white can win a
+     * count of their own instead of being spread over whatever hue their noise happens to have.
+     */
     bool DTPIconColors(UObject* WorldContext, UTextureRenderTarget2D* Target, UTexture2D* Icon, FDTTCargoColors& OutColors)
     {
         if (!IsValid(Target) || !IsValid(Icon)) return false;
@@ -208,9 +213,13 @@ namespace
             return false;
         }
 
-        constexpr int32 BucketCount = 12;
-        double SumR[BucketCount] = {}, SumG[BucketCount] = {}, SumB[BucketCount] = {}, Weight[BucketCount] = {};
-        double TotalWeight = 0.0;
+        constexpr int32 HueBuckets = 12;
+        constexpr int32 GreyBuckets = 3;
+        constexpr int32 BucketCount = HueBuckets + GreyBuckets;
+        double SumR[BucketCount] = {}, SumG[BucketCount] = {}, SumB[BucketCount] = {};
+        double Area[BucketCount] = {};
+        double TotalArea = 0.0;
+
         for (const FLinearColor& Pixel : Pixels)
         {
             if (Pixel.A < 0.5f) continue;
@@ -218,44 +227,69 @@ namespace
             // a darker shade of the same hue and drags the average down.
             const FLinearColor Linear(Pixel.R / Pixel.A, Pixel.G / Pixel.A, Pixel.B / Pixel.A, 1.0f);
             const FLinearColor HSV = Linear.LinearRGBToHSV();
-            // Near-black outlines say nothing about the item and are most of some icons.
-            if (HSV.B < 0.08f) continue;
-            const int32 Bucket = FMath::Clamp(
-                static_cast<int32>(HSV.R / 360.0f * BucketCount), 0, BucketCount - 1);
-            // Saturation squared, not saturation: copper ore is a cool grey rock with copper veins,
-            // and a linear weight let the large grey body outvote the small orange one - the ore
-            // came out grey-blue. The epsilon keeps a genuinely colourless item (concrete, steel)
-            // averaging to its own grey instead of to nothing.
-            const double PixelWeight = FMath::Square(static_cast<double>(HSV.G)) + 0.02;
-            SumR[Bucket] += Linear.R * PixelWeight;
-            SumG[Bucket] += Linear.G * PixelWeight;
-            SumB[Bucket] += Linear.B * PixelWeight;
-            Weight[Bucket] += PixelWeight;
-            TotalWeight += PixelWeight;
+
+            int32 Bucket;
+            if (HSV.G < DTPGreyThreshold)
+            {
+                // Dark, mid and light grey are three different colours to look at, and the split
+                // is in linear space, where 0.05 is already a dark grey rather than black.
+                const int32 Band = HSV.B < 0.05f ? 0 : (HSV.B < 0.30f ? 1 : 2);
+                Bucket = HueBuckets + Band;
+            }
+            else
+            {
+                Bucket = FMath::Clamp(static_cast<int32>(HSV.R / 360.0f * HueBuckets), 0, HueBuckets - 1);
+            }
+
+            SumR[Bucket] += Linear.R; SumG[Bucket] += Linear.G; SumB[Bucket] += Linear.B;
+            Area[Bucket] += 1.0;
+            TotalArea += 1.0;
         }
-        if (TotalWeight <= 0.0) return false;
+        if (TotalArea <= 0.0) return false;
 
         auto BucketColor = [&](int32 Bucket)
         {
             return DTPReadable(FLinearColor(
-                static_cast<float>(SumR[Bucket] / Weight[Bucket]),
-                static_cast<float>(SumG[Bucket] / Weight[Bucket]),
-                static_cast<float>(SumB[Bucket] / Weight[Bucket]), 1.0f));
+                static_cast<float>(SumR[Bucket] / Area[Bucket]),
+                static_cast<float>(SumG[Bucket] / Area[Bucket]),
+                static_cast<float>(SumB[Bucket] / Area[Bucket]), 1.0f));
         };
 
-        int32 Main = 0;
-        for (int32 Bucket = 1; Bucket < BucketCount; ++Bucket)
-        {
-            if (Weight[Bucket] > Weight[Main]) Main = Bucket;
-        }
-        OutColors.Primary = BucketColor(Main);
-
-        int32 Trim = INDEX_NONE;
+        int32 Main = INDEX_NONE;
         for (int32 Bucket = 0; Bucket < BucketCount; ++Bucket)
         {
-            const int32 Apart = FMath::Min(FMath::Abs(Bucket - Main), BucketCount - FMath::Abs(Bucket - Main));
-            if (Apart < 2 || Weight[Bucket] < TotalWeight * 0.15) continue;
-            if (Trim == INDEX_NONE || Weight[Bucket] > Weight[Trim]) Trim = Bucket;
+            if (Area[Bucket] > 0.0 && (Main == INDEX_NONE || Area[Bucket] > Area[Main])) Main = Bucket;
+        }
+        if (Main == INDEX_NONE) return false;
+        OutColors.Primary = BucketColor(Main);
+
+        // The trim: the biggest bucket that does not look like the main one. Two hue buckets side
+        // by side are the same colour to the eye, and so are two neighbouring shades of grey.
+        // A grey item takes a coloured trim where it has one - the orange corners of a fused
+        // modular frame say more about it than the lighter grey of its own highlights.
+        const bool bMainIsGrey = Main >= HueBuckets;
+        int32 Trim = INDEX_NONE;
+        for (int32 Pass = 0; Pass < 2 && Trim == INDEX_NONE; ++Pass)
+        {
+            // First pass takes a coloured trim if there is one: the gold of a circuit board's
+            // tracks tells more than the grey of its shadows, and grey is nearly always the
+            // largest runner-up on an icon lit from one side.
+            const bool bHuesOnly = Pass == 0;
+            for (int32 Bucket = 0; Bucket < BucketCount; ++Bucket)
+            {
+                if (Bucket == Main || Area[Bucket] < TotalArea * 0.08) continue;
+                if (bHuesOnly && Bucket >= HueBuckets) continue;
+                if (Main < HueBuckets && Bucket < HueBuckets)
+                {
+                    const int32 Apart = FMath::Abs(Bucket - Main);
+                    if (FMath::Min(Apart, HueBuckets - Apart) < 2) continue;
+                }
+                else if (bMainIsGrey && Bucket >= HueBuckets && FMath::Abs(Bucket - Main) < 2)
+                {
+                    continue;
+                }
+                if (Trim == INDEX_NONE || Area[Bucket] > Area[Trim]) Trim = Bucket;
+            }
         }
         OutColors.Secondary = Trim == INDEX_NONE ? DTPTrim(OutColors.Primary) : BucketColor(Trim);
         return true;
