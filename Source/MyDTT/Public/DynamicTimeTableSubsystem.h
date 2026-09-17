@@ -107,12 +107,24 @@ public:
      * ten stacks (open only with more than ten stacks free); N at or above the capacity never opens.
      * Legacy explicit "(Iron+)" remains supported. Parentheses deliberately differ from the
      * "[group,N]" balancing tag, so one station can carry both independently.
+     *
+     * "=" right behind the resource - "(Iron=)", "(Iron=-10)" - asks the truck to stand at this
+     * requester until its cargo is gone, the way the global StayUntilEmpty setting asks it of
+     * every requester. It is read off the resource here so nothing else in the tag has to know it.
      */
-    static bool ParseDispatchTag(const FString& FullName, FString& OutBaseName, FString& OutResourceId, EDTTDispatchRole& OutRole, int32& OutThreshold);
+    static bool ParseDispatchTag(const FString& FullName, FString& OutBaseName, FString& OutResourceId, EDTTDispatchRole& OutRole, int32& OutThreshold,
+        bool* OutStayUntilEmpty = nullptr);
     /** The name without its dispatch tag, for display. */
     static FString StripDispatchTag(const FString& FullName);
     /** The inverse of ParseDispatchTag. */
-    static FString MakeDispatchTaggedName(const FString& BaseName, const FString& ResourceId, EDTTDispatchRole Role, int32 Threshold);
+    static FString MakeDispatchTaggedName(const FString& BaseName, const FString& ResourceId, EDTTDispatchRole Role, int32 Threshold,
+        bool bStayUntilEmpty = false);
+    /**
+     * Adds or removes the "=" marker, rewriting the inside of the tag and nothing else: an
+     * auto-named station carries its caption behind the tag ("-240/m -> Ingots"), and composing
+     * the name anew would drop it. False when the name carries no requester tag to mark.
+     */
+    static bool SetStayMarkerInName(const FString& FullName, bool bOn, FString& OutName);
     /** Exact, resource-independent marker for an optional dedicated refuelling waypoint. */
     static bool ParseFuelStopTag(const FString& FullName, FString& OutBaseName);
     /** Exact marker "(D)" for a depot: where a pool truck waits, held docked, between laps. */

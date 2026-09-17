@@ -97,6 +97,13 @@ struct FDTTDispatchStation
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dynamic Time Table")
     int32 Threshold = INDEX_NONE;
 
+    // Requester only: the "=" of a "(ResourceId=)" tag. The truck stands at this station, draining
+    // into it and topping it up, until its cargo is gone - what the global StayUntilEmpty setting
+    // asks of every requester, asked here by one station. A station that stops consuming keeps the
+    // truck, which is why this is per station and off unless the name says otherwise.
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Dynamic Time Table")
+    bool bStayUntilEmpty = false;
+
     UPROPERTY()
     TObjectPtr<AFGDockingStationIdentifier> DockingStationIdentifier = nullptr;
 

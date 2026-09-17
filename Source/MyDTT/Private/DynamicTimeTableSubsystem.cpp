@@ -316,7 +316,7 @@ namespace
     FString DTSComposeSource(const AFGDockingStationIdentifier* Identifier, const AFGBuildableDockingStation* Station,
         const FString& Current, bool bHadAuto, const FString& PrevHead, const FString& PrevTag, const FString& PrevTail,
         bool bHasTag, const FString& TagBase, const FString& TagResource, EDTTDispatchRole TagRole, int32 TagThreshold,
-        FString* OutDropped = nullptr)
+        bool bTagStayUntilEmpty, FString* OutDropped = nullptr)
     {
         if (DTSIsTableText(Identifier->GetStationName()))
         {
@@ -327,13 +327,14 @@ namespace
         if (!DTSIsStationDefaultName(Station, PlayerText)) return Current;
         if (OutDropped) *OutDropped = PlayerText;
         if (bHadAuto) return DTSJoinAutoBlock(FString(), PrevTag, PrevTail);
-        return bHasTag ? UDynamicTimeTableSubsystem::MakeDispatchTaggedName(FString(), TagResource, TagRole, TagThreshold) : FString();
+        return bHasTag ? UDynamicTimeTableSubsystem::MakeDispatchTaggedName(FString(), TagResource, TagRole, TagThreshold, bTagStayUntilEmpty) : FString();
     }
 
     /** The same name with another word in its resource tag; empty when the tag cannot be found. */
-    FString DTSReplaceTagWord(const FString& Current, const FString& OldWord, const FString& NewWord, EDTTDispatchRole Role, int32 Threshold)
+    FString DTSReplaceTagWord(const FString& Current, const FString& OldWord, const FString& NewWord, EDTTDispatchRole Role, int32 Threshold,
+        bool bStayUntilEmpty)
     {
-        const FString NewTag = UDynamicTimeTableSubsystem::MakeDispatchTaggedName(FString(), NewWord, Role, Threshold);
+        const FString NewTag = UDynamicTimeTableSubsystem::MakeDispatchTaggedName(FString(), NewWord, Role, Threshold, bStayUntilEmpty);
         if (NewTag.IsEmpty()) return FString();
 
         FString Head, Tag, Tail;
@@ -376,6 +377,99 @@ namespace
         uint32 Parts[4];
         FMemory::Memcpy(Parts, Digest, sizeof(Parts));
         return FGuid(Parts[0], Parts[1], Parts[2], Parts[3]);
+    }
+
+    /**
+     * One dispatch tag as found in a name: where its brackets are, the resource it names, its
+     * role, its limit and whether it carries the "=" marker. The parser and the setter of that
+     * marker share this scan so that both always pick the same bracket of a name.
+     */
+    struct FDTTDispatchTagScan
+    {
+        int32 Open = INDEX_NONE;
+        int32 Close = INDEX_NONE;
+        FString Resource;
+        EDTTDispatchRole Role = EDTTDispatchRole::None;
+        int32 Threshold = 0;
+        bool bStayUntilEmpty = false;
+    };
+
+    bool DTSScanDispatchTag(const FString& Region, FDTTDispatchTagScan& Out)
+    {
+        // Walk parenthesized suffixes backwards. This keeps the independent (F) marker composable
+        // with dispatch names in either order: "Dock (Iron) (F)" and "Dock (F) (Iron)".
+        int32 SearchEnd = Region.Len();
+        while (SearchEnd > 0)
+        {
+            int32 Close = INDEX_NONE;
+            if (!Region.Left(SearchEnd).FindLastChar(TEXT(')'), Close)) break;
+            int32 Open = INDEX_NONE;
+            if (!Region.Left(Close).FindLastChar(TEXT('('), Open)) break;
+
+            const FString Inner = Region.Mid(Open + 1, Close - Open - 1).TrimStartAndEnd();
+            FString Resource;
+            EDTTDispatchRole Role = EDTTDispatchRole::None;
+            int32 Threshold = 0;
+            if (Inner.EndsWith(TEXT("+")))
+            {
+                Resource = Inner.LeftChop(1).TrimStartAndEnd();
+                if (!Resource.IsEmpty()) Role = EDTTDispatchRole::Producer;
+            }
+            else
+            {
+                // The offset is whatever follows the last '-', and only if it is a plain
+                // non-negative number, so a resource named "Iron Ore" still works.
+                int32 Dash = INDEX_NONE;
+                if (Inner.FindLastChar(TEXT('-'), Dash))
+                {
+                    const FString Tail = Inner.Mid(Dash + 1).TrimStartAndEnd();
+                    Resource = Inner.Left(Dash).TrimStartAndEnd();
+                    if (!Resource.IsEmpty() && DTSIsAllDigits(Tail))
+                    {
+                        Role = EDTTDispatchRole::Requester;
+                        Threshold = FCString::Atoi(*Tail);
+                    }
+                }
+
+                // A neutral tag delegates its role to the station's live LOAD/UNLOAD switch. Keep
+                // explicit +/- tags compatible so existing worlds do not need to rename stations.
+                if (Role == EDTTDispatchRole::None && !Inner.Equals(TEXT("F"), ESearchCase::IgnoreCase) &&
+                    !Inner.Equals(TEXT("D"), ESearchCase::IgnoreCase))
+                {
+                    Resource = Inner;
+                    if (!Resource.IsEmpty())
+                    {
+                        Role = EDTTDispatchRole::ByStationMode;
+                        // No number: the settings' limit applies (GetRequestLevels).
+                        Threshold = INDEX_NONE;
+                    }
+                }
+            }
+
+            // "(Iron=)" and "(Iron=-10)": the marker rides the resource, so it comes off here and
+            // nothing further down has to know about it. A producer never carries it - it is the
+            // requester that asks to be served to the end.
+            bool bStay = false;
+            if (Role != EDTTDispatchRole::None && Role != EDTTDispatchRole::Producer && Resource.EndsWith(TEXT("=")))
+            {
+                Resource = Resource.LeftChop(1).TrimStartAndEnd();
+                bStay = true;
+                if (Resource.IsEmpty()) Role = EDTTDispatchRole::None;
+            }
+
+            if (Role != EDTTDispatchRole::None)
+            {
+                Out.Open = Open;
+                Out.Close = Close;
+                Out.Resource = Resource;
+                Out.Role = Role;
+                Out.Threshold = Threshold;
+                Out.bStayUntilEmpty = bStay;
+                return true;
+            }
+            SearchEnd = Open;
+        }
+        return false;
     }
 }
 
@@ -490,7 +584,8 @@ FString UDynamicTimeTableSubsystem::MakeTaggedName(const FString& BaseName, cons
     return DTSJoinAutoBlock(Result, AutoTag, AutoTail);
 }
 
-bool UDynamicTimeTableSubsystem::ParseDispatchTag(const FString& InFullName, FString& OutBaseName, FString& OutResourceId, EDTTDispatchRole& OutRole, int32& OutThreshold)
+bool UDynamicTimeTableSubsystem::ParseDispatchTag(const FString& InFullName, FString& OutBaseName, FString& OutResourceId, EDTTDispatchRole& OutRole, int32& OutThreshold,
+    bool* OutStayUntilEmpty)
 {
     // The auto tag is a dispatch tag - it is the caption behind the name that is new - so in an
     // auto-named station only that tag is read, and a bracket the player put in their own text
@@ -503,68 +598,17 @@ bool UDynamicTimeTableSubsystem::ParseDispatchTag(const FString& InFullName, FSt
     OutResourceId.Reset();
     OutRole = EDTTDispatchRole::None;
     OutThreshold = 0;
+    if (OutStayUntilEmpty) *OutStayUntilEmpty = false;
 
-    // Walk parenthesized suffixes backwards. This keeps the independent (F) marker composable
-    // with dispatch names in either order: "Dock (Iron) (F)" and "Dock (F) (Iron)".
-    int32 SearchEnd = FullName.Len();
-    while (SearchEnd > 0)
-    {
-        int32 Close = INDEX_NONE;
-        if (!FullName.Left(SearchEnd).FindLastChar(TEXT(')'), Close)) break;
-        int32 Open = INDEX_NONE;
-        if (!FullName.Left(Close).FindLastChar(TEXT('('), Open)) break;
+    FDTTDispatchTagScan Scan;
+    if (!DTSScanDispatchTag(FullName, Scan)) return false;
 
-        const FString Inner = FullName.Mid(Open + 1, Close - Open - 1).TrimStartAndEnd();
-        FString Resource;
-        EDTTDispatchRole Role = EDTTDispatchRole::None;
-        int32 Threshold = 0;
-        if (Inner.EndsWith(TEXT("+")))
-        {
-            Resource = Inner.LeftChop(1).TrimStartAndEnd();
-            if (!Resource.IsEmpty()) Role = EDTTDispatchRole::Producer;
-        }
-        else
-        {
-            // The offset is whatever follows the last '-', and only if it is a plain
-            // non-negative number, so a resource named "Iron Ore" still works.
-            int32 Dash = INDEX_NONE;
-            if (Inner.FindLastChar(TEXT('-'), Dash))
-            {
-                const FString Tail = Inner.Mid(Dash + 1).TrimStartAndEnd();
-                Resource = Inner.Left(Dash).TrimStartAndEnd();
-                if (!Resource.IsEmpty() && DTSIsAllDigits(Tail))
-                {
-                    Role = EDTTDispatchRole::Requester;
-                    Threshold = FCString::Atoi(*Tail);
-                }
-            }
-
-            // A neutral tag delegates its role to the station's live LOAD/UNLOAD switch. Keep
-            // explicit +/- tags compatible so existing worlds do not need to rename stations.
-            if (Role == EDTTDispatchRole::None && !Inner.Equals(TEXT("F"), ESearchCase::IgnoreCase) &&
-                !Inner.Equals(TEXT("D"), ESearchCase::IgnoreCase))
-            {
-                Resource = Inner;
-                if (!Resource.IsEmpty())
-                {
-                    Role = EDTTDispatchRole::ByStationMode;
-                    // No number: the settings' limit applies (GetRequestLevels).
-                    Threshold = INDEX_NONE;
-                }
-            }
-        }
-
-        if (Role != EDTTDispatchRole::None)
-        {
-            OutBaseName = bAuto ? AutoHead : DTSCutOut(FullName, Open, Close + 1).TrimStartAndEnd();
-            OutResourceId = Resource;
-            OutRole = Role;
-            OutThreshold = Threshold;
-            return true;
-        }
-        SearchEnd = Open;
-    }
-    return false;
+    OutBaseName = bAuto ? AutoHead : DTSCutOut(FullName, Scan.Open, Scan.Close + 1).TrimStartAndEnd();
+    OutResourceId = Scan.Resource;
+    OutRole = Scan.Role;
+    OutThreshold = Scan.Threshold;
+    if (OutStayUntilEmpty) *OutStayUntilEmpty = Scan.bStayUntilEmpty;
+    return true;
 }
 
 FString UDynamicTimeTableSubsystem::StripDispatchTag(const FString& FullName)
@@ -574,22 +618,46 @@ FString UDynamicTimeTableSubsystem::StripDispatchTag(const FString& FullName)
     return Base;
 }
 
-FString UDynamicTimeTableSubsystem::MakeDispatchTaggedName(const FString& BaseName, const FString& ResourceId, EDTTDispatchRole Role, int32 Threshold)
+FString UDynamicTimeTableSubsystem::MakeDispatchTaggedName(const FString& BaseName, const FString& ResourceId, EDTTDispatchRole Role, int32 Threshold,
+    bool bStayUntilEmpty)
 {
     const FString Base = StripDispatchTag(BaseName);
-    // Reuses SanitizeGroupName: '(' / ')' / '-' would break this tag's own syntax the same way
-    // '[' / ']' / ',' would break the balancing tag's, so the same strip-to-space rule applies.
-    FString Resource = SanitizeGroupName(ResourceId).Replace(TEXT("("), TEXT(" ")).Replace(TEXT(")"), TEXT(" ")).Replace(TEXT("-"), TEXT(" ")).Replace(TEXT("+"), TEXT(" ")).TrimStartAndEnd();
+    // Reuses SanitizeGroupName: '(' / ')' / '-' / '=' would break this tag's own syntax the same
+    // way '[' / ']' / ',' would break the balancing tag's, so the same strip-to-space rule applies.
+    FString Resource = SanitizeGroupName(ResourceId).Replace(TEXT("("), TEXT(" ")).Replace(TEXT(")"), TEXT(" ")).Replace(TEXT("-"), TEXT(" ")).Replace(TEXT("+"), TEXT(" ")).Replace(TEXT("="), TEXT(" ")).TrimStartAndEnd();
     if (Resource.IsEmpty() || Role == EDTTDispatchRole::None) return Base;
 
+    // A producer never carries the marker: standing until empty is what a requester asks for.
+    const TCHAR* Mark = (bStayUntilEmpty && Role != EDTTDispatchRole::Producer) ? TEXT("=") : TEXT("");
     const FString Tag = Role == EDTTDispatchRole::Producer
         ? FString::Printf(TEXT("(%s+)"), *Resource)
         : Role == EDTTDispatchRole::Requester
-            ? FString::Printf(TEXT("(%s-%d)"), *Resource, FMath::Max(0, Threshold))
-            : FString::Printf(TEXT("(%s)"), *Resource);
+            ? FString::Printf(TEXT("(%s%s-%d)"), *Resource, Mark, FMath::Max(0, Threshold))
+            : FString::Printf(TEXT("(%s%s)"), *Resource, Mark);
     // The tag goes first: the station list is sorted by name, and a name that starts with the
     // resource sorts the stations by what they carry.
     return Base.IsEmpty() ? Tag : FString::Printf(TEXT("%s %s"), *Tag, *Base);
+}
+
+bool UDynamicTimeTableSubsystem::SetStayMarkerInName(const FString& InFullName, bool bOn, FString& OutName)
+{
+    OutName = InFullName;
+
+    FString AutoHead, AutoTag, AutoTail;
+    const bool bAuto = DTSSplitAutoBlock(InFullName, AutoHead, AutoTag, AutoTail);
+    const FString Region = bAuto ? AutoTag : AutoHead;
+
+    FDTTDispatchTagScan Scan;
+    if (!DTSScanDispatchTag(Region, Scan) || Scan.Role == EDTTDispatchRole::Producer) return false;
+    if (Scan.bStayUntilEmpty == bOn) return true;
+
+    FString Inner = Scan.Resource;
+    if (bOn) Inner += TEXT("=");
+    if (Scan.Role == EDTTDispatchRole::Requester) Inner += FString::Printf(TEXT("-%d"), FMath::Max(0, Scan.Threshold));
+
+    const FString NewRegion = Region.Left(Scan.Open + 1) + Inner + Region.Mid(Scan.Close);
+    OutName = bAuto ? DTSJoinAutoBlock(AutoHead, NewRegion, AutoTail) : NewRegion;
+    return true;
 }
 
 bool UDynamicTimeTableSubsystem::ParseFuelStopTag(const FString& InFullName, FString& OutBaseName)
@@ -694,10 +762,17 @@ namespace
         FString OldBase, OldResource;
         EDTTDispatchRole OldRole = EDTTDispatchRole::None;
         int32 OldThreshold = 0;
-        const bool bHadTag = UDynamicTimeTableSubsystem::ParseDispatchTag(CurrentName, OldBase, OldResource, OldRole, OldThreshold);
+        bool bOldStayUntilEmpty = false;
+        const bool bHadTag = UDynamicTimeTableSubsystem::ParseDispatchTag(CurrentName, OldBase, OldResource, OldRole, OldThreshold, &bOldStayUntilEmpty);
         const bool bKeepThreshold = bHadTag && Result.bRequester && OldRole == EDTTDispatchRole::Requester &&
             OldThreshold != INDEX_NONE &&
             (bSameResource || OldResource.Equals(Result.ResourceName, ESearchCase::IgnoreCase));
+        // The "=" marker is the player's, like the limit, and the tag is rewritten from scratch on
+        // every pass - so it has to be carried over here or the first pass would quietly drop it.
+        // Unlike the limit it does not care which resource the station ended up carrying: it says
+        // something about this consumer, not about the cargo. A station the belts turned into a
+        // producer loses it, because standing until empty is a requester's business.
+        const bool bKeepStayUntilEmpty = bHadTag && bOldStayUntilEmpty && Result.bRequester;
 
         // The player's own word for the resource survives as long as it means the same item. The
         // mod's item name is the game's, which is a different language on a Russian save and would
@@ -712,7 +787,7 @@ namespace
 
         const EDTTDispatchRole Role = bKeepThreshold ? EDTTDispatchRole::Requester : EDTTDispatchRole::ByStationMode;
         const FString Head = UDynamicTimeTableSubsystem::MakeDispatchTaggedName(
-            CurrentName, Resource, Role, bKeepThreshold ? OldThreshold : 0);
+            CurrentName, Resource, Role, bKeepThreshold ? OldThreshold : 0, bKeepStayUntilEmpty);
 
         // The tail is what gives way when the name gets long: the player's text and the tag carry
         // the meaning, the product list is a hint.
@@ -823,7 +898,8 @@ bool UDynamicTimeTableSubsystem::ProcessAutoNameForStation(AFGDockingStationIden
     FString TagBase, TagResource;
     EDTTDispatchRole TagRole = EDTTDispatchRole::None;
     int32 TagThreshold = 0;
-    const bool bHasTag = ParseDispatchTag(Current, TagBase, TagResource, TagRole, TagThreshold);
+    bool bTagStayUntilEmpty = false;
+    const bool bHasTag = ParseDispatchTag(Current, TagBase, TagResource, TagRole, TagThreshold, &bTagStayUntilEmpty);
     const TSubclassOf<UFGItemDescriptor> PreferredItem =
         (bHasTag && !bAutoWasUnsure) ? ResolveItemClassForResource(TagResource) : nullptr;
 
@@ -870,7 +946,7 @@ bool UDynamicTimeTableSubsystem::ProcessAutoNameForStation(AFGDockingStationIden
     const bool bRelabel = bExplainAll || AutoNameRelabelPending;
     const bool bKeepWord = bSameResource && !(bRelabel && ResolveItemClassByName(TagResource));
     const FString ComposeFrom = DTSComposeSource(Identifier, Station, Current, bHadAuto, PrevHead, PrevTag, PrevTail,
-        bHasTag, TagBase, TagResource, TagRole, TagThreshold);
+        bHasTag, TagBase, TagResource, TagRole, TagThreshold, bTagStayUntilEmpty);
     const FString* WorldWord = WorldWords ? WorldWords->Find(Result.ItemClass) : nullptr;
     const FString NewName = DTSComposeAutoName(ComposeFrom, Result, bShared, bSameResource, bKeepWord, WorldWord);
 
@@ -1136,7 +1212,8 @@ int32 UDynamicTimeTableSubsystem::RestoreGameWords(bool bApply, TArray<FString>&
         FString Base, Word;
         EDTTDispatchRole Role = EDTTDispatchRole::None;
         int32 Threshold = 0;
-        if (!ParseDispatchTag(Current, Base, Word, Role, Threshold)) continue;
+        bool bStayUntilEmpty = false;
+        if (!ParseDispatchTag(Current, Base, Word, Role, Threshold, &bStayUntilEmpty)) continue;
         if (Current.TrimStartAndEnd().EndsWith(TEXT(".")))
         {
             OutLines.Add(FString::Printf(TEXT("%s - skipped (player-owned-name)"), *Current));
@@ -1158,7 +1235,7 @@ int32 UDynamicTimeTableSubsystem::RestoreGameWords(bool bApply, TArray<FString>&
 
         const FString GameWord = ItemNameForNaming(Item);
         if (GameWord.IsEmpty() || GameWord == Word) continue;
-        const FString NewName = DTSReplaceTagWord(Current, Word, GameWord, Role, Threshold);
+        const FString NewName = DTSReplaceTagWord(Current, Word, GameWord, Role, Threshold, bStayUntilEmpty);
         if (NewName.IsEmpty() || NewName == Current) continue;
         if (bApply && !RenameDockGuarded(Identifier, NewName)) continue;
         ++Changed;
@@ -1217,7 +1294,8 @@ bool UDynamicTimeTableSubsystem::DescribeAutoName(const FString& StationQuery, T
     FString TagBase, TagResource;
     EDTTDispatchRole TagRole = EDTTDispatchRole::None;
     int32 TagThreshold = 0;
-    const bool bHasTag = ParseDispatchTag(Current, TagBase, TagResource, TagRole, TagThreshold);
+    bool bTagStayUntilEmpty = false;
+    const bool bHasTag = ParseDispatchTag(Current, TagBase, TagResource, TagRole, TagThreshold, &bTagStayUntilEmpty);
     const TSubclassOf<UFGItemDescriptor> PreferredItem =
         (bHasTag && !bAutoWasUnsure) ? ResolveItemClassForResource(TagResource) : nullptr;
 
@@ -1276,7 +1354,7 @@ bool UDynamicTimeTableSubsystem::DescribeAutoName(const FString& StationQuery, T
     const bool bSameResource = Result.ItemClass && (bOwnWord || (PreferredItem && PreferredItem == Result.ItemClass));
     FString Dropped;
     const FString ComposeFrom = DTSComposeSource(Identifier, Station, Current, bHadAuto, PrevHead, PrevTag, PrevTail,
-        bHasTag, TagBase, TagResource, TagRole, TagThreshold, &Dropped);
+        bHasTag, TagBase, TagResource, TagRole, TagThreshold, bTagStayUntilEmpty, &Dropped);
     if (!Dropped.IsEmpty()) OutLines.Add(FString::Printf(TEXT("  \"%s\" is the game's own text, not yours: dropped"), *Dropped));
     const TMap<TSubclassOf<UFGItemDescriptor>, FString> WorldWords = CollectWorldWords();
     if (const FString* WorldWord = WorldWords.Find(Result.ItemClass))
@@ -1916,14 +1994,15 @@ void UDynamicTimeTableSubsystem::RebuildGroupsFromNames()
             }
 
             // Independent tag, different bracket family - a dock can carry both, either, or neither.
-            FString DispatchBase, ResourceId; EDTTDispatchRole Role; int32 Threshold;
-            if (ParseDispatchTag(FullName, DispatchBase, ResourceId, Role, Threshold) && Role != EDTTDispatchRole::None)
+            FString DispatchBase, ResourceId; EDTTDispatchRole Role; int32 Threshold; bool bStayUntilEmpty = false;
+            if (ParseDispatchTag(FullName, DispatchBase, ResourceId, Role, Threshold, &bStayUntilEmpty) && Role != EDTTDispatchRole::None)
             {
                 FDTTDispatchStation Dispatch;
                 Dispatch.DisplayName = FullName;
                 Dispatch.ResourceId = ResourceId;
                 Dispatch.Role = Role;
                 Dispatch.Threshold = Threshold;
+                Dispatch.bStayUntilEmpty = bStayUntilEmpty;
                 Dispatch.DockingStationIdentifier = Identifier;
                 Dispatch.DockingPathNodeGuid = Identifier->GetPathNodeGUID();
                 RebuiltDispatch.Add(Dispatch);
@@ -4532,7 +4611,11 @@ bool UDynamicTimeTableSubsystem::ComputeTransferPlan(
             // the empty cargo. It applies to every requester of the lap, not only the last, which
             // is what makes it a different behaviour and not a longer LeftoverHoldSeconds: the
             // consumer is served to the end before the truck moves at all.
-            const bool bStayHere = Settings.bStayUntilEmpty && !Station->GetIsInLoadMode();
+            //
+            // The setting asks it of every requester in the world; the "=" in a station's own tag
+            // asks it of that one station. Either is enough, and a station marked while the
+            // setting is on is simply already doing it.
+            const bool bStayHere = (Settings.bStayUntilEmpty || Stop->bStayUntilEmpty) && !Station->GetIsInLoadMode();
             const bool bDrain = bStayHere || (Settings.bDrainLeftovers && !Station->GetIsInLoadMode() &&
                 (bFullLoadLastStop || IsLastPlannedRequester(Vehicle, StationGuid)));
             FDTTRequestLevels Levels;
@@ -6326,10 +6409,17 @@ void UDynamicTimeTableSubsystem::GetTruckWhyLines(const FString& TruckQuery, TAr
     {
         const UWorld* World = GetWorld();
         const double Held = Hold->bCycleDone && IsValid(World) ? World->GetTimeSeconds() - Hold->StartedSeconds : 0.0;
+        // Which of the two asked for it is the first thing one wants to know when a truck stands
+        // somewhere for a long time: the station's own tag, or the setting that holds them all.
+        const AFGDockingStationIdentifier* HoldIdentifier = Hold->Station.IsValid() ? Hold->Station->GetStationIdentifier() : nullptr;
+        const FDTTDispatchStation* HoldStop = IsValid(HoldIdentifier) ? FindDispatchStationByGuid(HoldIdentifier->GetPathNodeGUID()) : nullptr;
+        const TCHAR* UntilEmptyReason = (HoldStop && HoldStop->bStayUntilEmpty)
+            ? TEXT("when the cargo is gone (station tag)")
+            : TEXT("when the cargo is gone (stay until empty)");
         OutLines.Add(FString::Printf(TEXT("  held at '%s' for %.0f s, moved %d by top-ups; leaves %s"),
             Hold->Station.IsValid() ? *DTSDockName(Hold->Station->GetStationIdentifier()) : TEXT("<none>"),
             Held, Hold->MovedByTopUps,
-            Hold->bUntilEmpty ? TEXT("when the cargo is gone (stay until empty)")
+            Hold->bUntilEmpty ? UntilEmptyReason
                 : *FString::Printf(TEXT("after %.0f s"), Settings.LeftoverHoldSeconds)));
     }
     if (const FDTTIndexReset* Reset = IndexResets.Find(Vehicle))
