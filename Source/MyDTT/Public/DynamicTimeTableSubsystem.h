@@ -59,6 +59,13 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") bool AddStationByName(FGuid GroupId, const FString& StationName, int32 TargetSlots = 1);
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") bool RemoveStationByName(FGuid GroupId, const FString& StationName);
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") bool SetTargetSlots(FGuid GroupId, const FString& StationName, int32 TargetSlots);
+    /**
+     * Adds or removes the "=" marker on one docking station's own dispatch tag - the truck
+     * unloading there stands until its cargo is gone. Server only: this is a rename, and the name
+     * is where the setting lives. False with a reason in OutMessage when the station carries no
+     * dispatch tag to mark.
+     */
+    bool SetStationStayUntilEmpty(class AFGBuildableDockingStation* Station, bool bOn, FString& OutMessage);
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") void GetAllVanillaStationNames(TArray<FString>& OutStationNames) const;
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table|Groups") void GetAllDockingStationNames(TArray<FString>& OutStationNames) const;
     UFUNCTION(BlueprintPure, Category = "Dynamic Time Table|Groups") const TArray<FDTTStationGroup>& GetStationGroups() const;

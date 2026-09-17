@@ -1795,6 +1795,60 @@ bool UDynamicTimeTableSubsystem::SetTargetSlots(FGuid GroupId, const FString& St
     return true;
 }
 
+bool UDynamicTimeTableSubsystem::SetStationStayUntilEmpty(AFGBuildableDockingStation* Station, bool bOn, FString& OutMessage)
+{
+    OutMessage.Reset();
+    if (!IsServer())
+    {
+        OutMessage = TEXT("dTT: only the server changes station names.");
+        return false;
+    }
+    AFGDockingStationIdentifier* Identifier = IsValid(Station) ? Station->GetStationIdentifier() : nullptr;
+    if (!IsValid(Identifier))
+    {
+        OutMessage = TEXT("dTT: this station is not ready yet.");
+        return false;
+    }
+
+    const FString Current = Identifier->GetStationName().ToString();
+    FString NewName;
+    if (!SetStayMarkerInName(Current, bOn, NewName))
+    {
+        OutMessage = FString::Printf(TEXT("dTT: '%s' carries no (Resource) tag to mark."), *Current);
+        return false;
+    }
+    if (NewName != Current)
+    {
+        if (!RenameDockGuarded(Identifier, NewName))
+        {
+            OutMessage = FString::Printf(TEXT("dTT: renaming '%s' failed."), *Current);
+            return false;
+        }
+        RebuildGroupsFromNames();
+    }
+
+    // A truck standing here right now was told to wait for an empty cargo. With neither the tag
+    // nor the setting asking for that any more it should leave now, not at its next docking -
+    // otherwise clearing the marker looks like it did nothing at all.
+    if (!bOn && !Settings.bStayUntilEmpty)
+    {
+        TArray<AFGWheeledVehicleIdentifier*> Leaving;
+        for (const TPair<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTLeftoverHold>& Pair : LeftoverHolds)
+        {
+            if (Pair.Value.bUntilEmpty && Pair.Value.Station.Get() == Station && Pair.Key.IsValid())
+                Leaving.Add(Pair.Key.Get());
+        }
+        for (AFGWheeledVehicleIdentifier* Vehicle : Leaving) ReleaseLeftoverHold(Vehicle, TEXT("stay tag removed"), true);
+    }
+
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("STATION_STAY Station='%s' Stay=%s"),
+        *DTSDockName(Identifier), bOn ? TEXT("true") : TEXT("false"));
+    OutMessage = bOn
+        ? FString::Printf(TEXT("dTT: '%s' keeps the truck until its cargo is gone."), *NewName)
+        : FString::Printf(TEXT("dTT: '%s' unloads as usual again."), *NewName);
+    return true;
+}
+
 void UDynamicTimeTableSubsystem::GetAllVanillaStationNames(TArray<FString>& Out) const
 {
     Out.Reset();
