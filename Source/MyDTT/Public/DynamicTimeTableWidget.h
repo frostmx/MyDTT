@@ -11,6 +11,7 @@ class UCheckBox;
 class UComboBoxString;
 class UEditableTextBox;
 class UScrollBox;
+class USizeBox;
 class UProgressBar;
 class UImage;
 class UTexture2D;
@@ -37,6 +38,21 @@ class UTextBlock;
 class UWidgetSwitcher;
 class UDynamicTimeTableRemoteCallObject;
 
+/**
+ * The window's pages, in the order the switcher holds them. Every place that switches on the open
+ * tab names one of these instead of a number: the page index, the tint of the tab button, the
+ * snapshot section asked for and what a refresh redraws all have to agree, and they did so through
+ * four separate literals that a new page would have shifted silently.
+ */
+enum class EDTTTab : int32
+{
+    Groups = 0,
+    Dispatch,
+    Trucks,
+    Settings,
+    Count
+};
+
 UCLASS(NotBlueprintable)
 class MYDTT_API UDynamicTimeTableWidget : public UFGInteractWidget
 {
@@ -58,8 +74,10 @@ public:
     int32 GetRequestedSections() const;
 
 private:
-    // Tabs: 0 groups (editor + booking status), 1 dispatch stations, 2 trucks, 3 settings.
     UPROPERTY() TObjectPtr<UWidgetSwitcher> Pages;
+    /** The window frame, resized from the viewport rather than nailed to one resolution. */
+    UPROPERTY() TObjectPtr<USizeBox> WindowSizeBox;
+    FVector2D AppliedWindowSize = FVector2D::ZeroVector;
     UPROPERTY() TObjectPtr<UButton> GroupsTabButton;
     UPROPERTY() TObjectPtr<UButton> DispatchTabButton;
     UPROPERTY() TObjectPtr<UButton> TrucksTabButton;
@@ -109,7 +127,7 @@ private:
     /** Item icons by descriptor path; a miss is cached too so an unresolvable class is not loaded again every refresh. */
     UPROPERTY() TMap<FSoftObjectPath, TObjectPtr<UTexture2D>> IconCache;
     UTexture2D* IconFor(const TSoftClassPtr<class UFGItemDescriptor>& ItemClass);
-    int32 ActiveTab = 0;
+    EDTTTab ActiveTab = EDTTTab::Groups;
 
     UPROPERTY() TObjectPtr<UScrollBox> GroupScrollBox;
     UPROPERTY() TObjectPtr<UTextBlock> SummaryText;
@@ -152,6 +170,8 @@ private:
     float LocalLiveRefreshAccumulator = 0.0f;
 
     void BuildWidgetTree();
+    /** A share of the viewport within a ceiling; a no-op when the size has not changed. */
+    void ApplyWindowSize();
     void BuildEditorPanel(class UVerticalBox* Main);
     void BuildSettingsPanel(class UVerticalBox* Page);
     /** The server's (or the snapshot's) settings into the controls. */
@@ -160,7 +180,7 @@ private:
     FDTTSettings ViewSettings() const;
     void CloseWindow();
     void RefreshRuntimeDisplay();
-    void SetActiveTab(int32 Tab);
+    void SetActiveTab(EDTTTab Tab);
     void RefreshDispatchDisplay();
     void RefreshTruckDisplay();
     void SyncCards(UScrollBox* Page, TArray<FDTTCardWidgets>& Cards, const TArray<FString>& Keys,

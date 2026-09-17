@@ -111,6 +111,7 @@ void UDynamicTimeTableWidget::NativeConstruct()
         }
     }
     RefreshData();
+    ApplyWindowSize();
     SetActiveTab(ActiveTab);
     if (!IsRemoteClient())
     {
@@ -123,6 +124,10 @@ void UDynamicTimeTableWidget::NativeConstruct()
 void UDynamicTimeTableWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
 {
     Super::NativeTick(MyGeometry, InDeltaTime);
+
+    // Resolution and DPI can change under an open window; ApplyWindowSize returns at once
+    // unless the answer differs, so this is not a relayout every frame.
+    ApplyWindowSize();
 
     // Remote clients are refreshed by the RCO snapshot timer. Standalone and
     // listen-host widgets poll only their existing runtime text/color widgets.
@@ -239,13 +244,13 @@ void UDynamicTimeTableWidget::RefreshData()
     RebuildRuntimeDisplay();
     RefreshEditorControls();
     RefreshSettingsControls(false);
-    if (ActiveTab != 0) RefreshRuntimeDisplay();
+    if (ActiveTab != EDTTTab::Groups) RefreshRuntimeDisplay();
 }
 void UDynamicTimeTableWidget::RefreshRuntimeDisplay()
 {
-    if (ActiveTab == 1) { RefreshDispatchDisplay(); return; }
-    if (ActiveTab == 2) { RefreshTruckDisplay(); return; }
-    if (ActiveTab == 3) return;
+    if (ActiveTab == EDTTTab::Dispatch) { RefreshDispatchDisplay(); return; }
+    if (ActiveTab == EDTTTab::Trucks) { RefreshTruckDisplay(); return; }
+    if (ActiveTab == EDTTTab::Settings) return;
     if (!GroupScrollBox) return;
 
     if (!RuntimeLayoutMatches())
@@ -267,33 +272,33 @@ int32 UDynamicTimeTableWidget::GetRequestedSections() const
 {
     switch (ActiveTab)
     {
-    case 1: return EDTTSnapshotSection::Dispatch;
-    case 2: return EDTTSnapshotSection::Trucks;
+    case EDTTTab::Dispatch: return EDTTSnapshotSection::Dispatch;
+    case EDTTTab::Trucks: return EDTTSnapshotSection::Trucks;
     default: return EDTTSnapshotSection::Groups;
     }
 }
 
-void UDynamicTimeTableWidget::SetActiveTab(int32 Tab)
+void UDynamicTimeTableWidget::SetActiveTab(EDTTTab Tab)
 {
-    ActiveTab = FMath::Clamp(Tab, 0, 3);
-    if (Pages) Pages->SetActiveWidgetIndex(ActiveTab);
+    ActiveTab = (Tab >= EDTTTab::Groups && Tab < EDTTTab::Count) ? Tab : EDTTTab::Groups;
+    if (Pages) Pages->SetActiveWidgetIndex(static_cast<int32>(ActiveTab));
     const FLinearColor Active(0.2f, 0.8f, 1.0f, 1.0f);
     const FLinearColor Inactive(0.55f, 0.6f, 0.65f, 1.0f);
-    if (GroupsTabButton) GroupsTabButton->SetBackgroundColor(ActiveTab == 0 ? Active : Inactive);
-    if (DispatchTabButton) DispatchTabButton->SetBackgroundColor(ActiveTab == 1 ? Active : Inactive);
-    if (TrucksTabButton) TrucksTabButton->SetBackgroundColor(ActiveTab == 2 ? Active : Inactive);
-    if (SettingsTabButton) SettingsTabButton->SetBackgroundColor(ActiveTab == 3 ? Active : Inactive);
+    if (GroupsTabButton) GroupsTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Groups ? Active : Inactive);
+    if (DispatchTabButton) DispatchTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Dispatch ? Active : Inactive);
+    if (TrucksTabButton) TrucksTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Trucks ? Active : Inactive);
+    if (SettingsTabButton) SettingsTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Settings ? Active : Inactive);
     // Recalculate rebuilds the group bookings of the balancer, which only the Groups tab shows.
-    if (RecalculateButton) RecalculateButton->SetVisibility(ActiveTab == 0 ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    if (RecalculateButton) RecalculateButton->SetVisibility(ActiveTab == EDTTTab::Groups ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
     // A remote client shows the last snapshot of this section until the next one arrives; ask now
     // rather than at the next 1.5 s tick.
     if (IsRemoteClient() && RemoteCallObject) RemoteCallObject->RequestSnapshot(GetRequestedSections());
     RefreshRuntimeDisplay();
 }
 
-void UDynamicTimeTableWidget::HandleGroupsTabClicked() { SetActiveTab(0); }
-void UDynamicTimeTableWidget::HandleDispatchTabClicked() { SetActiveTab(1); }
-void UDynamicTimeTableWidget::HandleTrucksTabClicked() { SetActiveTab(2); }
+void UDynamicTimeTableWidget::HandleGroupsTabClicked() { SetActiveTab(EDTTTab::Groups); }
+void UDynamicTimeTableWidget::HandleDispatchTabClicked() { SetActiveTab(EDTTTab::Dispatch); }
+void UDynamicTimeTableWidget::HandleTrucksTabClicked() { SetActiveTab(EDTTTab::Trucks); }
 
 UTexture2D* UDynamicTimeTableWidget::IconFor(const TSoftClassPtr<UFGItemDescriptor>& ItemClass)
 {
@@ -311,39 +316,64 @@ void UDynamicTimeTableWidget::SyncCards(UScrollBox* Page, TArray<FDTTCardWidgets
     TFunctionRef<void(int32, FDTTCardSink&)> Fill)
 {
     if (!Page) return;
+
+    // Cards are claimed by key, not by position. Matching by position meant one dock appearing in
+    // the middle of the page put every later key against the wrong card and rebuilt the whole tail;
+    // the keys carry a guid, so a map of them is enough to move the survivors into place instead.
+    TMap<FString, int32> Surviving;
+    Surviving.Reserve(Cards.Num());
+    for (int32 Index = 0; Index < Cards.Num(); ++Index)
+    {
+        if (Cards[Index].Root && !Cards[Index].Key.IsEmpty()) Surviving.Add(Cards[Index].Key, Index);
+    }
+
+    TArray<FDTTCardWidgets> Next;
+    Next.SetNum(Keys.Num());
+    TBitArray<> Claimed(false, Cards.Num());
+
     for (int32 Index = 0; Index < Keys.Num(); ++Index)
     {
-        if (Cards.IsValidIndex(Index) && Cards[Index].Root && Cards[Index].Key == Keys[Index])
+        if (const int32* Found = Surviving.Find(Keys[Index]))
         {
-            FDTTCardSink Sink(WidgetTree, false, Cards[Index]);
+            Claimed[*Found] = true;
+            Next[Index] = MoveTemp(Cards[*Found]);
+            FDTTCardSink Sink(WidgetTree, false, Next[Index]);
             Fill(Index, Sink);
             // The shape changed without the key noticing: rebuild this card on the next refresh.
-            if (Sink.Overran()) Cards[Index].Key.Reset();
+            // Say so, because such a card then rebuilds every 1.5 s for as long as the window is
+            // open, which looks from the outside like the page flickering and left no trace at all.
+            if (Sink.Overran())
+            {
+                UE_LOG(LogDynamicTimeTableWidget, Warning,
+                    TEXT("CARD_OVERRAN Index=%d Key=%s Texts=%d/%d Borders=%d/%d Bars=%d/%d Images=%d/%d"),
+                    Index, *Keys[Index],
+                    Sink.TextIndex, Next[Index].Texts.Num(), Sink.BorderIndex, Next[Index].Borders.Num(),
+                    Sink.BarIndex, Next[Index].Bars.Num(), Sink.ImageIndex, Next[Index].Images.Num());
+                Next[Index].Key.Reset();
+            }
             continue;
         }
-        FDTTCardWidgets Fresh;
-        Fresh.Key = Keys[Index];
-        FDTTCardSink Sink(WidgetTree, true, Fresh);
+        Next[Index].Key = Keys[Index];
+        FDTTCardSink Sink(WidgetTree, true, Next[Index]);
         Fill(Index, Sink);
         UE_LOG(LogDynamicTimeTableWidget, Verbose, TEXT("CARD_BUILT Index=%d Key=%s"), Index, *Keys[Index]);
-        if (Cards.IsValidIndex(Index))
-        {
-            if (Cards[Index].Root) Page->RemoveChild(Cards[Index].Root);
-            Cards[Index] = MoveTemp(Fresh);
-        }
-        else
-        {
-            Cards.Add(MoveTemp(Fresh));
-        }
-        if (Cards[Index].Root)
-        {
-            Page->InsertChildAt(Index, Cards[Index].Root);
-            FDTTCardSink::Pad<UScrollBoxSlot>(Cards[Index].Root, FMargin(4, 3));
-        }
     }
-    while (Cards.Num() > Keys.Num())
+
+    for (int32 Index = 0; Index < Cards.Num(); ++Index)
     {
-        if (Cards.Last().Root) Page->RemoveChild(Cards.Last().Root);
-        Cards.Pop();
+        if (!Claimed[Index] && Cards[Index].Root) Page->RemoveChild(Cards[Index].Root);
+    }
+    Cards = MoveTemp(Next);
+
+    // Left to right: everything before Index already sits where it belongs, so pulling a card out
+    // of a later slot and inserting it here cannot disturb them. InsertChildAt makes a slot rather
+    // than moving one, hence the removal first and the padding again after.
+    for (int32 Index = 0; Index < Cards.Num(); ++Index)
+    {
+        UWidget* Root = Cards[Index].Root;
+        if (!Root || Page->GetChildIndex(Root) == Index) continue;
+        Page->RemoveChild(Root);
+        Page->InsertChildAt(Index, Root);
+        FDTTCardSink::Pad<UScrollBoxSlot>(Root, FMargin(4, 3));
     }
 }

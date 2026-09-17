@@ -10,10 +10,31 @@
 #include "Components/ScrollBoxSlot.h"
 #include "Components/SpinBox.h"
 #include "Components/WidgetSwitcher.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
 #include "Components/EditableTextBox.h"
 #include "Components/ScrollBox.h"
 
 using namespace DTTUI;
+
+void UDynamicTimeTableWidget::ApplyWindowSize()
+{
+    if (!WindowSizeBox) return;
+    // GetViewportSize reports pixels while the SizeBox override is in slate units: without the
+    // scale division the window comes out half again as large on a 4K screen at 150 %.
+    const float Scale = FMath::Max(UWidgetLayoutLibrary::GetViewportScale(this), 0.01f);
+    const FVector2D Viewport = UWidgetLayoutLibrary::GetViewportSize(this) / Scale;
+    // A share of what the player has, within a ceiling the columns were laid out for, and never
+    // wider than the viewport itself on a screen smaller than the floor.
+    const FVector2D Want(
+        FMath::Min(FMath::Clamp(Viewport.X * 0.85f, 1120.0f, 1600.0f), Viewport.X),
+        FMath::Min(FMath::Clamp(Viewport.Y * 0.85f, 820.0f, 1000.0f), Viewport.Y));
+    if (Want.Equals(AppliedWindowSize, 1.0f)) return;
+    AppliedWindowSize = Want;
+    WindowSizeBox->SetWidthOverride(Want.X);
+    WindowSizeBox->SetHeightOverride(Want.Y);
+    // The canvas slot, not the override, is what the panel allots; both have to agree.
+    if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(WindowSizeBox->Slot)) CanvasSlot->SetSize(Want);
+}
 
 void UDynamicTimeTableWidget::BuildWidgetTree()
 {
@@ -25,15 +46,14 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     UCanvasPanelSlot* DimmerSlot = Root->AddChildToCanvas(Dimmer);
     DimmerSlot->SetAnchors(FAnchors(0,0,1,1)); DimmerSlot->SetOffsets(FMargin(0));
 
-    USizeBox* WindowSize = WidgetTree->ConstructWidget<USizeBox>();
-    WindowSize->SetWidthOverride(1120); WindowSize->SetHeightOverride(820);
-    UCanvasPanelSlot* WindowSlot = Root->AddChildToCanvas(WindowSize);
+    WindowSizeBox = WidgetTree->ConstructWidget<USizeBox>();
+    UCanvasPanelSlot* WindowSlot = Root->AddChildToCanvas(WindowSizeBox);
     WindowSlot->SetAnchors(FAnchors(0.5f)); WindowSlot->SetAlignment(FVector2D(0.5f));
-    WindowSlot->SetSize(FVector2D(1120,820));
+    ApplyWindowSize();
 
     UBorder* WindowBorder = WidgetTree->ConstructWidget<UBorder>();
     WindowBorder->SetBrushColor(FLinearColor(0.035f,0.055f,0.07f,0.98f));
-    WindowBorder->SetPadding(FMargin(22)); WindowSize->SetContent(WindowBorder);
+    WindowBorder->SetPadding(FMargin(22)); WindowSizeBox->SetContent(WindowBorder);
     UVerticalBox* Main = WidgetTree->ConstructWidget<UVerticalBox>(); WindowBorder->SetContent(Main);
 
     UHorizontalBox* Header = WidgetTree->ConstructWidget<UHorizontalBox>();
@@ -70,7 +90,7 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     UVerticalBox* SettingsPage = WidgetTree->ConstructWidget<UVerticalBox>();
     Pages->AddChild(SettingsPage);
     BuildSettingsPanel(SettingsPage);
-    Pages->SetActiveWidgetIndex(0);
+    Pages->SetActiveWidgetIndex(static_cast<int32>(EDTTTab::Groups));
 
     UHorizontalBox* Footer = WidgetTree->ConstructWidget<UHorizontalBox>();
     Main->AddChildToVerticalBox(Footer)->SetHorizontalAlignment(HAlign_Right);
@@ -326,7 +346,7 @@ FDTTSettings UDynamicTimeTableWidget::ReadSettingsControls() const
 void UDynamicTimeTableWidget::HandleSettingSpinChanged(float) { if (!bRefreshingControls) bSettingsEdited = true; }
 void UDynamicTimeTableWidget::HandleSettingCheckChanged(bool) { if (!bRefreshingControls) bSettingsEdited = true; }
 void UDynamicTimeTableWidget::HandleSettingComboChanged(FString, ESelectInfo::Type) { if (!bRefreshingControls) bSettingsEdited = true; }
-void UDynamicTimeTableWidget::HandleSettingsTabClicked() { SetActiveTab(3); RefreshSettingsControls(true); }
+void UDynamicTimeTableWidget::HandleSettingsTabClicked() { SetActiveTab(EDTTTab::Settings); RefreshSettingsControls(true); }
 void UDynamicTimeTableWidget::HandleSettingsSaveClicked()
 {
     const FDTTSettings V = ReadSettingsControls();
