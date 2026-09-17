@@ -18,7 +18,7 @@ USTRUCT(BlueprintType)
 struct FDTTClientSnapshot
 {
     GENERATED_BODY()
-    UPROPERTY(BlueprintReadOnly) int32 ProtocolVersion = 13;
+    UPROPERTY(BlueprintReadOnly) int32 ProtocolVersion = 14;
     UPROPERTY(BlueprintReadOnly) int32 Revision = 0;
     // EDTTSnapshotSection bits this snapshot carries; the client keeps the other sections it has.
     UPROPERTY(BlueprintReadOnly) int32 Sections = 0;
@@ -48,7 +48,8 @@ public:
     // 11: stay-until-empty and the two fuel margins in the settings.
     // 12: the auto-name switch and its four tunables in the settings.
     // 13: the naming language in the settings.
-    static constexpr int32 ProtocolVersion = 13;
+    // 14: a station's "=" marker can be set from the station's own window.
+    static constexpr int32 ProtocolVersion = 14;
     // A section is cut here so that the whole snapshot stays well under the 64 KB reliable bunch.
     static constexpr int32 MaxSnapshotRows = 400;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -64,6 +65,13 @@ public:
     void RequestSetTargetSlots(FGuid GroupId, const FString& StationName, int32 TargetSlots);
     void RequestRecalculate();
     void RequestSetSettings(const FDTTSettings& Settings);
+    /**
+     * The "=" marker of one docking station, from the button this mod puts in that station's own
+     * window. The station is passed as the actor: the player is standing in front of it, so it is
+     * replicated to them. Nothing comes back but the usual operation result - the marker lives in
+     * the station's name, which the game replicates by itself, so the client reads it from there.
+     */
+    void RequestSetStationStay(class AFGBuildableDockingStation* Station, bool bOn);
     UFUNCTION(Client, Reliable)
     void Client_OpenWindow();
 private:
@@ -78,6 +86,7 @@ private:
     UFUNCTION(Server, Reliable) void Server_SetTargetSlots(FGuid GroupId, const FString& StationName, int32 TargetSlots, int32 ClientProtocol);
     UFUNCTION(Server, Reliable) void Server_Recalculate(int32 ClientProtocol);
     UFUNCTION(Server, Reliable) void Server_SetSettings(const FDTTSettings& Settings, int32 ClientProtocol);
+    UFUNCTION(Server, Reliable) void Server_SetStationStay(class AFGBuildableDockingStation* Station, bool bOn, int32 ClientProtocol);
     UFUNCTION(Client, Reliable) void Client_ReceiveSnapshot(const FDTTClientSnapshot& Snapshot);
     UFUNCTION(Client, Reliable) void Client_OperationResult(bool bSuccess, const FString& Message);
     bool Check(int32 ClientProtocol);
