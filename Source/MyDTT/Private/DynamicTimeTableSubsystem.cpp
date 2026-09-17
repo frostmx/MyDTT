@@ -3,6 +3,7 @@
 #include "DTTAutoName.h"
 #include "DTTCargoPaint.h"
 #include "DTTSaveDataActor.h"
+#include "DTTStationWindow.h"
 #include "DynamicTimeTableChatCommand.h"
 #include "MyDTTHooks.h"
 #include "Command/ChatCommandLibrary.h"
@@ -1429,6 +1430,7 @@ void UDynamicTimeTableSubsystem::Deinitialize()
     if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().ClearTimer(TruckPollTimerHandle);
+        World->GetTimerManager().ClearTimer(StationWindowTimerHandle);
     }
     bWorldStationsReady = false;
     StationGroups.Reset();
@@ -1457,6 +1459,9 @@ void UDynamicTimeTableSubsystem::OnWorldBeginPlay(UWorld& InWorld)
     {
         InitializePersistence();
         RegisterDTTChatCommand();
+        // Wherever there is someone to look at a window: a listen server and a remote client both
+        // have one, a dedicated server has none.
+        StartStationWindowWatch();
     }
 }
 
@@ -3961,6 +3966,20 @@ void UDynamicTimeTableSubsystem::ProcessCurrentTruckTarget(AFGWheeledVehicleIden
             *DTSVehicleName(Vehicle), *Selected->DisplayName, C, Selected->TargetSlots, C > Selected->TargetSlots ? TEXT(" OVERLOAD") : TEXT(""), Trigger);
     }
     OnGroupsChanged.Broadcast(); OnGroupsChangedNative.Broadcast();
+}
+
+void UDynamicTimeTableSubsystem::StartStationWindowWatch()
+{
+    UWorld* World = GetWorld();
+    if (!IsValid(World) || World->GetNetMode() == NM_DedicatedServer) return;
+    World->GetTimerManager().ClearTimer(StationWindowTimerHandle);
+    World->GetTimerManager().SetTimer(StationWindowTimerHandle, this,
+        &UDynamicTimeTableSubsystem::TickStationWindow, 0.3f, true);
+}
+
+void UDynamicTimeTableSubsystem::TickStationWindow()
+{
+    FDTTStationWindow::Tick(GetWorld());
 }
 
 void UDynamicTimeTableSubsystem::StartTruckPolling()

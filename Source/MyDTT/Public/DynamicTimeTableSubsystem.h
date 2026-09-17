@@ -311,6 +311,9 @@ private:
     };
     TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTTruckPollState> TruckPollStates;
     FTimerHandle TruckPollTimerHandle;
+    // Client side only: watches for the game's own docking-station window and puts this mod's
+    // button in it. Slower than a frame and faster than the eye - the window is opened by hand.
+    FTimerHandle StationWindowTimerHandle;
 
     // Resource dispatch (producer/requester). Rebuilt alongside StationGroups in
     // RebuildGroupsFromNames; nothing here is SaveGame, same philosophy as the rest of this mod.
@@ -463,6 +466,9 @@ private:
     void ReleaseTruckBooking(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason);
     void StartTruckPolling();
     void PollTruckStates();
+    /** Nothing but the station-window watch; does not run on a dedicated server. */
+    void StartStationWindowWatch();
+    void TickStationWindow();
     void SchedulePendingRouteReevaluation();
     void ProcessPendingRouteReevaluations();
     void ProcessCurrentTruckTarget(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Trigger);
