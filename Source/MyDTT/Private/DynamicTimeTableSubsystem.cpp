@@ -4707,11 +4707,11 @@ void UDynamicTimeTableSubsystem::TickCargoPaint(AFGWheeledVehicleIdentifier* Veh
         return;
     }
 
-    const FLinearColor Color = FDTTCargoPaint::ColorFor(Cargo);
+    const FDTTCargoColors Colors = FDTTCargoPaint::ColorsFor(Cargo);
     const FFactoryCustomizationData& Current = WheeledVehicle->GetCustomizationData_Native();
     // The 1 Hz poll asks this of every truck: without this test the paint would replicate to every
     // client every second, for every truck in the world.
-    if (FDTTCargoPaint::IsPainted(Current, Color)) return;
+    if (FDTTCargoPaint::IsPainted(Current, Colors)) return;
 
     if (!OriginalTruckPaints.Contains(Vehicle))
     {
@@ -4719,9 +4719,10 @@ void UDynamicTimeTableSubsystem::TickCargoPaint(AFGWheeledVehicleIdentifier* Veh
     }
     // skipCombine: the cargo colour replaces what is there rather than merging into it, or the
     // previous cargo's swatch would keep winning over the override.
-    WheeledVehicle->SetCustomizationData_Native(FDTTCargoPaint::MakePaint(Current, Color), /*skipCombine*/ true);
-    UE_LOG(LogDynamicTimeTableSubsystem, Log, TEXT("CARGO_PAINT Truck='%s' Item='%s' Color=%s"),
-        *DTSVehicleName(Vehicle), *UFGItemDescriptor::GetItemName(Cargo).ToString(), *Color.ToString());
+    WheeledVehicle->SetCustomizationData_Native(FDTTCargoPaint::MakePaint(Current, Colors), /*skipCombine*/ true);
+    UE_LOG(LogDynamicTimeTableSubsystem, Log, TEXT("CARGO_PAINT Truck='%s' Item='%s' Primary=%s Secondary=%s"),
+        *DTSVehicleName(Vehicle), *UFGItemDescriptor::GetItemName(Cargo).ToString(),
+        *Colors.Primary.ToString(), *Colors.Secondary.ToString());
 }
 
 void UDynamicTimeTableSubsystem::RestoreTruckPaint(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason)

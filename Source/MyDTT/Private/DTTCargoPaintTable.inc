@@ -2,5 +2,895 @@
 // command writes on a client. One line per vanilla item: the class name and the average colour of
 // its icon. A dedicated server's cook keeps no texture pixels, so the colours cannot be computed
 // where they are used - they are baked here instead. Do not edit by hand; re-bake.
-//
-// DTT_BAKED_COLOR("Desc_OreIron_C", 0.35f, 0.33f, 0.31f)
+
+DTT_BAKED_COLOR("BP_EquipmentDescriptorBeacon_C", 0.4086f, 0.1934f, 0.0816f, 0.1430f, 0.0677f, 0.0286f)  // Beacon
+DTT_BAKED_COLOR("BP_EquipmentDescriptorCup_C", 0.2712f, 0.0878f, 0.0321f, 0.0357f, 0.1726f, 0.2831f)  // Cup
+DTT_BAKED_COLOR("BP_EquipmentDescriptorGasmask_C", 0.4700f, 0.2026f, 0.0679f, 0.1645f, 0.0709f, 0.0238f)  // Gas Mask
+DTT_BAKED_COLOR("BP_EquipmentDescriptorHazmatSuit_C", 0.6016f, 0.4720f, 0.1877f, 0.2106f, 0.1652f, 0.0657f)  // Hazmat Suit
+DTT_BAKED_COLOR("BP_EquipmentDescriptorJetPack_C", 0.4258f, 0.2485f, 0.1123f, 0.1490f, 0.0870f, 0.0393f)  // Jetpack
+DTT_BAKED_COLOR("BP_EquipmentDescriptorNobeliskDetonator_C", 0.5627f, 0.4332f, 0.0208f, 0.1969f, 0.1516f, 0.0073f)  // Nobelisk Detonator
+DTT_BAKED_COLOR("BP_EquipmentDescriptorObjectScanner_C", 0.5515f, 0.2256f, 0.0390f, 0.1930f, 0.0790f, 0.0137f)  // Object Scanner
+DTT_BAKED_COLOR("BP_EquipmentDescriptorRifleMk2_C", 0.7331f, 0.4833f, 0.1002f, 0.2566f, 0.1692f, 0.0351f)  // Rifle Mk.2
+DTT_BAKED_COLOR("BP_EquipmentDescriptorRifle_C", 0.7331f, 0.4833f, 0.1002f, 0.2566f, 0.1692f, 0.0351f)  // Rifle
+DTT_BAKED_COLOR("BP_ItemDescriptorPortableMiner_C", 0.2474f, 0.0920f, 0.0444f, 0.0866f, 0.0322f, 0.0155f)  // Portable Miner
+DTT_BAKED_COLOR("BP_OS_RF_C", 0.2162f, 0.4111f, 0.4774f, 0.0757f, 0.1439f, 0.1671f)  // Remote Factory Handheld
+DTT_BAKED_COLOR("Desc_AlienDNACapsule_C", 0.0541f, 0.1079f, 0.3374f, 0.0189f, 0.0378f, 0.1181f)  // Alien DNA Capsule
+DTT_BAKED_COLOR("Desc_AlienFuel_C", 0.4498f, 0.2047f, 0.0806f, 0.1574f, 0.0716f, 0.0282f)  // ALIEN FUEL
+DTT_BAKED_COLOR("Desc_AlienPowerBuilding_C", 0.6855f, 0.3734f, 0.1201f, 0.2399f, 0.1307f, 0.0420f)  // Alien Power Augmenter
+DTT_BAKED_COLOR("Desc_AlienPowerFuel_C", 0.1376f, 0.1175f, 0.1990f, 0.6583f, 0.3771f, 0.3070f)  // Alien Power Matrix
+DTT_BAKED_COLOR("Desc_AlienPowerShard_C", 0.6155f, 0.2602f, 0.0759f, 0.2154f, 0.0911f, 0.0266f)  // Alien Power Shard
+DTT_BAKED_COLOR("Desc_AlienProtein_C", 0.1043f, 0.0494f, 0.1285f, 0.7902f, 0.4282f, 0.1384f)  // Alien Protein
+DTT_BAKED_COLOR("Desc_AluminaSolution_C", 0.3849f, 0.1645f, 0.0626f, 0.1347f, 0.0576f, 0.0219f)  // Alumina Solution
+DTT_BAKED_COLOR("Desc_AluminumCasing_C", 0.2735f, 0.3110f, 0.4208f, 0.0957f, 0.1088f, 0.1473f)  // Aluminum Casing
+DTT_BAKED_COLOR("Desc_AluminumIngot_C", 0.2571f, 0.2961f, 0.3956f, 0.2403f, 0.3697f, 0.2431f)  // Aluminum Ingot
+DTT_BAKED_COLOR("Desc_AluminumPlateReinforced_C", 0.2847f, 0.1884f, 0.1439f, 0.2116f, 0.3256f, 0.2131f)  // Heat Sink
+DTT_BAKED_COLOR("Desc_AluminumPlate_C", 0.3132f, 0.3636f, 0.4818f, 0.2770f, 0.2526f, 0.1801f)  // Alclad Aluminum Sheet
+DTT_BAKED_COLOR("Desc_AluminumScrap_C", 0.3825f, 0.1609f, 0.0199f, 0.1339f, 0.0563f, 0.0069f)  // Aluminum Scrap
+DTT_BAKED_COLOR("Desc_AnyUndefined_C", 0.8500f, 0.5525f, 0.5525f, 0.2975f, 0.1934f, 0.1934f)  // Any Undefined
+DTT_BAKED_COLOR("Desc_AssemblerMk1_C", 0.3171f, 0.1479f, 0.0774f, 0.1291f, 0.1442f, 0.1986f)  // Assembler
+DTT_BAKED_COLOR("Desc_Barrier_Corner_C", 0.4565f, 0.2098f, 0.0790f, 0.1598f, 0.0734f, 0.0276f)  // Corner Road Barrier
+DTT_BAKED_COLOR("Desc_Barrier_Low_01_C", 0.7506f, 0.5254f, 0.2878f, 0.2627f, 0.1839f, 0.1007f)  // Low Barrier
+DTT_BAKED_COLOR("Desc_Barrier_Tall_01_C", 0.6701f, 0.4728f, 0.2641f, 0.2345f, 0.1655f, 0.0924f)  // High Barrier
+DTT_BAKED_COLOR("Desc_Battery_C", 0.2130f, 0.2375f, 0.3650f, 0.4936f, 0.4378f, 0.0393f)  // Battery
+DTT_BAKED_COLOR("Desc_Beam_C", 0.0746f, 0.0941f, 0.1200f, 0.0261f, 0.0329f, 0.0420f)  // Metal Beam
+DTT_BAKED_COLOR("Desc_Beam_Cable_C", 0.0780f, 0.0875f, 0.1200f, 0.1427f, 0.1035f, 0.1592f)  // Braided Cable
+DTT_BAKED_COLOR("Desc_Beam_Cable_Cluster_C", 0.0867f, 0.1004f, 0.1334f, 0.0304f, 0.0352f, 0.0467f)  // Braided Cable Cluster
+DTT_BAKED_COLOR("Desc_Beam_Concrete_C", 0.3378f, 0.2195f, 0.2486f, 0.1182f, 0.0768f, 0.0870f)  // Round Concrete Beam
+DTT_BAKED_COLOR("Desc_Beam_Connector_C", 0.0895f, 0.0780f, 0.1200f, 0.1440f, 0.0936f, 0.1324f)  // Beam Connector
+DTT_BAKED_COLOR("Desc_Beam_Connector_Double_C", 0.0882f, 0.0780f, 0.1200f, 0.1619f, 0.1052f, 0.1619f)  // Double Beam Connector
+DTT_BAKED_COLOR("Desc_Beam_Cross_C", 0.7517f, 0.3113f, 0.0918f, 0.2631f, 0.1089f, 0.0321f)  // Cross Beam
+DTT_BAKED_COLOR("Desc_Beam_H_C", 0.6184f, 0.2341f, 0.0699f, 0.2165f, 0.0819f, 0.0245f)  // H-Beam
+DTT_BAKED_COLOR("Desc_Beam_Painted_C", 0.6099f, 0.2617f, 0.0708f, 0.2134f, 0.0916f, 0.0248f)  // Painted Beam
+DTT_BAKED_COLOR("Desc_Beam_Prototype_01_C", 0.7517f, 0.3113f, 0.0918f, 0.2631f, 0.1089f, 0.0321f)  // Beam Prototype 1
+DTT_BAKED_COLOR("Desc_Beam_Shelf_C", 0.6451f, 0.2467f, 0.0717f, 0.2258f, 0.0863f, 0.0251f)  // Shelf Beam
+DTT_BAKED_COLOR("Desc_Beam_Support_C", 0.4242f, 0.1724f, 0.0802f, 0.1485f, 0.0604f, 0.0281f)  // Beam Support
+DTT_BAKED_COLOR("Desc_BerryBush_C", 0.7727f, 0.1585f, 0.1090f, 0.2704f, 0.0555f, 0.0381f)  // Berry Bush Plant
+DTT_BAKED_COLOR("Desc_Berry_C", 0.7727f, 0.1585f, 0.1090f, 0.2704f, 0.0555f, 0.0381f)  // Paleberry
+DTT_BAKED_COLOR("Desc_BigGarageDoor_16x8_C", 0.5729f, 0.2068f, 0.0357f, 0.2005f, 0.0724f, 0.0125f)  // Roll-Up Gate
+DTT_BAKED_COLOR("Desc_BigGarageDoor_16x8_Concrete_C", 0.1676f, 0.1238f, 0.0634f, 0.0789f, 0.0781f, 0.1201f)  // Roll-Up Gate
+DTT_BAKED_COLOR("Desc_BigGarageDoor_16x8_Steel_C", 0.1468f, 0.1037f, 0.0420f, 0.0788f, 0.0780f, 0.1200f)  // Roll-Up Gate
+DTT_BAKED_COLOR("Desc_Biofuel_C", 0.2131f, 0.1589f, 0.1323f, 0.0746f, 0.0556f, 0.0463f)  // Solid Biofuel
+DTT_BAKED_COLOR("Desc_Blender_C", 0.4584f, 0.2199f, 0.0639f, 0.1604f, 0.0770f, 0.0224f)  // Blender
+DTT_BAKED_COLOR("Desc_BlueprintDesigner_C", 0.0564f, 0.0801f, 0.1361f, 0.0197f, 0.0281f, 0.0476f)  // Blueprint Designer Mk.1
+DTT_BAKED_COLOR("Desc_BlueprintDesigner_MK2_C", 0.0538f, 0.0817f, 0.1463f, 0.0188f, 0.0286f, 0.0512f)  // Blueprint Designer Mk.2
+DTT_BAKED_COLOR("Desc_BlueprintDesigner_MK3_C", 0.0498f, 0.0765f, 0.1370f, 0.0174f, 0.0268f, 0.0480f)  // Blueprint Designer Mk.3
+DTT_BAKED_COLOR("Desc_Blueprint_C", 0.8500f, 0.5525f, 0.5525f, 0.2975f, 0.1934f, 0.1934f)  // Factory Blueprint
+DTT_BAKED_COLOR("Desc_BoomBox_C", 0.5477f, 0.2712f, 0.0750f, 0.1917f, 0.0949f, 0.0262f)  // Boombox
+DTT_BAKED_COLOR("Desc_Cable_C", 0.1273f, 0.1491f, 0.2257f, 0.1523f, 0.1372f, 0.0990f)  // Cable
+DTT_BAKED_COLOR("Desc_Camera_C", 0.4557f, 0.1928f, 0.1437f, 0.1595f, 0.0675f, 0.0503f)  // AWESOME Camera
+DTT_BAKED_COLOR("Desc_CandyCaneDecor_C", 0.4155f, 0.0221f, 0.0265f, 0.1454f, 0.0077f, 0.0093f)  // FICSMAS Candy Cane
+DTT_BAKED_COLOR("Desc_CandyCane_C", 0.8500f, 0.1171f, 0.1287f, 0.2975f, 0.0410f, 0.0450f)  // Candy Cane
+DTT_BAKED_COLOR("Desc_CartridgeChaos_C", 0.4248f, 0.0358f, 0.0445f, 0.1487f, 0.0125f, 0.0156f)  // Turbo Rifle Ammo
+DTT_BAKED_COLOR("Desc_CartridgeSmartProjectile_C", 0.1929f, 0.1649f, 0.0560f, 0.0893f, 0.0811f, 0.1248f)  // Homing Rifle Ammo
+DTT_BAKED_COLOR("Desc_CartridgeStandard_C", 0.4670f, 0.1323f, 0.0294f, 0.1634f, 0.0463f, 0.0103f)  // Rifle Ammo
+DTT_BAKED_COLOR("Desc_CatwalkCross_C", 0.3098f, 0.3282f, 0.4766f, 0.1084f, 0.1149f, 0.1668f)  // Catwalk Intersection
+DTT_BAKED_COLOR("Desc_CatwalkRamp_C", 0.3965f, 0.1796f, 0.0762f, 0.2121f, 0.2399f, 0.3465f)  // Catwalk Ramp
+DTT_BAKED_COLOR("Desc_CatwalkStairs_C", 0.3693f, 0.1831f, 0.0964f, 0.1293f, 0.0641f, 0.0337f)  // Catwalk Stairs
+DTT_BAKED_COLOR("Desc_CatwalkStraight_C", 0.4915f, 0.2583f, 0.1436f, 0.1720f, 0.0904f, 0.0503f)  // Straight Catwalk
+DTT_BAKED_COLOR("Desc_CatwalkT_C", 0.4957f, 0.2469f, 0.1066f, 0.3105f, 0.3261f, 0.4777f)  // Catwalk T-Junction
+DTT_BAKED_COLOR("Desc_CatwalkTurn_C", 0.4281f, 0.2279f, 0.1179f, 0.2749f, 0.2924f, 0.4230f)  // Catwalk Corner
+DTT_BAKED_COLOR("Desc_CeilingLight_C", 0.2011f, 0.2348f, 0.3094f, 0.0704f, 0.0822f, 0.1083f)  // Ceiling Light
+DTT_BAKED_COLOR("Desc_Cement_C", 0.2634f, 0.2041f, 0.1620f, 0.0922f, 0.0714f, 0.0567f)  // Concrete
+DTT_BAKED_COLOR("Desc_CentralStorage_C", 0.3332f, 0.1894f, 0.0680f, 0.2892f, 0.1548f, 0.2653f)  // Dimensional Depot Uploader
+DTT_BAKED_COLOR("Desc_ChainLinkFence_C", 0.8480f, 0.5666f, 0.2695f, 0.2968f, 0.1983f, 0.0943f)  // Construction Fence
+DTT_BAKED_COLOR("Desc_Chainsaw_C", 0.2997f, 0.1214f, 0.0390f, 0.1049f, 0.0425f, 0.0136f)  // Chainsaw
+DTT_BAKED_COLOR("Desc_CharacterClap_Statue_C", 0.0584f, 0.0655f, 0.1335f, 0.1200f, 0.0792f, 0.0732f)  // Pretty Good pioneering Statue
+DTT_BAKED_COLOR("Desc_CharacterRunStatue_C", 0.1440f, 0.0604f, 0.0422f, 0.0504f, 0.0212f, 0.0148f)  // Adequate pioneering Statue
+DTT_BAKED_COLOR("Desc_CharacterSpin_Statue_C", 0.1541f, 0.0758f, 0.0266f, 0.0539f, 0.0265f, 0.0093f)  // Satisfactory pioneering Statue
+DTT_BAKED_COLOR("Desc_CheatTrainTeleportStation_C", 0.3894f, 0.1986f, 0.1097f, 0.1354f, 0.1516f, 0.2120f)  // Cheat Train Teleport Station
+DTT_BAKED_COLOR("Desc_CircuitBoardHighSpeed_C", 0.3233f, 0.2280f, 0.0050f, 0.0789f, 0.1768f, 0.1669f)  // AI Limiter
+DTT_BAKED_COLOR("Desc_CircuitBoard_C", 0.7310f, 0.3549f, 0.0957f, 0.0570f, 0.1321f, 0.0607f)  // Circuit Board
+DTT_BAKED_COLOR("Desc_Coal_C", 0.0761f, 0.0863f, 0.1200f, 0.0266f, 0.0302f, 0.0420f)  // Coal ping=0.048/0.048/0.048
+DTT_BAKED_COLOR("Desc_CompactedCoal_C", 0.0780f, 0.0839f, 0.1200f, 0.0273f, 0.0294f, 0.0420f)  // Compacted Coal
+DTT_BAKED_COLOR("Desc_ComputerQuantum_C", 0.5687f, 0.3322f, 0.1564f, 0.1990f, 0.1163f, 0.0547f)  // Quantum Computer
+DTT_BAKED_COLOR("Desc_ComputerSuper_C", 0.5687f, 0.3322f, 0.1564f, 0.1990f, 0.1163f, 0.0547f)  // Supercomputer
+DTT_BAKED_COLOR("Desc_Computer_C", 0.4640f, 0.2460f, 0.1017f, 0.1624f, 0.0861f, 0.0356f)  // Computer
+DTT_BAKED_COLOR("Desc_ConcreteConcaveRoundFoundation_8x1_C", 0.3854f, 0.2505f, 0.3854f, 0.3199f, 0.2849f, 0.4383f)  // Rounded Concave Foundation 1m
+DTT_BAKED_COLOR("Desc_Concrete_Barrier_01_C", 0.7427f, 0.5589f, 0.1897f, 0.2599f, 0.1956f, 0.0664f)  // Road Barrier
+DTT_BAKED_COLOR("Desc_ConstructorMk1_C", 0.4676f, 0.2375f, 0.1151f, 0.1637f, 0.0831f, 0.0403f)  // Constructor
+DTT_BAKED_COLOR("Desc_Converter_C", 0.5967f, 0.2812f, 0.0709f, 0.1040f, 0.1116f, 0.2007f)  // Converter
+DTT_BAKED_COLOR("Desc_ConveyorAttachmentMergerLift_C", 0.3012f, 0.1399f, 0.0576f, 0.1054f, 0.0490f, 0.0202f)  // Conveyor Merger
+DTT_BAKED_COLOR("Desc_ConveyorAttachmentMergerPriorityLift_C", 0.3012f, 0.1399f, 0.0576f, 0.1054f, 0.0490f, 0.0202f)  // Priority Merger
+DTT_BAKED_COLOR("Desc_ConveyorAttachmentMergerPriority_C", 0.3498f, 0.1573f, 0.0387f, 0.1224f, 0.0551f, 0.0135f)  // Priority Merger
+DTT_BAKED_COLOR("Desc_ConveyorAttachmentMerger_C", 0.3012f, 0.1399f, 0.0576f, 0.1054f, 0.0490f, 0.0202f)  // Conveyor Merger
+DTT_BAKED_COLOR("Desc_ConveyorAttachmentSplitterLift_C", 0.4357f, 0.2208f, 0.1257f, 0.2932f, 0.3357f, 0.4511f)  // Conveyor Splitter
+DTT_BAKED_COLOR("Desc_ConveyorAttachmentSplitterProgrammableLift_C", 0.4371f, 0.2146f, 0.1105f, 0.2060f, 0.2333f, 0.3169f)  // Programmable Splitter
+DTT_BAKED_COLOR("Desc_ConveyorAttachmentSplitterProgrammable_C", 0.4371f, 0.2146f, 0.1105f, 0.2060f, 0.2333f, 0.3169f)  // Programmable Splitter
+DTT_BAKED_COLOR("Desc_ConveyorAttachmentSplitterSmartLift_C", 0.3535f, 0.1713f, 0.0908f, 0.1237f, 0.0600f, 0.0318f)  // Smart Splitter
+DTT_BAKED_COLOR("Desc_ConveyorAttachmentSplitterSmart_C", 0.3535f, 0.1713f, 0.0908f, 0.1237f, 0.0600f, 0.0318f)  // Smart Splitter
+DTT_BAKED_COLOR("Desc_ConveyorAttachmentSplitter_C", 0.4357f, 0.2208f, 0.1257f, 0.2932f, 0.3357f, 0.4511f)  // Conveyor Splitter
+DTT_BAKED_COLOR("Desc_ConveyorBeltMk1_C", 0.4070f, 0.2798f, 0.1956f, 0.0830f, 0.0994f, 0.1277f)  // Conveyor Belt Mk.1
+DTT_BAKED_COLOR("Desc_ConveyorBeltMk2_C", 0.4146f, 0.1754f, 0.0615f, 0.1451f, 0.0614f, 0.0215f)  // Conveyor Belt Mk.2
+DTT_BAKED_COLOR("Desc_ConveyorBeltMk3_C", 0.4105f, 0.1756f, 0.0605f, 0.1437f, 0.0615f, 0.0212f)  // Conveyor Belt Mk.3
+DTT_BAKED_COLOR("Desc_ConveyorBeltMk4_C", 0.4122f, 0.1597f, 0.0446f, 0.1443f, 0.0559f, 0.0156f)  // Conveyor Belt Mk.4
+DTT_BAKED_COLOR("Desc_ConveyorBeltMk5_C", 0.4131f, 0.1639f, 0.0486f, 0.1446f, 0.0573f, 0.0170f)  // Conveyor Belt Mk.5
+DTT_BAKED_COLOR("Desc_ConveyorBeltMk6_C", 0.4921f, 0.5489f, 0.7570f, 0.3291f, 0.2085f, 0.1316f)  // Conveyor Belt Mk.6
+DTT_BAKED_COLOR("Desc_ConveyorCeilingAttachment_C", 0.1785f, 0.1348f, 0.0581f, 0.2193f, 0.2556f, 0.3459f)  // Conveyor Ceiling Mount
+DTT_BAKED_COLOR("Desc_ConveyorLiftMk1_C", 0.5647f, 0.3243f, 0.1448f, 0.1977f, 0.1135f, 0.0507f)  // Conveyor Lift Mk.1
+DTT_BAKED_COLOR("Desc_ConveyorLiftMk2_C", 0.5699f, 0.3234f, 0.1411f, 0.1994f, 0.1132f, 0.0494f)  // Conveyor Lift Mk.2
+DTT_BAKED_COLOR("Desc_ConveyorLiftMk3_C", 0.5836f, 0.3307f, 0.1420f, 0.2043f, 0.1157f, 0.0497f)  // Conveyor Lift Mk.3
+DTT_BAKED_COLOR("Desc_ConveyorLiftMk4_C", 0.5963f, 0.3409f, 0.1524f, 0.2087f, 0.1193f, 0.0534f)  // Conveyor Lift Mk.4
+DTT_BAKED_COLOR("Desc_ConveyorLiftMk5_C", 0.6037f, 0.3467f, 0.1529f, 0.2113f, 0.1214f, 0.0535f)  // Conveyor Lift Mk.5
+DTT_BAKED_COLOR("Desc_ConveyorLiftMk6_C", 0.6706f, 0.3847f, 0.1714f, 0.2347f, 0.1346f, 0.0600f)  // Conveyor Lift Mk.6
+DTT_BAKED_COLOR("Desc_ConveyorMonitor_C", 0.4257f, 0.1196f, 0.0354f, 0.1490f, 0.0419f, 0.0124f)  // Conveyor Throughput Monitor
+DTT_BAKED_COLOR("Desc_ConveyorPoleStackable_C", 0.1737f, 0.1875f, 0.2672f, 0.2498f, 0.0918f, 0.0386f)  // Stackable Conveyor Pole
+DTT_BAKED_COLOR("Desc_ConveyorPoleWall_C", 0.2729f, 0.3072f, 0.4199f, 0.4189f, 0.3597f, 0.2007f)  // Conveyor Wall Mount
+DTT_BAKED_COLOR("Desc_ConveyorPole_C", 0.3108f, 0.2402f, 0.0690f, 0.1705f, 0.2310f, 0.2624f)  // Conveyor Pole
+DTT_BAKED_COLOR("Desc_ConveyorWallHole_C", 0.2718f, 0.1955f, 0.0230f, 0.0951f, 0.0684f, 0.0080f)  // Conveyor Wall Hole
+DTT_BAKED_COLOR("Desc_CoolingSystem_C", 0.6256f, 0.3061f, 0.1437f, 0.1234f, 0.1578f, 0.2736f)  // Cooling System
+DTT_BAKED_COLOR("Desc_CopperDust_C", 0.2063f, 0.1015f, 0.1258f, 0.0722f, 0.0355f, 0.0440f)  // Copper Powder
+DTT_BAKED_COLOR("Desc_CopperIngot_C", 0.2861f, 0.1481f, 0.1200f, 0.1001f, 0.0518f, 0.0420f)  // Copper Ingot
+DTT_BAKED_COLOR("Desc_CopperSheet_C", 0.2326f, 0.1197f, 0.0890f, 0.0814f, 0.0419f, 0.0311f)  // Copper Sheet
+DTT_BAKED_COLOR("Desc_CrystalOscillator_C", 0.5726f, 0.3594f, 0.0508f, 0.2004f, 0.1258f, 0.0178f)  // Crystal Oscillator
+DTT_BAKED_COLOR("Desc_CrystalShard_C", 0.6155f, 0.2602f, 0.0759f, 0.2154f, 0.0911f, 0.0266f)  // Power Shard
+DTT_BAKED_COLOR("Desc_Crystal_C", 0.2259f, 0.4929f, 0.6399f, 0.0790f, 0.1725f, 0.2240f)  // Blue Power Slug
+DTT_BAKED_COLOR("Desc_Crystal_mk2_C", 0.7592f, 0.5640f, 0.2330f, 0.2657f, 0.1974f, 0.0815f)  // Yellow Power Slug
+DTT_BAKED_COLOR("Desc_Crystal_mk3_C", 0.5753f, 0.2367f, 0.6843f, 0.2014f, 0.0828f, 0.2395f)  // Purple Power Slug
+DTT_BAKED_COLOR("Desc_CyberWagon_C", 0.5041f, 0.2753f, 0.1577f, 0.0698f, 0.1043f, 0.1256f)  // Cyber Wagon
+DTT_BAKED_COLOR("Desc_DarkEnergy_C", 0.4618f, 0.1784f, 0.0720f, 0.6163f, 0.3010f, 0.5667f)  // Dark Matter Residue
+DTT_BAKED_COLOR("Desc_DarkMatter_C", 0.6715f, 0.3569f, 0.1497f, 0.1741f, 0.0787f, 0.3918f)  // Dark Matter Crystal
+DTT_BAKED_COLOR("Desc_Diamond_C", 0.4976f, 0.2249f, 0.0899f, 0.1742f, 0.0787f, 0.0315f)  // Diamonds
+DTT_BAKED_COLOR("Desc_DissolvedSilica_C", 0.4355f, 0.1560f, 0.0363f, 0.6810f, 0.4427f, 0.6086f)  // Dissolved Silica
+DTT_BAKED_COLOR("Desc_DoggoStatue_C", 0.2403f, 0.1315f, 0.0545f, 0.0841f, 0.0460f, 0.0191f)  // Lizard Doggo Statue
+DTT_BAKED_COLOR("Desc_DownQuarterPipeInCorner_Asphalt_8x4_C", 0.1181f, 0.1129f, 0.1736f, 0.0413f, 0.0395f, 0.0608f)  // Inverted Inner Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_DownQuarterPipeInCorner_ConcretePolished_8x4_C", 0.3298f, 0.2990f, 0.4600f, 0.0817f, 0.1256f, 0.0817f)  // Inverted Inner Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_DownQuarterPipeInCorner_Concrete_8x4_C", 0.5149f, 0.3347f, 0.5149f, 0.3033f, 0.2672f, 0.1971f)  // Inverted Inner Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_DownQuarterPipeInCorner_Grip_8x4_C", 0.2707f, 0.2850f, 0.4165f, 0.0948f, 0.0997f, 0.1458f)  // Inverted Inner Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_DownQuarterPipeOutCorner_Asphalt_8x4_C", 0.1181f, 0.1129f, 0.1737f, 0.0413f, 0.0395f, 0.0608f)  // Inverted Outer Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_DownQuarterPipeOutCorner_ConcretePolished_8x4_C", 0.3232f, 0.3000f, 0.4616f, 0.0780f, 0.1200f, 0.0780f)  // Inverted Outer Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_DownQuarterPipeOutCorner_Concrete_8x4_C", 0.5226f, 0.3397f, 0.5221f, 0.2714f, 0.2425f, 0.1764f)  // Inverted Outer Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_DownQuarterPipeOutCorner_Grip_8x4_C", 0.2554f, 0.2698f, 0.3929f, 0.0894f, 0.0944f, 0.1375f)  // Inverted Outer Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_DownQuarterPipe_Asphalt_8x4_C", 0.1195f, 0.1142f, 0.1757f, 0.0418f, 0.0400f, 0.0615f)  // Inverted Quarter Pipe
+DTT_BAKED_COLOR("Desc_DownQuarterPipe_ConcretePolished_8x4_C", 0.3294f, 0.2989f, 0.4599f, 0.1153f, 0.1046f, 0.1610f)  // Inverted Quarter Pipe
+DTT_BAKED_COLOR("Desc_DownQuarterPipe_Concrete_8x4_C", 0.5264f, 0.3422f, 0.5264f, 0.4110f, 0.3008f, 0.2671f)  // Inverted Quarter Pipe
+DTT_BAKED_COLOR("Desc_DownQuarterPipe_Grip_8x4_C", 0.2601f, 0.2739f, 0.4002f, 0.0910f, 0.0959f, 0.1401f)  // Inverted Quarter Pipe
+DTT_BAKED_COLOR("Desc_DowsingStick_C", 0.8500f, 0.5525f, 0.5525f, 0.2975f, 0.1934f, 0.1934f)  // Dowsing stick
+DTT_BAKED_COLOR("Desc_DroneStation_C", 0.5273f, 0.2610f, 0.1147f, 0.1845f, 0.0913f, 0.0401f)  // Drone Port
+DTT_BAKED_COLOR("Desc_DroneTransport_C", 0.5875f, 0.3370f, 0.1982f, 0.2056f, 0.1179f, 0.0694f)  // Drone
+DTT_BAKED_COLOR("Desc_EfficiencyCheckerPipe_C", 0.8500f, 0.6238f, 0.1591f, 0.2975f, 0.2183f, 0.0557f)  // Efficiency Checker (Pipe)
+DTT_BAKED_COLOR("Desc_EfficiencyCheckerSlim_C", 0.8500f, 0.6340f, 0.1637f, 0.2975f, 0.2219f, 0.0573f)  // Efficiency Checker (Top)
+DTT_BAKED_COLOR("Desc_EfficiencyCheckerWallBellow_C", 0.1578f, 0.1313f, 0.0908f, 0.0552f, 0.0460f, 0.0318f)  // Efficiency Checker (Wall Bellow)
+DTT_BAKED_COLOR("Desc_EfficiencyCheckerWallPipeBellow_C", 0.8334f, 0.5009f, 0.0841f, 0.2917f, 0.1753f, 0.0294f)  // Efficiency Checker (Wall Pipe Below)
+DTT_BAKED_COLOR("Desc_EfficiencyCheckerWallPipe_C", 0.8128f, 0.4625f, 0.0672f, 0.2845f, 0.1619f, 0.0235f)  // Efficiency Checker (Wall Pipe Above)
+DTT_BAKED_COLOR("Desc_EfficiencyCheckerWall_C", 0.1417f, 0.1265f, 0.0921f, 0.0496f, 0.0443f, 0.0322f)  // Efficiency Checker (Wall)
+DTT_BAKED_COLOR("Desc_EfficiencyCheckerWide_C", 0.8500f, 0.6398f, 0.1733f, 0.2975f, 0.2239f, 0.0606f)  // Efficiency Checker (Side)
+DTT_BAKED_COLOR("Desc_ElectromagneticControlRod_C", 0.5683f, 0.5385f, 0.1299f, 0.1112f, 0.1436f, 0.2198f)  // Electromagnetic Control Rod
+DTT_BAKED_COLOR("Desc_ElevatorFloorStop_C", 0.4069f, 0.1852f, 0.0750f, 0.1424f, 0.0648f, 0.0262f)  // Elevator Floor Stop
+DTT_BAKED_COLOR("Desc_Elevator_C", 0.3780f, 0.1749f, 0.0742f, 0.1323f, 0.0612f, 0.0260f)  // Personnel Elevator
+DTT_BAKED_COLOR("Desc_EquipChecker_C", 0.4131f, 0.1621f, 0.0366f, 0.1446f, 0.0567f, 0.0128f)  // Efficiency Checker Hand Tool
+DTT_BAKED_COLOR("Desc_ExoticMatter_C", 0.7894f, 0.3566f, 0.1096f, 0.2763f, 0.1248f, 0.0384f)  // Quark Conductor
+DTT_BAKED_COLOR("Desc_Explorer_C", 0.3827f, 0.1840f, 0.0673f, 0.1340f, 0.0644f, 0.0235f)  // Explorer
+DTT_BAKED_COLOR("Desc_Fabric_C", 0.3826f, 0.2969f, 0.2487f, 0.1339f, 0.1039f, 0.0870f)  // Fabric
+DTT_BAKED_COLOR("Desc_Fence_01_C", 0.5811f, 0.3692f, 0.2457f, 0.2034f, 0.1292f, 0.0860f)  // Industrial Railing
+DTT_BAKED_COLOR("Desc_FicsiteIngot_C", 0.3993f, 0.0940f, 0.0040f, 0.1398f, 0.0329f, 0.0014f)  // Ficsite Ingot
+DTT_BAKED_COLOR("Desc_FicsiteMesh_C", 0.6826f, 0.1958f, 0.0040f, 0.2389f, 0.0685f, 0.0014f)  // Ficsite Trigon
+DTT_BAKED_COLOR("Desc_FicsoniumFuelRod_C", 0.7772f, 0.6838f, 0.0556f, 0.2720f, 0.2393f, 0.0195f)  // Ficsonium Fuel Rod
+DTT_BAKED_COLOR("Desc_Ficsonium_C", 0.8449f, 0.7450f, 0.0696f, 0.2957f, 0.2607f, 0.0244f)  // Ficsonium
+DTT_BAKED_COLOR("Desc_Filter_C", 0.2099f, 0.1870f, 0.2876f, 0.0734f, 0.0654f, 0.1007f)  // Gas Filter
+DTT_BAKED_COLOR("Desc_Fireworks_Projectile_01_C", 0.5228f, 0.2642f, 0.1236f, 0.1830f, 0.0925f, 0.0433f)  // Sweet Fireworks
+DTT_BAKED_COLOR("Desc_Fireworks_Projectile_02_C", 0.4937f, 0.2442f, 0.1105f, 0.1728f, 0.0855f, 0.0387f)  // Fancy Fireworks
+DTT_BAKED_COLOR("Desc_Fireworks_Projectile_03_C", 0.4972f, 0.2521f, 0.1226f, 0.1740f, 0.0882f, 0.0429f)  // Sparkly Fireworks
+DTT_BAKED_COLOR("Desc_Flat_Frame_01_C", 0.1180f, 0.1297f, 0.1816f, 0.0413f, 0.0454f, 0.0636f)  // Frame Floor
+DTT_BAKED_COLOR("Desc_FloodlightPole_C", 0.4635f, 0.2479f, 0.1049f, 0.0980f, 0.1049f, 0.1530f)  // Flood Light Tower
+DTT_BAKED_COLOR("Desc_FloodlightWall_C", 0.4722f, 0.2293f, 0.1423f, 0.1653f, 0.0803f, 0.0498f)  // Wall-Mounted Flood Light
+DTT_BAKED_COLOR("Desc_FluidCanister_C", 0.1575f, 0.1374f, 0.2113f, 0.2823f, 0.1835f, 0.2823f)  // Empty Canister
+DTT_BAKED_COLOR("Desc_FluidTruckStation_C", 0.4433f, 0.2132f, 0.0626f, 0.1552f, 0.0746f, 0.0219f)  // Fluid Truck Station
+DTT_BAKED_COLOR("Desc_FluidTruck_C", 0.4608f, 0.2287f, 0.0819f, 0.1613f, 0.0801f, 0.0287f)  // Fluid Truck
+DTT_BAKED_COLOR("Desc_FoundationGlass_01_C", 0.1016f, 0.1122f, 0.1564f, 0.0356f, 0.0393f, 0.0547f)  // Glass Frame Foundation
+DTT_BAKED_COLOR("Desc_FoundationPassthrough_Hypertube_C", 0.2303f, 0.1018f, 0.0453f, 0.0806f, 0.0356f, 0.0159f)  // Hypertube Floor Hole
+DTT_BAKED_COLOR("Desc_FoundationPassthrough_Lift_C", 0.2717f, 0.1915f, 0.0304f, 0.2856f, 0.3239f, 0.4449f)  // Conveyor Lift Floor Hole
+DTT_BAKED_COLOR("Desc_FoundationPassthrough_Pipe_C", 0.3649f, 0.1828f, 0.0993f, 0.1277f, 0.0640f, 0.0347f)  // Pipeline Floor Hole
+DTT_BAKED_COLOR("Desc_Foundation_8x1_01_C", 0.1853f, 0.2034f, 0.2851f, 0.0649f, 0.0712f, 0.0998f)  // Foundation (1 m)
+DTT_BAKED_COLOR("Desc_Foundation_8x2_01_C", 0.1928f, 0.2118f, 0.2966f, 0.0675f, 0.0741f, 0.1038f)  // Foundation (2 m)
+DTT_BAKED_COLOR("Desc_Foundation_8x4_01_C", 0.1987f, 0.2184f, 0.3057f, 0.0696f, 0.0764f, 0.1070f)  // Foundation (4 m)
+DTT_BAKED_COLOR("Desc_Foundation_Asphalt_8x1_C", 0.0869f, 0.0922f, 0.1336f, 0.0304f, 0.0323f, 0.0468f)  // Foundation (1 m)
+DTT_BAKED_COLOR("Desc_Foundation_Asphalt_8x2_C", 0.0909f, 0.0961f, 0.1399f, 0.0318f, 0.0336f, 0.0490f)  // Foundation (2 m)
+DTT_BAKED_COLOR("Desc_Foundation_Asphalt_8x4_C", 0.1012f, 0.1067f, 0.1557f, 0.0354f, 0.0373f, 0.0545f)  // Foundation (4 m)
+DTT_BAKED_COLOR("Desc_Foundation_Cheat_Green_C", 0.1936f, 0.2108f, 0.2978f, 0.0678f, 0.0738f, 0.1042f)  // Green Screen Foundation 8m x 4m
+DTT_BAKED_COLOR("Desc_Foundation_ConcretePolished_8x1_C", 0.2684f, 0.2869f, 0.4130f, 0.0940f, 0.1004f, 0.1445f)  // Foundation (1 m)
+DTT_BAKED_COLOR("Desc_Foundation_Concrete_8x1_C", 0.3854f, 0.2505f, 0.3854f, 0.3199f, 0.2849f, 0.4383f)  // Foundation (1 m)
+DTT_BAKED_COLOR("Desc_Foundation_Concrete_8x2_C", 0.3627f, 0.2357f, 0.3627f, 0.0927f, 0.1425f, 0.0927f)  // Foundation (2 m)
+DTT_BAKED_COLOR("Desc_Foundation_Concrete_8x4_C", 0.0854f, 0.1314f, 0.0854f, 0.3601f, 0.2341f, 0.3601f)  // Foundation (4 m)
+DTT_BAKED_COLOR("Desc_Foundation_Frame_01_C", 0.0820f, 0.0974f, 0.1505f, 0.0287f, 0.0341f, 0.0527f)  // Frame Foundation
+DTT_BAKED_COLOR("Desc_Foundation_Metal_8x1_C", 0.2522f, 0.2630f, 0.3880f, 0.0883f, 0.0921f, 0.1358f)  // Foundation (1 m)
+DTT_BAKED_COLOR("Desc_Foundation_Metal_8x2_C", 0.2506f, 0.2631f, 0.3855f, 0.0877f, 0.0921f, 0.1349f)  // Foundation (2 m)
+DTT_BAKED_COLOR("Desc_Foundation_Metal_8x4_C", 0.2518f, 0.2633f, 0.3874f, 0.0881f, 0.0921f, 0.1356f)  // Foundation (4 m)
+DTT_BAKED_COLOR("Desc_FoundryMk1_C", 0.5346f, 0.2433f, 0.1083f, 0.1871f, 0.0851f, 0.0379f)  // Foundry
+DTT_BAKED_COLOR("Desc_FrackingExtractor_C", 0.6201f, 0.2912f, 0.1202f, 0.2170f, 0.1019f, 0.0421f)  // Resource Well Extractor
+DTT_BAKED_COLOR("Desc_FrackingSmasher_C", 0.4720f, 0.2365f, 0.1149f, 0.1878f, 0.2081f, 0.2889f)  // Resource Well Pressurizer
+DTT_BAKED_COLOR("Desc_FreightWagon_C", 0.4144f, 0.2156f, 0.1091f, 0.1450f, 0.0754f, 0.0382f)  // Freight Car
+DTT_BAKED_COLOR("Desc_Fuel_C", 0.7873f, 0.3265f, 0.0559f, 0.2756f, 0.1143f, 0.0196f)  // Packaged Fuel
+DTT_BAKED_COLOR("Desc_GasTank_C", 0.1954f, 0.2660f, 0.4969f, 0.3195f, 0.2077f, 0.3186f)  // Empty Fluid Tank
+DTT_BAKED_COLOR("Desc_Gate_Automated_8x4_C", 0.1068f, 0.1203f, 0.1643f, 0.2103f, 0.1575f, 0.0409f)  // Automated Gate
+DTT_BAKED_COLOR("Desc_GeneratorBiomass_Automated_C", 0.2880f, 0.1387f, 0.0549f, 0.1008f, 0.0485f, 0.0192f)  // Biomass Burner
+DTT_BAKED_COLOR("Desc_GeneratorCoal_C", 0.1963f, 0.1126f, 0.0761f, 0.0687f, 0.0394f, 0.0266f)  // Coal-Powered Generator
+DTT_BAKED_COLOR("Desc_GeneratorFuel_C", 0.3183f, 0.1763f, 0.0957f, 0.1114f, 0.0617f, 0.0335f)  // Fuel-Powered Generator
+DTT_BAKED_COLOR("Desc_GeneratorGeoThermal_C", 0.4185f, 0.2290f, 0.0912f, 0.1465f, 0.0802f, 0.0319f)  // Geothermal Generator
+DTT_BAKED_COLOR("Desc_GeneratorNuclear_C", 0.4292f, 0.1875f, 0.0655f, 0.0370f, 0.1234f, 0.1460f)  // Nuclear Power Plant
+DTT_BAKED_COLOR("Desc_GenericBiomass_C", 0.2200f, 0.1688f, 0.0662f, 0.0770f, 0.0591f, 0.0232f)  // Biomass
+DTT_BAKED_COLOR("Desc_Geyser_C", 0.3020f, 0.2278f, 0.1963f, 0.2084f, 0.1828f, 0.2813f)  // Geyser ping=0.000/0.000/0.000
+DTT_BAKED_COLOR("Desc_Gift_C", 0.8473f, 0.3858f, 0.0661f, 0.1538f, 0.1909f, 0.6545f)  // FICSMAS Gift
+DTT_BAKED_COLOR("Desc_GoldIngot_C", 0.3754f, 0.2819f, 0.1423f, 0.1314f, 0.0987f, 0.0498f)  // Caterium Ingot
+DTT_BAKED_COLOR("Desc_GoldenNut_Statue_C", 0.1935f, 0.0999f, 0.0353f, 0.0677f, 0.0349f, 0.0124f)  // Golden Nut Statue
+DTT_BAKED_COLOR("Desc_GolfCartGold_C", 0.2861f, 0.2087f, 0.0788f, 0.1001f, 0.0730f, 0.0276f)  // Golden Factory Cart™
+DTT_BAKED_COLOR("Desc_GolfCart_C", 0.6533f, 0.2849f, 0.0832f, 0.1187f, 0.4170f, 0.5374f)  // Factory Cart™
+DTT_BAKED_COLOR("Desc_GunpowderMK2_C", 0.5103f, 0.0272f, 0.0334f, 0.3802f, 0.2774f, 0.0445f)  // Smokeless Powder
+DTT_BAKED_COLOR("Desc_Gunpowder_C", 0.5922f, 0.0383f, 0.0132f, 0.2073f, 0.0134f, 0.0046f)  // Black Powder
+DTT_BAKED_COLOR("Desc_HUBParts_C", 0.1254f, 0.1159f, 0.0422f, 0.0439f, 0.0406f, 0.0148f)  // HUB Parts
+DTT_BAKED_COLOR("Desc_HadronCollider_C", 0.3500f, 0.1753f, 0.1048f, 0.1225f, 0.0614f, 0.0367f)  // Particle Accelerator
+DTT_BAKED_COLOR("Desc_HardDrive_C", 0.4426f, 0.1484f, 0.0496f, 0.1549f, 0.0519f, 0.0174f)  // Hard Drive
+DTT_BAKED_COLOR("Desc_HatcherBasic_C", 0.0751f, 0.0879f, 0.2004f, 0.3823f, 0.1038f, 0.1653f)  // Tropical Crab Hatcher
+DTT_BAKED_COLOR("Desc_HatcherParts_C", 0.4502f, 0.2034f, 0.2753f, 0.1193f, 0.1317f, 0.2972f)  // Hatcher Remains
+DTT_BAKED_COLOR("Desc_HazmatFilter_C", 0.4388f, 0.2805f, 0.0454f, 0.1536f, 0.0982f, 0.0159f)  // Iodine-Infused Filter
+DTT_BAKED_COLOR("Desc_HeavyOilResidue_C", 0.2316f, 0.0200f, 0.4008f, 0.3683f, 0.1374f, 0.0395f)  // Heavy Oil Residue
+DTT_BAKED_COLOR("Desc_Helmet_Alpha_C", 0.5370f, 0.2253f, 0.0578f, 0.1880f, 0.0788f, 0.0202f)  // 4-lph-4 FICSIT Helmet
+DTT_BAKED_COLOR("Desc_Helmet_Beta_C", 0.4172f, 0.2004f, 0.1107f, 0.1460f, 0.0701f, 0.0387f)  // B-374 FICSIT Helmet
+DTT_BAKED_COLOR("Desc_Helmet_Bobble_C", 0.5444f, 0.2676f, 0.1123f, 0.0244f, 0.0650f, 0.1522f)  // Bobblehead FICSIT Helmet
+DTT_BAKED_COLOR("Desc_Helmet_Coffee_C", 0.5355f, 0.2447f, 0.0774f, 0.1874f, 0.0857f, 0.0271f)  // Efficient FICSIT Helmet
+DTT_BAKED_COLOR("Desc_Helmet_Default_C", 0.5093f, 0.2481f, 0.1077f, 0.1783f, 0.0868f, 0.0377f)  // Standard FICSIT Helmet
+DTT_BAKED_COLOR("Desc_Helmet_Dogo_C", 0.5836f, 0.2616f, 0.1597f, 0.2043f, 0.0915f, 0.0559f)  // Doggo FICSIT Helmet
+DTT_BAKED_COLOR("Desc_Helmet_Ficsmas_C", 0.4458f, 0.2226f, 0.0942f, 0.1560f, 0.0779f, 0.0330f)  // FICSMAS Hat
+DTT_BAKED_COLOR("Desc_Helmet_Golden_C", 0.1932f, 0.1048f, 0.0369f, 0.0676f, 0.0367f, 0.0129f)  // Golden FICSIT Helmet
+DTT_BAKED_COLOR("Desc_Helmet_Neko_C", 0.6451f, 0.2906f, 0.0767f, 0.2258f, 0.1017f, 0.0269f)  // Neko Helmet
+DTT_BAKED_COLOR("Desc_Helmet_Neon_C", 0.5662f, 0.2507f, 0.0747f, 0.1982f, 0.0878f, 0.0262f)  // Neon FICSIT Helmet
+DTT_BAKED_COLOR("Desc_Helmet_Scarf_C", 0.5546f, 0.1731f, 0.0576f, 0.1941f, 0.0606f, 0.0202f)  // Women’s Day Helmet
+DTT_BAKED_COLOR("Desc_Helmet_Scout_C", 0.5821f, 0.2742f, 0.0870f, 0.2037f, 0.0960f, 0.0305f)  // Scout FICSIT Helmet
+DTT_BAKED_COLOR("Desc_Helmet_Welder_C", 0.5902f, 0.2576f, 0.0724f, 0.2066f, 0.0902f, 0.0253f)  // Enginerd FICSIT Helmet
+DTT_BAKED_COLOR("Desc_HighSpeedConnector_C", 0.0703f, 0.1526f, 0.0760f, 0.0246f, 0.0534f, 0.0266f)  // High-Speed Connector
+DTT_BAKED_COLOR("Desc_HighSpeedWire_C", 0.4516f, 0.3749f, 0.2000f, 0.1581f, 0.1312f, 0.0700f)  // Quickwire
+DTT_BAKED_COLOR("Desc_HogAlpha_C", 0.2396f, 0.1567f, 0.1150f, 0.0839f, 0.0548f, 0.0403f)  // Alpha Hog
+DTT_BAKED_COLOR("Desc_HogBasic_C", 0.1031f, 0.0733f, 0.1200f, 0.0361f, 0.0256f, 0.0420f)  // Fluffy-Tailed Hog
+DTT_BAKED_COLOR("Desc_HogCliff_C", 0.1765f, 0.1337f, 0.2479f, 0.5140f, 0.4269f, 0.1957f)  // Cliff Hog
+DTT_BAKED_COLOR("Desc_HogNuclear_C", 0.4609f, 0.3752f, 0.1557f, 0.1613f, 0.1313f, 0.0545f)  // Radioactive Cliff Hog
+DTT_BAKED_COLOR("Desc_HogParts_C", 0.2954f, 0.1920f, 0.2777f, 0.1034f, 0.0672f, 0.0972f)  // Hog Remains
+DTT_BAKED_COLOR("Desc_Hog_Statue_C", 0.0569f, 0.0724f, 0.1588f, 0.0199f, 0.0253f, 0.0556f)  // Silver Hog Statue
+DTT_BAKED_COLOR("Desc_HostileCreature_C", 0.2424f, 0.1450f, 0.1673f, 0.0848f, 0.0508f, 0.0585f)
+DTT_BAKED_COLOR("Desc_HydrogenGas_C", 0.7619f, 0.8348f, 0.0063f, 0.3274f, 0.1260f, 0.0299f)  // Hydrogen Gas
+DTT_BAKED_COLOR("Desc_HyperPoleStackable_C", 0.4594f, 0.2003f, 0.0847f, 0.1608f, 0.0701f, 0.0296f)  // Stackable Hypertube Support
+DTT_BAKED_COLOR("Desc_HyperTubeJunction_C", 0.3934f, 0.1658f, 0.0628f, 0.0578f, 0.0863f, 0.1270f)  // Hypertube Junction
+DTT_BAKED_COLOR("Desc_HyperTubeWallHole_C", 0.4358f, 0.1827f, 0.0658f, 0.1525f, 0.0640f, 0.0230f)  // Hypertube Wall Hole
+DTT_BAKED_COLOR("Desc_HyperTubeWallSupport_C", 0.3704f, 0.1706f, 0.0710f, 0.1296f, 0.0597f, 0.0248f)  // Hypertube Wall Support
+DTT_BAKED_COLOR("Desc_HypertubeTJunction_C", 0.3413f, 0.1359f, 0.0501f, 0.0446f, 0.0726f, 0.1200f)  // Hypertube Branch
+DTT_BAKED_COLOR("Desc_IndustrialTank_C", 0.2981f, 0.1374f, 0.0549f, 0.1043f, 0.0481f, 0.0192f)  // Industrial Fluid Buffer
+DTT_BAKED_COLOR("Desc_InvertedRamp_Asphalt_8x1_C", 0.0780f, 0.0826f, 0.1200f, 0.0273f, 0.0289f, 0.0420f)  // Inverted Ramp (1 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_Asphalt_8x2_C", 0.0803f, 0.0780f, 0.1200f, 0.0281f, 0.0273f, 0.0420f)  // Inverted Ramp (2 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_Asphalt_8x4_C", 0.0809f, 0.0787f, 0.1210f, 0.0283f, 0.0275f, 0.0424f)  // Inverted Ramp (4 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_Concrete_8x1_C", 0.2518f, 0.2289f, 0.3521f, 0.0881f, 0.0801f, 0.1232f)  // Inverted Ramp (1 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_Concrete_8x2_C", 0.2545f, 0.2317f, 0.3565f, 0.2545f, 0.1654f, 0.2545f)  // Inverted Ramp (2 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_Concrete_8x4_C", 0.2604f, 0.2378f, 0.3659f, 0.2277f, 0.1480f, 0.2277f)  // Inverted Ramp (4 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_DCorner_Asphalt_8x1_C", 0.0780f, 0.0830f, 0.1200f, 0.0273f, 0.0291f, 0.0420f)  // Inverted Down Corner (1 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_DCorner_Asphalt_8x2_C", 0.0780f, 0.0824f, 0.1200f, 0.0273f, 0.0288f, 0.0420f)  // Inverted Down Corner (2 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_DCorner_Asphalt_8x4_C", 0.0780f, 0.0826f, 0.1200f, 0.0273f, 0.0289f, 0.0420f)  // Inverted Down Corner (4 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_DCorner_Concrete_8x1_C", 0.1946f, 0.2178f, 0.2994f, 0.0681f, 0.0762f, 0.1048f)  // Inverted Down Corner (1 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_DCorner_Concrete_8x2_C", 0.1991f, 0.2232f, 0.3063f, 0.0697f, 0.0781f, 0.1072f)  // Inverted Down Corner (2 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_DCorner_Concrete_8x4_C", 0.2037f, 0.2285f, 0.3134f, 0.0713f, 0.0800f, 0.1097f)  // Inverted Down Corner (4 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_DCorner_Metal_8x1_C", 0.2355f, 0.2535f, 0.3624f, 0.0824f, 0.0887f, 0.1268f)  // Inverted Down Corner (1 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_DCorner_Metal_8x2_C", 0.2442f, 0.2616f, 0.3757f, 0.0855f, 0.0915f, 0.1315f)  // Inverted Down Corner (2 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_DCorner_Metal_8x4_C", 0.2369f, 0.2538f, 0.3644f, 0.0829f, 0.0888f, 0.1275f)  // Inverted Down Corner (4 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_DCorner_Polished_8x1_C", 0.2286f, 0.2073f, 0.1486f, 0.0800f, 0.0726f, 0.0520f)  // Inverted Down Corner (1 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_DCorner_Polished_8x2_C", 0.2406f, 0.2170f, 0.1564f, 0.0842f, 0.0759f, 0.0547f)  // Inverted Down Corner (2 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_DCorner_Polished_8x4_C", 0.2853f, 0.2578f, 0.1855f, 0.0999f, 0.0902f, 0.0649f)  // Inverted Down Corner (4 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_Metal_8x1_C", 0.2402f, 0.2572f, 0.3695f, 0.0841f, 0.0900f, 0.1293f)  // Inverted Ramp (1 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_Metal_8x2_C", 0.2502f, 0.2682f, 0.3850f, 0.0876f, 0.0939f, 0.1347f)  // Inverted Ramp (2 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_Metal_8x4_C", 0.2402f, 0.2572f, 0.3695f, 0.0841f, 0.0900f, 0.1293f)  // Inverted Ramp (4 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_Polished_8x1_C", 0.1778f, 0.1619f, 0.1156f, 0.0622f, 0.0567f, 0.0404f)  // Inverted Ramp (1 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_Polished_8x2_C", 0.1837f, 0.1678f, 0.1194f, 0.0643f, 0.0587f, 0.0418f)  // Inverted Ramp (2 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_Polished_8x4_C", 0.1918f, 0.1740f, 0.1247f, 0.0671f, 0.0609f, 0.0436f)  // Inverted Ramp (4 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_UCorner_Asphalt_8x1_C", 0.0780f, 0.0827f, 0.1200f, 0.0273f, 0.0290f, 0.0420f)  // Inverted Up Corner (1 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_UCorner_Asphalt_8x2_C", 0.0780f, 0.0832f, 0.1200f, 0.0273f, 0.0291f, 0.0420f)  // Inverted Up Corner (2 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_UCorner_Asphalt_8x4_C", 0.0814f, 0.0780f, 0.1200f, 0.0285f, 0.0273f, 0.0420f)  // Inverted Up Corner (4 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_UCorner_Concrete_8x1_C", 0.2541f, 0.2306f, 0.3548f, 0.3291f, 0.2139f, 0.3284f)  // Inverted Up Corner (1 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_UCorner_Concrete_8x2_C", 0.2502f, 0.2288f, 0.3520f, 0.3447f, 0.2240f, 0.3447f)  // Inverted Up Corner (2 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_UCorner_Concrete_8x4_C", 0.2614f, 0.2324f, 0.3575f, 0.3025f, 0.1966f, 0.3025f)  // Inverted Up Corner (4 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_UCorner_Metal_8x1_C", 0.2325f, 0.2503f, 0.3577f, 0.0814f, 0.0876f, 0.1252f)  // Inverted Up Corner (1 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_UCorner_Metal_8x2_C", 0.2325f, 0.2479f, 0.3577f, 0.0814f, 0.0868f, 0.1252f)  // Inverted Up Corner (2 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_UCorner_Metal_8x4_C", 0.2236f, 0.2378f, 0.3439f, 0.0782f, 0.0832f, 0.1204f)  // Inverted Up Corner (4 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_UCorner_Polished_8x1_C", 0.2715f, 0.2446f, 0.1765f, 0.0950f, 0.0856f, 0.0618f)  // Inverted Up Corner (1 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_UCorner_Polished_8x2_C", 0.3197f, 0.2858f, 0.2078f, 0.1119f, 0.1000f, 0.0727f)  // Inverted Up Corner (2 m)
+DTT_BAKED_COLOR("Desc_InvertedRamp_UCorner_Polished_8x4_C", 0.4354f, 0.3849f, 0.2830f, 0.0902f, 0.0780f, 0.1200f)  // Inverted Up Corner (4 m)
+DTT_BAKED_COLOR("Desc_Inverted_ConcreteFoundation_Convex_8x4_C", 0.0000f, 0.8500f, 0.8500f, 0.0000f, 0.2975f, 0.2975f)  // Rounded Concave Foundation 1m
+DTT_BAKED_COLOR("Desc_IonizedFuel_C", 0.5072f, 0.1818f, 0.0502f, 0.1775f, 0.0636f, 0.0176f)  // Ionized Fuel
+DTT_BAKED_COLOR("Desc_IronIngot_C", 0.1995f, 0.2290f, 0.3069f, 0.2098f, 0.1905f, 0.1364f)  // Iron Ingot
+DTT_BAKED_COLOR("Desc_IronPlateReinforced_C", 0.2363f, 0.2708f, 0.3789f, 0.0827f, 0.0948f, 0.1326f)  // Reinforced Iron Plate
+DTT_BAKED_COLOR("Desc_IronPlate_C", 0.1729f, 0.1981f, 0.2660f, 0.0605f, 0.0693f, 0.0931f)  // Iron Plate
+DTT_BAKED_COLOR("Desc_IronRod_C", 0.0889f, 0.1026f, 0.1367f, 0.0311f, 0.0359f, 0.0479f)  // Iron Rod
+DTT_BAKED_COLOR("Desc_IronScrew_C", 0.0480f, 0.1269f, 0.4377f, 0.0168f, 0.0444f, 0.1532f)  // Screws
+DTT_BAKED_COLOR("Desc_JumpPadAdjustable_C", 0.4177f, 0.1964f, 0.0981f, 0.2846f, 0.3247f, 0.4379f)  // Jump Pad
+DTT_BAKED_COLOR("Desc_JumpPadTilted_C", 0.4177f, 0.1964f, 0.0981f, 0.2846f, 0.3247f, 0.4379f)  // Old Tilted Jump Pad
+DTT_BAKED_COLOR("Desc_JumpPad_C", 0.4177f, 0.1964f, 0.0981f, 0.2846f, 0.3247f, 0.4379f)  // Old Jump Pad
+DTT_BAKED_COLOR("Desc_Ladder_C", 0.4647f, 0.2076f, 0.0838f, 0.1626f, 0.0727f, 0.0293f)  // Ladder
+DTT_BAKED_COLOR("Desc_LandingPad_C", 0.0231f, 0.4556f, 0.0692f, 0.0081f, 0.1595f, 0.0242f)  // U-Jelly Landing Pad
+DTT_BAKED_COLOR("Desc_LargeFan_C", 0.4334f, 0.1834f, 0.0458f, 0.1517f, 0.0642f, 0.0160f)  // Large Fan
+DTT_BAKED_COLOR("Desc_LargeVent_C", 0.3578f, 0.1249f, 0.0278f, 0.1252f, 0.0437f, 0.0097f)  // Large Vent
+DTT_BAKED_COLOR("Desc_Leaves_C", 0.0846f, 0.1420f, 0.0907f, 0.0296f, 0.0497f, 0.0317f)  // Leaves
+DTT_BAKED_COLOR("Desc_LightsControlPanel_C", 0.5600f, 0.2361f, 0.0789f, 0.1960f, 0.0826f, 0.0276f)  // Light Control Panel
+DTT_BAKED_COLOR("Desc_LiquidBiofuel_C", 0.0722f, 0.3847f, 0.0258f, 0.3674f, 0.1461f, 0.0397f)  // Liquid Biofuel
+DTT_BAKED_COLOR("Desc_LiquidFuel_C", 0.6657f, 0.2029f, 0.0149f, 0.2330f, 0.0710f, 0.0052f)  // Fuel
+DTT_BAKED_COLOR("Desc_LiquidOil_C", 0.1867f, 0.0913f, 0.0538f, 0.0653f, 0.0320f, 0.0188f)  // Crude Oil ping=0.000/0.000/0.000
+DTT_BAKED_COLOR("Desc_LiquidTurboFuel_C", 0.5920f, 0.0560f, 0.0168f, 0.2072f, 0.0196f, 0.0059f)  // Turbofuel
+DTT_BAKED_COLOR("Desc_Locomotive_C", 0.3354f, 0.1305f, 0.0320f, 0.1174f, 0.0457f, 0.0112f)  // Electric Locomotive
+DTT_BAKED_COLOR("Desc_LookoutTower_C", 0.3317f, 0.1759f, 0.0783f, 0.1161f, 0.0616f, 0.0274f)  // Lookout Tower
+DTT_BAKED_COLOR("Desc_Mam_C", 0.6038f, 0.3509f, 0.1464f, 0.2113f, 0.1228f, 0.0512f)  // MAM
+DTT_BAKED_COLOR("Desc_ManufacturerMk1_C", 0.4521f, 0.2644f, 0.1475f, 0.1482f, 0.1634f, 0.2280f)  // Manufacturer
+DTT_BAKED_COLOR("Desc_MechaHelmet_C", 0.6753f, 0.3167f, 0.0841f, 0.2364f, 0.1108f, 0.0294f)  // MECH-4 Prime Helmet
+DTT_BAKED_COLOR("Desc_Medkit_C", 0.0398f, 0.2218f, 0.5105f, 0.0139f, 0.0776f, 0.1787f)  // Medicinal Inhaler
+DTT_BAKED_COLOR("Desc_MetacellIngot_C", 0.0922f, 0.1045f, 0.1419f, 0.0323f, 0.0366f, 0.0497f)  // Metacell Ingot
+DTT_BAKED_COLOR("Desc_MetalcellMesh_C", 0.1613f, 0.1814f, 0.2481f, 0.2380f, 0.1547f, 0.2372f)  // Metacell Mesh
+DTT_BAKED_COLOR("Desc_MinerMk1_C", 0.2708f, 0.1754f, 0.1373f, 0.1240f, 0.1423f, 0.1908f)  // Miner Mk.1
+DTT_BAKED_COLOR("Desc_MinerMk2_C", 0.2286f, 0.1302f, 0.0937f, 0.1086f, 0.1241f, 0.1671f)  // Miner Mk.2
+DTT_BAKED_COLOR("Desc_MinerMk3_C", 0.2150f, 0.1042f, 0.0630f, 0.0948f, 0.1059f, 0.1459f)  // Miner Mk.3
+DTT_BAKED_COLOR("Desc_ModularFrameFused_C", 0.7305f, 0.3280f, 0.0857f, 0.2557f, 0.1148f, 0.0300f)  // Fused Modular Frame
+DTT_BAKED_COLOR("Desc_ModularFrameHeavy_C", 0.1054f, 0.1203f, 0.1873f, 0.0369f, 0.0421f, 0.0656f)  // Heavy Modular Frame
+DTT_BAKED_COLOR("Desc_ModularFrameLightweight_C", 0.6500f, 0.4553f, 0.0498f, 0.2275f, 0.1594f, 0.0174f)  // Radio Control Unit
+DTT_BAKED_COLOR("Desc_ModularFrame_C", 0.1778f, 0.2012f, 0.2978f, 0.0622f, 0.0704f, 0.1042f)  // Modular Frame
+DTT_BAKED_COLOR("Desc_MotorLightweight_C", 0.4856f, 0.3037f, 0.0263f, 0.1700f, 0.1063f, 0.0092f)  // Turbo Motor
+DTT_BAKED_COLOR("Desc_Motor_C", 0.0787f, 0.1023f, 0.1942f, 0.0276f, 0.0358f, 0.0680f)  // Motor
+DTT_BAKED_COLOR("Desc_Mycelia_C", 0.1442f, 0.1610f, 0.2219f, 0.2392f, 0.1555f, 0.2385f)  // Mycelia
+DTT_BAKED_COLOR("Desc_NaturalGas_C", 0.7619f, 0.8348f, 0.0063f, 0.3274f, 0.1260f, 0.0299f)  // Natural Gas
+DTT_BAKED_COLOR("Desc_NitricAcid_C", 0.3736f, 0.1529f, 0.0432f, 0.1308f, 0.0535f, 0.0151f)  // Nitric Acid
+DTT_BAKED_COLOR("Desc_NitrogenGas_C", 0.3524f, 0.1281f, 0.0402f, 0.1233f, 0.0448f, 0.0141f)  // Nitrogen Gas ping=0.000/0.000/0.000
+DTT_BAKED_COLOR("Desc_NobeliskCluster_C", 0.5802f, 0.2219f, 0.0650f, 0.2031f, 0.0777f, 0.0227f)  // Cluster Nobelisk
+DTT_BAKED_COLOR("Desc_NobeliskExplosive_C", 0.2770f, 0.0386f, 0.0216f, 0.0969f, 0.0135f, 0.0076f)  // Nobelisk
+DTT_BAKED_COLOR("Desc_NobeliskGas_C", 0.1029f, 0.1765f, 0.0451f, 0.4252f, 0.3082f, 0.0332f)  // Gas Nobelisk
+DTT_BAKED_COLOR("Desc_NobeliskNuke_C", 0.4755f, 0.3441f, 0.0342f, 0.1664f, 0.1204f, 0.0120f)  // Nuke Nobelisk
+DTT_BAKED_COLOR("Desc_NobeliskShockwave_C", 0.2107f, 0.3198f, 0.3690f, 0.4270f, 0.3287f, 0.0460f)  // Pulse Nobelisk
+DTT_BAKED_COLOR("Desc_NonFissibleUranium_C", 0.5628f, 0.5118f, 0.0571f, 0.1970f, 0.1791f, 0.0200f)  // Non-Fissile Uranium
+DTT_BAKED_COLOR("Desc_None_C", 0.8500f, 0.5525f, 0.5525f, 0.8500f, 0.5525f, 0.8500f)  // None
+DTT_BAKED_COLOR("Desc_NonflyingBird_C", 0.0911f, 0.2635f, 0.2187f, 0.0319f, 0.0922f, 0.0766f)  // Flightless Birb
+DTT_BAKED_COLOR("Desc_NuclearFuelRod_C", 0.4088f, 0.3282f, 0.0211f, 0.0701f, 0.2694f, 0.1177f)  // Uranium Fuel Rod
+DTT_BAKED_COLOR("Desc_NuclearWaste_C", 0.6044f, 0.5563f, 0.0132f, 0.2115f, 0.1947f, 0.0046f)  // Uranium Waste
+DTT_BAKED_COLOR("Desc_NutBush_C", 0.5833f, 0.4563f, 0.2580f, 0.2042f, 0.1597f, 0.0903f)  // Nut Bush Plant
+DTT_BAKED_COLOR("Desc_Nut_C", 0.5833f, 0.4563f, 0.2580f, 0.2042f, 0.1597f, 0.0903f)  // Beryl Nut
+DTT_BAKED_COLOR("Desc_OilPump_C", 0.2982f, 0.1544f, 0.0855f, 0.1044f, 0.0541f, 0.0299f)  // Oil Extractor
+DTT_BAKED_COLOR("Desc_OilRefinery_C", 0.3283f, 0.1711f, 0.1093f, 0.1378f, 0.1558f, 0.2121f)  // Refinery
+DTT_BAKED_COLOR("Desc_OreBauxite_C", 0.4043f, 0.1752f, 0.1178f, 0.1415f, 0.0613f, 0.0412f)  // Bauxite ping=1.000/0.000/0.000
+DTT_BAKED_COLOR("Desc_OreCopper_C", 0.2114f, 0.0947f, 0.0767f, 0.1489f, 0.1722f, 0.2291f)  // Copper Ore ping=0.050/0.500/0.150
+DTT_BAKED_COLOR("Desc_OreGold_C", 0.3760f, 0.2962f, 0.1850f, 0.1662f, 0.1779f, 0.2557f)  // Caterium Ore ping=1.000/0.622/0.000
+DTT_BAKED_COLOR("Desc_OreIron_C", 0.1624f, 0.0901f, 0.1044f, 0.1900f, 0.2108f, 0.2976f)  // Iron Ore ping=0.460/0.291/0.242
+DTT_BAKED_COLOR("Desc_OreUranium_C", 0.1371f, 0.2664f, 0.0956f, 0.0480f, 0.0932f, 0.0335f)  // Uranium ping=0.000/1.000/0.041
+DTT_BAKED_COLOR("Desc_Overflow_C", 0.8500f, 0.5525f, 0.5525f, 0.2975f, 0.1934f, 0.1934f)  // Overflow
+DTT_BAKED_COLOR("Desc_PackagedAlumina_C", 0.2854f, 0.3113f, 0.4391f, 0.5179f, 0.2805f, 0.0635f)  // Packaged Alumina Solution
+DTT_BAKED_COLOR("Desc_PackagedBiofuel_C", 0.0901f, 0.1792f, 0.0491f, 0.0315f, 0.0627f, 0.0172f)  // Packaged Liquid Biofuel
+DTT_BAKED_COLOR("Desc_PackagedIonizedFuel_C", 0.7573f, 0.5789f, 0.0096f, 0.3515f, 0.0073f, 0.0111f)  // Packaged Ionized Fuel
+DTT_BAKED_COLOR("Desc_PackagedNitricAcid_C", 0.2224f, 0.2037f, 0.3133f, 0.7325f, 0.5046f, 0.1949f)  // Packaged Nitric Acid
+DTT_BAKED_COLOR("Desc_PackagedNitrogenGas_C", 0.2847f, 0.3001f, 0.4380f, 0.3237f, 0.2281f, 0.1111f)  // Packaged Nitrogen Gas
+DTT_BAKED_COLOR("Desc_PackagedOilResidue_C", 0.1543f, 0.0025f, 0.2457f, 0.0540f, 0.0009f, 0.0860f)  // Packaged Heavy Oil Residue
+DTT_BAKED_COLOR("Desc_PackagedOil_C", 0.8500f, 0.5908f, 0.1366f, 0.2975f, 0.2068f, 0.0478f)  // Packaged Oil
+DTT_BAKED_COLOR("Desc_PackagedRocketFuel_C", 0.4124f, 0.0019f, 0.0056f, 0.7699f, 0.5884f, 0.0309f)  // Packaged Rocket Fuel
+DTT_BAKED_COLOR("Desc_PackagedSulfuricAcid_C", 0.5660f, 0.5134f, 0.1211f, 0.1981f, 0.1797f, 0.0424f)  // Packaged Sulfuric Acid
+DTT_BAKED_COLOR("Desc_PackagedWater_C", 0.0473f, 0.1528f, 0.3159f, 0.0165f, 0.0535f, 0.1106f)  // Packaged Water
+DTT_BAKED_COLOR("Desc_Packager_C", 0.2208f, 0.1000f, 0.0503f, 0.1245f, 0.1404f, 0.2257f)  // Packager
+DTT_BAKED_COLOR("Desc_Parachute_C", 0.2884f, 0.4574f, 0.3027f, 0.1010f, 0.1601f, 0.1059f)  // Parachute
+DTT_BAKED_COLOR("Desc_PetroleumCoke_C", 0.0780f, 0.0859f, 0.1200f, 0.0273f, 0.0301f, 0.0420f)  // Petroleum Coke
+DTT_BAKED_COLOR("Desc_PillarBase_C", 0.4102f, 0.1970f, 0.0900f, 0.1436f, 0.0689f, 0.0315f)  // Big Pillar Support
+DTT_BAKED_COLOR("Desc_PillarBase_Small_C", 0.4717f, 0.2347f, 0.1103f, 0.1651f, 0.0821f, 0.0386f)  // Small Pillar Support
+DTT_BAKED_COLOR("Desc_PillarMiddle_C", 0.2633f, 0.2785f, 0.4050f, 0.0921f, 0.0975f, 0.1418f)  // Big Metal Pillar
+DTT_BAKED_COLOR("Desc_PillarMiddle_Concrete_C", 0.3531f, 0.5432f, 0.3734f, 0.4063f, 0.3614f, 0.5559f)  // Big Concrete Pillar
+DTT_BAKED_COLOR("Desc_PillarMiddle_Frame_C", 0.1375f, 0.1595f, 0.2149f, 0.0481f, 0.0558f, 0.0752f)  // Big Frame Pillar
+DTT_BAKED_COLOR("Desc_Pillar_Small_Concrete_C", 0.3495f, 0.5376f, 0.3566f, 0.5628f, 0.4123f, 0.3659f)  // Small Concrete Pillar
+DTT_BAKED_COLOR("Desc_Pillar_Small_Frame_C", 0.1613f, 0.1814f, 0.2481f, 0.2380f, 0.1547f, 0.2372f)  // Small Frame Pillar
+DTT_BAKED_COLOR("Desc_Pillar_Small_Metal_C", 0.3411f, 0.3122f, 0.4803f, 0.1194f, 0.1093f, 0.1681f)  // Small Metal Pillar
+DTT_BAKED_COLOR("Desc_PipeHyperStart_C", 0.3114f, 0.1239f, 0.0499f, 0.1090f, 0.0433f, 0.0175f)  // Hypertube Entrance
+DTT_BAKED_COLOR("Desc_PipeHyperSupport_C", 0.2316f, 0.0900f, 0.0345f, 0.0810f, 0.0315f, 0.0121f)  // Hypertube Support
+DTT_BAKED_COLOR("Desc_PipeHyper_C", 0.2064f, 0.1754f, 0.0934f, 0.1179f, 0.1677f, 0.2357f)  // Hypertube
+DTT_BAKED_COLOR("Desc_PipeStorageTank_C", 0.3364f, 0.1394f, 0.0472f, 0.1177f, 0.0488f, 0.0165f)  // Fluid Buffer
+DTT_BAKED_COLOR("Desc_PipeSupportStackable_C", 0.3742f, 0.1582f, 0.0618f, 0.1310f, 0.0554f, 0.0216f)  // Stackable Pipeline Support
+DTT_BAKED_COLOR("Desc_PipelineJunction_Cross_C", 0.6015f, 0.2552f, 0.0678f, 0.2105f, 0.0893f, 0.0237f)  // Pipeline Junction
+DTT_BAKED_COLOR("Desc_PipelineJunction_T_C", 0.5733f, 0.2396f, 0.0635f, 0.2007f, 0.0838f, 0.0222f)  // Pipeline T-Junction
+DTT_BAKED_COLOR("Desc_PipelineMK2_C", 0.4317f, 0.1835f, 0.0826f, 0.1511f, 0.0642f, 0.0289f)  // Pipeline Mk.2
+DTT_BAKED_COLOR("Desc_PipelineMK2_NoIndicator_C", 0.3878f, 0.1391f, 0.0582f, 0.1357f, 0.0487f, 0.0204f)  // Clean Pipeline Mk.2
+DTT_BAKED_COLOR("Desc_PipelinePumpMk2_C", 0.4850f, 0.1986f, 0.0685f, 0.1697f, 0.0695f, 0.0240f)  // Pipeline Pump Mk.2
+DTT_BAKED_COLOR("Desc_PipelinePump_C", 0.2385f, 0.1059f, 0.0564f, 0.0835f, 0.0370f, 0.0197f)  // Pipeline Pump Mk.1
+DTT_BAKED_COLOR("Desc_PipelineSupportWallHole_C", 0.3463f, 0.1320f, 0.0431f, 0.1212f, 0.0462f, 0.0151f)  // Pipeline Wall Hole
+DTT_BAKED_COLOR("Desc_PipelineSupportWall_C", 0.3404f, 0.1320f, 0.0442f, 0.1191f, 0.0462f, 0.0155f)  // Pipeline Wall Support
+DTT_BAKED_COLOR("Desc_PipelineSupport_C", 0.2569f, 0.0909f, 0.0284f, 0.0899f, 0.0318f, 0.0099f)  // Pipeline Support
+DTT_BAKED_COLOR("Desc_Pipeline_C", 0.4670f, 0.1866f, 0.0745f, 0.1634f, 0.0653f, 0.0261f)  // Pipeline Mk.1
+DTT_BAKED_COLOR("Desc_Pipeline_NoIndicator_C", 0.4135f, 0.1500f, 0.0639f, 0.1447f, 0.0525f, 0.0224f)  // Clean Pipeline Mk.1
+DTT_BAKED_COLOR("Desc_Plastic_C", 0.0445f, 0.3059f, 0.7493f, 0.0156f, 0.1071f, 0.2622f)  // Plastic
+DTT_BAKED_COLOR("Desc_PlutoniumCell_C", 0.4611f, 0.4279f, 0.0539f, 0.1614f, 0.1498f, 0.0189f)  // Encased Plutonium Cell
+DTT_BAKED_COLOR("Desc_PlutoniumFuelRod_C", 0.6183f, 0.5325f, 0.0637f, 0.2164f, 0.1864f, 0.0223f)  // Plutonium Fuel Rod
+DTT_BAKED_COLOR("Desc_PlutoniumPellet_C", 0.1651f, 0.2886f, 0.3457f, 0.0578f, 0.1010f, 0.1210f)  // Plutonium Pellet
+DTT_BAKED_COLOR("Desc_PlutoniumWaste_C", 0.4789f, 0.4279f, 0.0421f, 0.1676f, 0.1498f, 0.0147f)  // Plutonium Waste
+DTT_BAKED_COLOR("Desc_PolymerResin_C", 0.0519f, 0.0704f, 0.5378f, 0.0182f, 0.0246f, 0.1882f)  // Polymer Resin
+DTT_BAKED_COLOR("Desc_PortalPotty_C", 0.7076f, 0.3486f, 0.1011f, 0.2477f, 0.1220f, 0.0354f)  // SPWN
+DTT_BAKED_COLOR("Desc_PortalSatellite_C", 0.6467f, 0.2889f, 0.0644f, 0.2264f, 0.1011f, 0.0225f)  // Satellite Portal
+DTT_BAKED_COLOR("Desc_Portal_C", 0.6097f, 0.2695f, 0.0600f, 0.2134f, 0.0943f, 0.0210f)  // Main Portal
+DTT_BAKED_COLOR("Desc_PowerLine_C", 0.0396f, 0.4272f, 0.7346f, 0.0139f, 0.1495f, 0.2571f)  // Power Line
+DTT_BAKED_COLOR("Desc_PowerPoleMk1_C", 0.2631f, 0.1198f, 0.0495f, 0.0921f, 0.0419f, 0.0173f)  // Power Pole Mk.1
+DTT_BAKED_COLOR("Desc_PowerPoleMk2_C", 0.2497f, 0.0969f, 0.0404f, 0.1913f, 0.2521f, 0.2943f)  // Power Pole Mk.2
+DTT_BAKED_COLOR("Desc_PowerPoleMk3_C", 0.2301f, 0.1096f, 0.0575f, 0.0805f, 0.0383f, 0.0201f)  // Power Pole Mk.3
+DTT_BAKED_COLOR("Desc_PowerPoleWallDoubleMk2_C", 0.3753f, 0.3024f, 0.0799f, 0.0835f, 0.1250f, 0.1740f)  // Double Wall Outlet Mk.2
+DTT_BAKED_COLOR("Desc_PowerPoleWallDoubleMk3_C", 0.3994f, 0.3137f, 0.0760f, 0.1558f, 0.2134f, 0.2397f)  // Double Wall Outlet Mk.3
+DTT_BAKED_COLOR("Desc_PowerPoleWallDouble_C", 0.4076f, 0.3246f, 0.0615f, 0.1427f, 0.1136f, 0.0215f)  // Double Wall Outlet Mk.1
+DTT_BAKED_COLOR("Desc_PowerPoleWallMk2_C", 0.3428f, 0.2756f, 0.0573f, 0.0919f, 0.1306f, 0.1814f)  // Wall Outlet Mk.2
+DTT_BAKED_COLOR("Desc_PowerPoleWallMk3_C", 0.3646f, 0.2848f, 0.0537f, 0.1864f, 0.2580f, 0.2867f)  // Wall Outlet Mk.3
+DTT_BAKED_COLOR("Desc_PowerPoleWall_C", 0.3588f, 0.2766f, 0.0449f, 0.1256f, 0.0968f, 0.0157f)  // Wall Outlet Mk.1
+DTT_BAKED_COLOR("Desc_PowerStorageMk1_C", 0.5149f, 0.2248f, 0.0988f, 0.1802f, 0.0787f, 0.0346f)  // Power Storage
+DTT_BAKED_COLOR("Desc_PowerSwitch_C", 0.6308f, 0.3087f, 0.1459f, 0.2208f, 0.1081f, 0.0511f)  // Power Switch
+DTT_BAKED_COLOR("Desc_PowerTowerPlatform_C", 0.5879f, 0.3053f, 0.1160f, 0.2058f, 0.1068f, 0.0406f)  // Power Tower Platform
+DTT_BAKED_COLOR("Desc_PowerTower_C", 0.6117f, 0.3143f, 0.1199f, 0.2141f, 0.1100f, 0.0420f)  // Power Tower
+DTT_BAKED_COLOR("Desc_PressureConversionCube_C", 0.5208f, 0.2482f, 0.1186f, 0.1823f, 0.0869f, 0.0415f)  // Pressure Conversion Cube
+DTT_BAKED_COLOR("Desc_PriorityPowerSwitch_C", 0.7778f, 0.4860f, 0.2400f, 0.2722f, 0.1701f, 0.0840f)  // Priority Power Switch
+DTT_BAKED_COLOR("Desc_PropaneGas_C", 0.7859f, 0.8500f, 0.0051f, 0.3800f, 0.1349f, 0.0220f)  // Propane Gas
+DTT_BAKED_COLOR("Desc_QuantumCrystal_C", 0.6898f, 0.3687f, 0.1198f, 0.2414f, 0.1291f, 0.0419f)  // Quantum Crystal - DISCONTINUED
+DTT_BAKED_COLOR("Desc_QuantumEncoder_C", 0.5721f, 0.2785f, 0.1064f, 0.2002f, 0.0975f, 0.0372f)  // Quantum Encoder
+DTT_BAKED_COLOR("Desc_QuantumEnergy_C", 0.4331f, 0.1864f, 0.0558f, 0.1516f, 0.0652f, 0.0195f)  // Excited Photonic Matter
+DTT_BAKED_COLOR("Desc_QuantumOscillator_C", 0.5529f, 0.2551f, 0.1127f, 0.1542f, 0.1688f, 0.2452f)  // Superposition Oscillator
+DTT_BAKED_COLOR("Desc_QuarterPipeCorner_01_C", 0.1250f, 0.1367f, 0.1924f, 0.0438f, 0.0478f, 0.0673f)  // Inner Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipeCorner_02_C", 0.1814f, 0.1697f, 0.2611f, 0.0635f, 0.0594f, 0.0914f)  // Inverted Inner Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipeCorner_03_C", 0.1672f, 0.1524f, 0.2345f, 0.0585f, 0.0534f, 0.0821f)  // Outer Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipeCorner_04_C", 0.1754f, 0.1645f, 0.2531f, 0.0614f, 0.0576f, 0.0886f)  // Inverted Outer Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipeInCorner_Asphalt_8x4_C", 0.1084f, 0.1026f, 0.1579f, 0.0379f, 0.0359f, 0.0553f)  // Inner Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipeInCorner_ConcretePolished_8x4_C", 0.1355f, 0.1477f, 0.2085f, 0.0474f, 0.0517f, 0.0730f)  // Inner Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipeInCorner_Concrete_8x4_C", 0.1089f, 0.1244f, 0.1676f, 0.4592f, 0.2985f, 0.4592f)  // Inner Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipeInCorner_Grip_8x4_C", 0.1999f, 0.2192f, 0.3175f, 0.0700f, 0.0767f, 0.1111f)  // Inner Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_Asphalt_8x1_C", 0.1220f, 0.1156f, 0.1779f, 0.0427f, 0.0405f, 0.0623f)  // Inner Corner Extension (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_Asphalt_8x2_C", 0.1215f, 0.1158f, 0.1782f, 0.0425f, 0.0405f, 0.0624f)  // Inner Corner Extension (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_Asphalt_8x4_C", 0.1303f, 0.1233f, 0.1896f, 0.0456f, 0.0431f, 0.0664f)  // Inner Corner Extension (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_Concrete_8x1_C", 0.3849f, 0.2502f, 0.3849f, 0.1393f, 0.2143f, 0.1393f)  // Inner Corner Extension (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_Concrete_8x2_C", 0.1162f, 0.1788f, 0.1162f, 0.3687f, 0.2397f, 0.3682f)  // Inner Corner Extension (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_Concrete_8x4_C", 0.1166f, 0.1794f, 0.1166f, 0.0408f, 0.0628f, 0.0408f)  // Inner Corner Extension (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_Ficsit_8x1_C", 0.1628f, 0.1741f, 0.2505f, 0.0570f, 0.0609f, 0.0877f)  // Inner Corner Extension (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_Ficsit_8x2_C", 0.1567f, 0.1669f, 0.2410f, 0.0548f, 0.0584f, 0.0844f)  // Inner Corner Extension (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_Ficsit_8x4_C", 0.1423f, 0.1521f, 0.2189f, 0.0498f, 0.0532f, 0.0766f)  // Inner Corner Extension (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_Grip_8x1_C", 0.2440f, 0.2570f, 0.3754f, 0.0854f, 0.0899f, 0.1314f)  // Inner Corner Extension (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_Grip_8x2_C", 0.2363f, 0.2477f, 0.3636f, 0.0827f, 0.0867f, 0.1272f)  // Inner Corner Extension (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_Grip_8x4_C", 0.1993f, 0.2102f, 0.3067f, 0.0698f, 0.0736f, 0.1073f)  // Inner Corner Extension (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_PolishedConcrete_8x1_C", 0.2687f, 0.2885f, 0.4134f, 0.0940f, 0.1010f, 0.1447f)  // Inner Corner Extension (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_PolishedConcrete_8x2_C", 0.2814f, 0.2987f, 0.4330f, 0.0985f, 0.1045f, 0.1515f)  // Inner Corner Extension (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleInCorner_PolishedConcrete_8x4_C", 0.2852f, 0.3005f, 0.4388f, 0.0998f, 0.1052f, 0.1536f)  // Inner Corner Extension (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_Asphalt_4x1_C", 0.1276f, 0.1212f, 0.1864f, 0.0447f, 0.0424f, 0.0652f)  // Outer Corner Extension (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_Asphalt_4x2_C", 0.1332f, 0.1258f, 0.1936f, 0.1038f, 0.1596f, 0.1038f)  // Outer Corner Extension (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_Asphalt_4x4_C", 0.1041f, 0.1602f, 0.1043f, 0.1406f, 0.1338f, 0.2058f)  // Outer Corner Extension (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_Concrete_4x1_C", 0.1037f, 0.1595f, 0.1037f, 0.3867f, 0.2514f, 0.3857f)  // Outer Corner Extension (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_Concrete_4x2_C", 0.0976f, 0.1502f, 0.0976f, 0.3185f, 0.2798f, 0.4304f)  // Outer Corner Extension (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_Concrete_4x4_C", 0.0973f, 0.1496f, 0.0973f, 0.0340f, 0.0524f, 0.0340f)  // Outer Corner Extension (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_Ficsit_4x1_C", 0.1638f, 0.1755f, 0.2520f, 0.0573f, 0.0614f, 0.0882f)  // Outer Corner Extension (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_Ficsit_4x2_C", 0.1476f, 0.1585f, 0.2271f, 0.0517f, 0.0555f, 0.0795f)  // Outer Corner Extension (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_Ficsit_4x4_C", 0.1380f, 0.1484f, 0.2124f, 0.0483f, 0.0519f, 0.0743f)  // Outer Corner Extension (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_Grip_4x1_C", 0.2207f, 0.2310f, 0.3395f, 0.0772f, 0.0809f, 0.1188f)  // Outer Corner Extension (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_Grip_4x2_C", 0.2256f, 0.2357f, 0.3470f, 0.0790f, 0.0825f, 0.1215f)  // Outer Corner Extension (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_Grip_4x4_C", 0.2199f, 0.2318f, 0.3383f, 0.0770f, 0.0811f, 0.1184f)  // Outer Corner Extension (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_PolishedConcrete_4x1_C", 0.3809f, 0.3537f, 0.5442f, 0.1333f, 0.1238f, 0.1905f)  // Outer Corner Extension (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_PolishedConcrete_4x2_C", 0.4106f, 0.3776f, 0.5810f, 0.0780f, 0.1200f, 0.0850f)  // Outer Corner Extension (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddleOutCorner_PolishedConcrete_4x4_C", 0.0780f, 0.1200f, 0.0817f, 0.3160f, 0.3380f, 0.4862f)  // Outer Corner Extension (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_Asphalt_8x1_C", 0.1129f, 0.1072f, 0.1650f, 0.0395f, 0.0375f, 0.0577f)  // Half Foundation (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_Asphalt_8x2_C", 0.1080f, 0.1044f, 0.1606f, 0.0378f, 0.0365f, 0.0562f)  // Half Foundation (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_Asphalt_8x4_C", 0.1189f, 0.1150f, 0.1769f, 0.0884f, 0.1360f, 0.0884f)  // Half Foundation (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_Concrete_8x1_C", 0.3946f, 0.2565f, 0.3946f, 0.1097f, 0.1688f, 0.1097f)  // Half Foundation (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_Concrete_8x2_C", 0.1162f, 0.1787f, 0.1162f, 0.3845f, 0.2499f, 0.3845f)  // Half Foundation (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_Concrete_8x4_C", 0.1050f, 0.1615f, 0.1050f, 0.3444f, 0.2239f, 0.3444f)  // Half Foundation (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_Ficsit_4x1_C", 0.1665f, 0.1791f, 0.2562f, 0.0583f, 0.0627f, 0.0897f)  // Half Foundation (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_Ficsit_4x2_C", 0.1574f, 0.1687f, 0.2422f, 0.0551f, 0.0590f, 0.0848f)  // Half Foundation (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_Ficsit_4x4_C", 0.1363f, 0.1465f, 0.2097f, 0.0477f, 0.0513f, 0.0734f)  // Half Foundation (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_Grip_8x1_C", 0.2374f, 0.2484f, 0.3652f, 0.0831f, 0.0869f, 0.1278f)  // Half Foundation (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_Grip_8x2_C", 0.2333f, 0.2437f, 0.3589f, 0.0817f, 0.0853f, 0.1256f)  // Half Foundation (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_Grip_8x4_C", 0.2289f, 0.2391f, 0.3521f, 0.0801f, 0.0837f, 0.1232f)  // Half Foundation (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_PolishedConcrete_8x1_C", 0.3478f, 0.3224f, 0.4960f, 0.1217f, 0.1128f, 0.1736f)  // Half Foundation (1 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_PolishedConcrete_8x2_C", 0.3575f, 0.3313f, 0.5097f, 0.0780f, 0.1200f, 0.0780f)  // Half Foundation (2 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeMiddle_PolishedConcrete_8x4_C", 0.0780f, 0.1200f, 0.0788f, 0.3048f, 0.3256f, 0.4689f)  // Half Foundation (4 m)
+DTT_BAKED_COLOR("Desc_QuarterPipeOutCorner_Asphalt_8x4_C", 0.1101f, 0.1018f, 0.1566f, 0.0385f, 0.0356f, 0.0548f)  // Outer Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipeOutCorner_ConcretePolished_8x4_C", 0.2732f, 0.2456f, 0.3778f, 0.0780f, 0.1200f, 0.0780f)  // Outer Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipeOutCorner_Concrete_8x4_C", 0.4542f, 0.2952f, 0.4538f, 0.1590f, 0.1033f, 0.1588f)  // Outer Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipeOutCorner_Grip_8x4_C", 0.2005f, 0.2104f, 0.3085f, 0.0702f, 0.0736f, 0.1080f)  // Outer Corner Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipe_02_C", 0.1908f, 0.1754f, 0.2698f, 0.0668f, 0.0614f, 0.0944f)  // Inverted Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipe_Asphalt_8x4_C", 0.1026f, 0.0957f, 0.1472f, 0.0359f, 0.0335f, 0.0515f)  // Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipe_C", 0.1514f, 0.1393f, 0.2142f, 0.0530f, 0.0487f, 0.0750f)  // Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipe_ConcretePolished_8x4_C", 0.2378f, 0.2186f, 0.3363f, 0.0832f, 0.0765f, 0.1177f)  // Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipe_Concrete_8x4_C", 0.4340f, 0.2821f, 0.4340f, 0.1519f, 0.0987f, 0.1519f)  // Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuarterPipe_Grip_8x4_C", 0.2002f, 0.2131f, 0.3080f, 0.0701f, 0.0746f, 0.1078f)  // Quarter Pipe
+DTT_BAKED_COLOR("Desc_QuartzCrystal_C", 0.0648f, 0.1058f, 0.5018f, 0.1982f, 0.0467f, 0.2361f)  // Quartz Crystal
+DTT_BAKED_COLOR("Desc_RadarTower_C", 0.5166f, 0.2572f, 0.0760f, 0.1233f, 0.1683f, 0.1979f)  // Radar Tower
+DTT_BAKED_COLOR("Desc_Railing_01_C", 0.4007f, 0.1974f, 0.1245f, 0.1403f, 0.0691f, 0.0436f)  // Modern Railing
+DTT_BAKED_COLOR("Desc_RailroadBlockSignal_C", 0.1574f, 0.1886f, 0.2827f, 0.2939f, 0.4948f, 0.2594f)  // Block Signal
+DTT_BAKED_COLOR("Desc_RailroadEndStop_C", 0.4399f, 0.1924f, 0.0435f, 0.1540f, 0.0674f, 0.0152f)  // Buffer Stop
+DTT_BAKED_COLOR("Desc_RailroadPathSignal_C", 0.3579f, 0.1836f, 0.1373f, 0.1542f, 0.1797f, 0.2986f)  // Path Signal
+DTT_BAKED_COLOR("Desc_RailroadSwitchControl_C", 0.8500f, 0.5525f, 0.5525f, 0.2975f, 0.1934f, 0.1934f)  // Railroad Switch Control
+DTT_BAKED_COLOR("Desc_RailroadTrackIntegrated_C", 0.0892f, 0.1282f, 0.1373f, 0.1156f, 0.1778f, 0.1373f)  // Integrated Platform Track
+DTT_BAKED_COLOR("Desc_RailroadTrack_C", 0.0892f, 0.1282f, 0.1373f, 0.1156f, 0.1778f, 0.1373f)  // Railway
+DTT_BAKED_COLOR("Desc_RampDouble_8x1_C", 0.1171f, 0.1282f, 0.1802f, 0.0410f, 0.0449f, 0.0631f)  // Double Ramp (2 m)
+DTT_BAKED_COLOR("Desc_RampDouble_Asphalt_8x1_C", 0.0841f, 0.0905f, 0.1299f, 0.2316f, 0.2068f, 0.1506f)  // Double Ramp (2 m)
+DTT_BAKED_COLOR("Desc_RampDouble_Asphalt_8x2_C", 0.2173f, 0.1959f, 0.1413f, 0.1297f, 0.0843f, 0.1297f)  // Double Ramp (4 m)
+DTT_BAKED_COLOR("Desc_RampDouble_Asphalt_8x4_C", 0.2104f, 0.1917f, 0.1368f, 0.0625f, 0.0781f, 0.1200f)  // Double Ramp (8 m)
+DTT_BAKED_COLOR("Desc_RampDouble_C", 0.1162f, 0.1294f, 0.1788f, 0.0407f, 0.0453f, 0.0626f)  // Double Ramp (4 m)
+DTT_BAKED_COLOR("Desc_RampDouble_Concrete_8x1_C", 0.1730f, 0.1980f, 0.2662f, 0.0606f, 0.0693f, 0.0932f)  // Double Ramp (2 m)
+DTT_BAKED_COLOR("Desc_RampDouble_Concrete_8x2_C", 0.1747f, 0.1995f, 0.2688f, 0.0612f, 0.0698f, 0.0941f)  // Double Ramp (4 m)
+DTT_BAKED_COLOR("Desc_RampDouble_Concrete_8x4_C", 0.2138f, 0.1390f, 0.2138f, 0.1342f, 0.2065f, 0.1342f)  // Double Ramp (8 m)
+DTT_BAKED_COLOR("Desc_RampDouble_Metal_8x1_C", 0.1866f, 0.2107f, 0.3301f, 0.0653f, 0.0738f, 0.1155f)  // Double Ramp (2 m)
+DTT_BAKED_COLOR("Desc_RampDouble_Metal_8x2_C", 0.1800f, 0.2065f, 0.3279f, 0.0630f, 0.0723f, 0.1148f)  // Double Ramp (4 m)
+DTT_BAKED_COLOR("Desc_RampDouble_Metal_8x4_C", 0.1910f, 0.2177f, 0.3350f, 0.0668f, 0.0762f, 0.1173f)  // Double Ramp (8 m)
+DTT_BAKED_COLOR("Desc_RampDouble_Polished_8x1_C", 0.1739f, 0.1563f, 0.1131f, 0.0609f, 0.0547f, 0.0396f)  // Double Ramp (2 m)
+DTT_BAKED_COLOR("Desc_RampDouble_Polished_8x2_C", 0.1550f, 0.1380f, 0.1007f, 0.0542f, 0.0483f, 0.0353f)  // Double Ramp (4 m)
+DTT_BAKED_COLOR("Desc_RampDouble_Polished_8x4_C", 0.1866f, 0.1660f, 0.1213f, 0.0653f, 0.0581f, 0.0424f)  // Double Ramp (8 m)
+DTT_BAKED_COLOR("Desc_RampInverted_8x1_C", 0.1455f, 0.1570f, 0.2238f, 0.0509f, 0.0549f, 0.0783f)  // Inverted Ramp (1 m)
+DTT_BAKED_COLOR("Desc_RampInverted_8x1_Corner_01_C", 0.1201f, 0.1281f, 0.1848f, 0.0420f, 0.0448f, 0.0647f)  // Inverted Up Corner (1 m)
+DTT_BAKED_COLOR("Desc_RampInverted_8x1_Corner_02_C", 0.1658f, 0.1793f, 0.2550f, 0.0580f, 0.0627f, 0.0893f)  // Inverted Down Corner (1 m)
+DTT_BAKED_COLOR("Desc_RampInverted_8x2_01_C", 0.1488f, 0.1596f, 0.2289f, 0.0521f, 0.0559f, 0.0801f)  // Inverted Ramp (2 m)
+DTT_BAKED_COLOR("Desc_RampInverted_8x2_Corner_01_C", 0.1170f, 0.1257f, 0.1800f, 0.0410f, 0.0440f, 0.0630f)  // Inverted Up Corner (2 m)
+DTT_BAKED_COLOR("Desc_RampInverted_8x2_Corner_02_C", 0.1604f, 0.1727f, 0.2468f, 0.0561f, 0.0604f, 0.0864f)  // Inverted Down Corner (2 m)
+DTT_BAKED_COLOR("Desc_RampInverted_8x4_Corner_01_C", 0.1290f, 0.1396f, 0.1985f, 0.0452f, 0.0488f, 0.0695f)  // Inverted Up Corner (4 m)
+DTT_BAKED_COLOR("Desc_RampInverted_8x4_Corner_02_C", 0.1651f, 0.1802f, 0.2540f, 0.0578f, 0.0631f, 0.0889f)  // Inverted Down Corner (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_8x1_01_C", 0.1192f, 0.1299f, 0.1834f, 0.0417f, 0.0455f, 0.0642f)  // Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_8x2_01_C", 0.1154f, 0.1280f, 0.1776f, 0.0404f, 0.0448f, 0.0621f)  // Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_8x4_01_C", 0.1298f, 0.1456f, 0.1996f, 0.0454f, 0.0509f, 0.0699f)  // Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_8x4_Inverted_01_C", 0.1449f, 0.1562f, 0.2229f, 0.0507f, 0.0547f, 0.0780f)  // Inverted Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_8x8x8_C", 0.1234f, 0.1382f, 0.1899f, 0.0432f, 0.0484f, 0.0665f)  // Double Ramp (8 m)
+DTT_BAKED_COLOR("Desc_Ramp_Asphalt_8x1_C", 0.0780f, 0.0835f, 0.1200f, 0.1200f, 0.0780f, 0.1200f)  // Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_Asphalt_8x2_C", 0.0780f, 0.0842f, 0.1200f, 0.0273f, 0.0295f, 0.0420f)  // Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_Asphalt_8x4_C", 0.0780f, 0.0894f, 0.1200f, 0.1200f, 0.0780f, 0.1200f)  // Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_Concrete_8x1_C", 0.1729f, 0.1969f, 0.2661f, 0.0605f, 0.0689f, 0.0931f)  // Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_Concrete_8x2_C", 0.1740f, 0.1985f, 0.2677f, 0.0609f, 0.0695f, 0.0937f)  // Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_Concrete_8x4_C", 0.2002f, 0.1876f, 0.2886f, 0.2379f, 0.1547f, 0.2379f)  // Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_Diagonal_8x1_01_C", 0.1105f, 0.1206f, 0.1700f, 0.0387f, 0.0422f, 0.0595f)  // Down Corner Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_Diagonal_8x1_02_C", 0.0926f, 0.1025f, 0.1425f, 0.0324f, 0.0359f, 0.0499f)  // Up Corner Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_Diagonal_8x2_01_C", 0.1148f, 0.1258f, 0.1766f, 0.0402f, 0.0440f, 0.0618f)  // Down Corner Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_Diagonal_8x2_02_C", 0.0966f, 0.1073f, 0.1486f, 0.0338f, 0.0376f, 0.0520f)  // Up Corner Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_Diagonal_8x4_01_C", 0.1343f, 0.1496f, 0.2065f, 0.0470f, 0.0524f, 0.0723f)  // Down Corner Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_Diagonal_8x4_02_C", 0.1146f, 0.1282f, 0.1763f, 0.0401f, 0.0449f, 0.0617f)  // Up Corner Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_DownCorner_Asphalt_8x1_C", 0.0780f, 0.0830f, 0.1200f, 0.0273f, 0.0291f, 0.0420f)  // Down Corner Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_DownCorner_Asphalt_8x2_C", 0.0836f, 0.0813f, 0.1250f, 0.0293f, 0.0284f, 0.0438f)  // Down Corner Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_DownCorner_Asphalt_8x4_C", 0.0895f, 0.0867f, 0.1334f, 0.0313f, 0.0303f, 0.0467f)  // Down Corner Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_DownCorner_Concrete_8x1_C", 0.1832f, 0.2098f, 0.2818f, 0.0641f, 0.0734f, 0.0986f)  // Down Corner Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_DownCorner_Concrete_8x2_C", 0.1963f, 0.2199f, 0.3019f, 0.0687f, 0.0770f, 0.1057f)  // Down Corner Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_DownCorner_Concrete_8x4_C", 0.2547f, 0.2326f, 0.3579f, 0.3228f, 0.2098f, 0.3228f)  // Down Corner Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_DownCorner_Metal_8x1_C", 0.1891f, 0.2109f, 0.3209f, 0.0662f, 0.0738f, 0.1123f)  // Down Corner Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_DownCorner_Metal_8x2_C", 0.2011f, 0.2236f, 0.3350f, 0.0704f, 0.0783f, 0.1173f)  // Down Corner Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_DownCorner_Metal_8x4_C", 0.2467f, 0.2705f, 0.3795f, 0.0863f, 0.0947f, 0.1328f)  // Down Corner Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_DownCorner_Polished_8x1_C", 0.1620f, 0.1454f, 0.1053f, 0.0567f, 0.0509f, 0.0369f)  // Down Corner Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_DownCorner_Polished_8x2_C", 0.1632f, 0.1471f, 0.1061f, 0.0571f, 0.0515f, 0.0371f)  // Down Corner Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_DownCorner_Polished_8x4_C", 0.1546f, 0.1381f, 0.1005f, 0.0541f, 0.0483f, 0.0352f)  // Down Corner Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_Frame_01_C", 0.0980f, 0.1109f, 0.1539f, 0.0343f, 0.0388f, 0.0539f)  // Frame Ramp
+DTT_BAKED_COLOR("Desc_Ramp_Frame_Inverted_01_C", 0.0955f, 0.1091f, 0.1545f, 0.0334f, 0.0382f, 0.0541f)  // Inverted Frame Ramp
+DTT_BAKED_COLOR("Desc_Ramp_Metal_8x1_C", 0.1891f, 0.2129f, 0.3317f, 0.0662f, 0.0745f, 0.1161f)  // Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_Metal_8x2_C", 0.1815f, 0.2073f, 0.3292f, 0.0635f, 0.0725f, 0.1152f)  // Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_Metal_8x4_C", 0.1950f, 0.2220f, 0.3408f, 0.0682f, 0.0777f, 0.1193f)  // Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_Polished_8x1_C", 0.1877f, 0.1686f, 0.1220f, 0.0657f, 0.0590f, 0.0427f)  // Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_Polished_8x2_C", 0.1989f, 0.1765f, 0.1293f, 0.0696f, 0.0618f, 0.0452f)  // Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_Polished_8x4_C", 0.2106f, 0.1878f, 0.1369f, 0.0737f, 0.0657f, 0.0479f)  // Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_UpCorner_Asphalt_8x1_C", 0.0849f, 0.0780f, 0.1200f, 0.3258f, 0.2924f, 0.2118f)  // Up Corner Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_UpCorner_Asphalt_8x2_C", 0.3242f, 0.2902f, 0.2107f, 0.0827f, 0.0780f, 0.1200f)  // Up Corner Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_UpCorner_Asphalt_8x4_C", 0.0856f, 0.0780f, 0.1200f, 0.0300f, 0.0273f, 0.0420f)  // Up Corner Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_UpCorner_Concrete_8x1_C", 0.1754f, 0.1988f, 0.2698f, 0.0614f, 0.0696f, 0.0944f)  // Up Corner Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_UpCorner_Concrete_8x2_C", 0.1822f, 0.2072f, 0.2803f, 0.0638f, 0.0725f, 0.0981f)  // Up Corner Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_UpCorner_Concrete_8x4_C", 0.3043f, 0.1978f, 0.3043f, 0.1065f, 0.0692f, 0.1065f)  // Up Corner Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_UpCorner_Metal_8x1_C", 0.1643f, 0.1897f, 0.3091f, 0.0575f, 0.0664f, 0.1082f)  // Up Corner Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_UpCorner_Metal_8x2_C", 0.1746f, 0.2027f, 0.3233f, 0.0611f, 0.0710f, 0.1131f)  // Up Corner Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_UpCorner_Metal_8x4_C", 0.2152f, 0.2453f, 0.3674f, 0.0753f, 0.0859f, 0.1286f)  // Up Corner Ramp (4 m)
+DTT_BAKED_COLOR("Desc_Ramp_UpCorner_Polished_8x1_C", 0.1778f, 0.1591f, 0.1156f, 0.0622f, 0.0557f, 0.0405f)  // Up Corner Ramp (1 m)
+DTT_BAKED_COLOR("Desc_Ramp_UpCorner_Polished_8x2_C", 0.1765f, 0.1585f, 0.1148f, 0.0618f, 0.0555f, 0.0402f)  // Up Corner Ramp (2 m)
+DTT_BAKED_COLOR("Desc_Ramp_UpCorner_Polished_8x4_C", 0.1824f, 0.1609f, 0.1186f, 0.0638f, 0.0563f, 0.0415f)  // Up Corner Ramp (4 m)
+DTT_BAKED_COLOR("Desc_RawQuartz_C", 0.5220f, 0.2278f, 0.4719f, 0.1446f, 0.1008f, 0.2389f)  // Raw Quartz ping=0.984/1.000/0.765
+DTT_BAKED_COLOR("Desc_RebarGunProjectile_C", 0.1711f, 0.1238f, 0.0213f, 0.1833f, 0.0833f, 0.0921f)  // Rebar Gun
+DTT_BAKED_COLOR("Desc_RebarGun_C", 0.1711f, 0.1238f, 0.0213f, 0.1833f, 0.0833f, 0.0921f)  // Rebar Gun (OLD)
+DTT_BAKED_COLOR("Desc_Rebar_Aluminum_C", 0.5753f, 0.1982f, 0.0190f, 0.2014f, 0.0694f, 0.0067f)  // Aluminum Rebar
+DTT_BAKED_COLOR("Desc_Rebar_ChemicalShot_C", 0.8168f, 0.5764f, 0.0577f, 0.2859f, 0.2017f, 0.0202f)  // Rebar Syringe
+DTT_BAKED_COLOR("Desc_Rebar_Explosive_C", 0.3326f, 0.0131f, 0.0166f, 0.1164f, 0.0046f, 0.0058f)  // Explosive Rebar
+DTT_BAKED_COLOR("Desc_Rebar_Hookshot_C", 0.8168f, 0.5764f, 0.0577f, 0.2859f, 0.2017f, 0.0202f)  // Rebar Hookshot
+DTT_BAKED_COLOR("Desc_Rebar_Rocket_C", 0.8168f, 0.5764f, 0.0577f, 0.2859f, 0.2017f, 0.0202f)  // Rocket Rebar
+DTT_BAKED_COLOR("Desc_Rebar_Spreadshot_C", 0.1962f, 0.0462f, 0.1708f, 0.0687f, 0.0162f, 0.0598f)  // Shatter Rebar
+DTT_BAKED_COLOR("Desc_Rebar_Steel_C", 0.8168f, 0.5764f, 0.0577f, 0.2859f, 0.2017f, 0.0202f)  // Steel Rebar
+DTT_BAKED_COLOR("Desc_Rebar_Stunshot_C", 0.0099f, 0.1782f, 0.3816f, 0.0035f, 0.0624f, 0.1336f)  // Stun Rebar
+DTT_BAKED_COLOR("Desc_RemoteFactory_C", 0.2162f, 0.4111f, 0.4774f, 0.0757f, 0.1439f, 0.1671f)  // Remote Factory
+DTT_BAKED_COLOR("Desc_ResourceSinkCoupon_C", 0.7685f, 0.3390f, 0.1166f, 0.2690f, 0.1186f, 0.0408f)  // FICSIT Coupon
+DTT_BAKED_COLOR("Desc_ResourceSinkShop_C", 0.2768f, 0.1236f, 0.0598f, 0.0969f, 0.0433f, 0.0209f)  // AWESOME Shop
+DTT_BAKED_COLOR("Desc_ResourceSink_C", 0.4679f, 0.2845f, 0.1332f, 0.1638f, 0.0996f, 0.0466f)  // AWESOME Sink
+DTT_BAKED_COLOR("Desc_RocketFuel_C", 0.6608f, 0.0958f, 0.0156f, 0.2313f, 0.0335f, 0.0055f)  // Rocket Fuel
+DTT_BAKED_COLOR("Desc_Roof_A_01_C", 0.3681f, 0.3428f, 0.5273f, 0.1288f, 0.1200f, 0.1846f)  // Flat Roof
+DTT_BAKED_COLOR("Desc_Roof_A_02_C", 0.2772f, 0.2965f, 0.4265f, 0.0970f, 0.1038f, 0.1493f)  // Roof (1 m)
+DTT_BAKED_COLOR("Desc_Roof_A_03_C", 0.2492f, 0.2682f, 0.3835f, 0.0872f, 0.0939f, 0.1342f)  // Roof (2 m)
+DTT_BAKED_COLOR("Desc_Roof_A_04_C", 0.1690f, 0.1974f, 0.3101f, 0.0591f, 0.0691f, 0.1085f)  // Roof (4 m)
+DTT_BAKED_COLOR("Desc_Roof_Metal_InCorner_01_C", 0.2212f, 0.2400f, 0.3402f, 0.0774f, 0.0840f, 0.1191f)  // Inner Corner Roof (1 m)
+DTT_BAKED_COLOR("Desc_Roof_Metal_InCorner_02_C", 0.2262f, 0.2435f, 0.3480f, 0.0792f, 0.0852f, 0.1218f)  // Inner Corner Roof (2 m)
+DTT_BAKED_COLOR("Desc_Roof_Metal_InCorner_03_C", 0.2221f, 0.2390f, 0.3417f, 0.0777f, 0.0836f, 0.1196f)  // Inner Corner Roof (4 m)
+DTT_BAKED_COLOR("Desc_Roof_Metal_OutCorner_01_C", 0.3277f, 0.3015f, 0.4639f, 0.1147f, 0.1055f, 0.1623f)  // Outer Corner Roof (1 m)
+DTT_BAKED_COLOR("Desc_Roof_Metal_OutCorner_02_C", 0.2369f, 0.2549f, 0.3645f, 0.0829f, 0.0892f, 0.1276f)  // Outer Corner Roof (2 m)
+DTT_BAKED_COLOR("Desc_Roof_Metal_OutCorner_03_C", 0.2302f, 0.2465f, 0.3542f, 0.0806f, 0.0863f, 0.1240f)  // Outer Corner Roof (4 m)
+DTT_BAKED_COLOR("Desc_Roof_Orange_01_C", 0.8500f, 0.5028f, 0.2891f, 0.2975f, 0.1760f, 0.1012f)  // Flat Roof
+DTT_BAKED_COLOR("Desc_Roof_Orange_02_C", 0.8500f, 0.4678f, 0.2340f, 0.2975f, 0.1637f, 0.0819f)  // Roof (1 m)
+DTT_BAKED_COLOR("Desc_Roof_Orange_03_C", 0.8500f, 0.4258f, 0.1720f, 0.2975f, 0.1490f, 0.0602f)  // Roof (2 m)
+DTT_BAKED_COLOR("Desc_Roof_Orange_04_C", 0.7832f, 0.3329f, 0.1003f, 0.2741f, 0.1165f, 0.0351f)  // Roof (4 m)
+DTT_BAKED_COLOR("Desc_Roof_Orange_InCorner_01_C", 0.7885f, 0.4323f, 0.2765f, 0.2760f, 0.1513f, 0.0968f)  // Inner Corner Roof (1 m)
+DTT_BAKED_COLOR("Desc_Roof_Orange_InCorner_02_C", 0.7803f, 0.4260f, 0.2637f, 0.2731f, 0.1491f, 0.0923f)  // Inner Corner Roof (2 m)
+DTT_BAKED_COLOR("Desc_Roof_Orange_InCorner_03_C", 0.7611f, 0.3862f, 0.2051f, 0.2664f, 0.1352f, 0.0718f)  // Inner Corner Roof (4 m)
+DTT_BAKED_COLOR("Desc_Roof_Orange_OutCorner_01_C", 0.7851f, 0.4118f, 0.2405f, 0.2748f, 0.1441f, 0.0842f)  // Outer Corner Roof (1 m)
+DTT_BAKED_COLOR("Desc_Roof_Orange_OutCorner_02_C", 0.8246f, 0.4254f, 0.2318f, 0.2886f, 0.1489f, 0.0811f)  // Outer Corner Roof (2 m)
+DTT_BAKED_COLOR("Desc_Roof_Orange_OutCorner_03_C", 0.7818f, 0.3589f, 0.1458f, 0.2736f, 0.1256f, 0.0510f)  // Outer Corner Roof (4 m)
+DTT_BAKED_COLOR("Desc_Roof_Tar_01_C", 0.1669f, 0.1420f, 0.2184f, 0.0584f, 0.0497f, 0.0764f)  // Flat Roof
+DTT_BAKED_COLOR("Desc_Roof_Tar_02_C", 0.1411f, 0.1211f, 0.1863f, 0.0494f, 0.0424f, 0.0652f)  // Roof (1 m)
+DTT_BAKED_COLOR("Desc_Roof_Tar_03_C", 0.1114f, 0.0979f, 0.1507f, 0.0390f, 0.0343f, 0.0527f)  // Roof (2 m)
+DTT_BAKED_COLOR("Desc_Roof_Tar_04_C", 0.0854f, 0.0780f, 0.1200f, 0.0299f, 0.0273f, 0.0420f)  // Roof (4 m)
+DTT_BAKED_COLOR("Desc_Roof_Tar_InCorner_01_C", 0.0863f, 0.0780f, 0.1200f, 0.0302f, 0.0273f, 0.0420f)  // Inner Corner Roof (1 m)
+DTT_BAKED_COLOR("Desc_Roof_Tar_InCorner_02_C", 0.0860f, 0.0780f, 0.1200f, 0.0301f, 0.0273f, 0.0420f)  // Inner Corner Roof (2 m)
+DTT_BAKED_COLOR("Desc_Roof_Tar_InCorner_03_C", 0.0829f, 0.0780f, 0.1200f, 0.0290f, 0.0273f, 0.0420f)  // Inner Corner Roof (4 m)
+DTT_BAKED_COLOR("Desc_Roof_Tar_OutCorner_01_C", 0.0891f, 0.0806f, 0.1239f, 0.0312f, 0.0282f, 0.0434f)  // Outer Corner Roof (1 m)
+DTT_BAKED_COLOR("Desc_Roof_Tar_OutCorner_02_C", 0.0916f, 0.0832f, 0.1281f, 0.0321f, 0.0291f, 0.0448f)  // Outer Corner Roof (2 m)
+DTT_BAKED_COLOR("Desc_Roof_Tar_OutCorner_03_C", 0.0842f, 0.0780f, 0.1200f, 0.0295f, 0.0273f, 0.0420f)  // Outer Corner Roof (4 m)
+DTT_BAKED_COLOR("Desc_Roof_Window_01_C", 0.1569f, 0.1414f, 0.2175f, 0.0549f, 0.0495f, 0.0761f)  // Flat Roof
+DTT_BAKED_COLOR("Desc_Roof_Window_02_C", 0.1236f, 0.1127f, 0.1733f, 0.0433f, 0.0394f, 0.0607f)  // Roof (1 m)
+DTT_BAKED_COLOR("Desc_Roof_Window_03_C", 0.0819f, 0.0890f, 0.1261f, 0.0287f, 0.0312f, 0.0441f)  // Roof (2 m)
+DTT_BAKED_COLOR("Desc_Roof_Window_04_C", 0.0879f, 0.0817f, 0.1258f, 0.0308f, 0.0286f, 0.0440f)  // Roof (4 m)
+DTT_BAKED_COLOR("Desc_Roof_Window_InCorner_01_C", 0.1094f, 0.0991f, 0.1525f, 0.0383f, 0.0347f, 0.0534f)  // Inner Corner Roof (1 m)
+DTT_BAKED_COLOR("Desc_Roof_Window_InCorner_02_C", 0.1055f, 0.0954f, 0.1467f, 0.0369f, 0.0334f, 0.0514f)  // Inner Corner Roof (2 m)
+DTT_BAKED_COLOR("Desc_Roof_Window_InCorner_03_C", 0.1209f, 0.1085f, 0.1670f, 0.0423f, 0.0380f, 0.0584f)  // Inner Corner Roof (4 m)
+DTT_BAKED_COLOR("Desc_Roof_Window_OutCorner_01_C", 0.1009f, 0.0913f, 0.1405f, 0.0353f, 0.0320f, 0.0492f)  // Outer Corner Roof (1 m)
+DTT_BAKED_COLOR("Desc_Roof_Window_OutCorner_02_C", 0.0939f, 0.0858f, 0.1319f, 0.0328f, 0.0300f, 0.0462f)  // Outer Corner Roof (2 m)
+DTT_BAKED_COLOR("Desc_Roof_Window_OutCorner_03_C", 0.0780f, 0.0850f, 0.1200f, 0.0273f, 0.0297f, 0.0420f)  // Outer Corner Roof (4 m)
+DTT_BAKED_COLOR("Desc_Rotor_C", 0.0882f, 0.1174f, 0.2137f, 0.0309f, 0.0411f, 0.0748f)  // Rotor
+DTT_BAKED_COLOR("Desc_Rubber_C", 0.3503f, 0.2845f, 0.1156f, 0.1226f, 0.0996f, 0.0405f)  // Rubber
+DTT_BAKED_COLOR("Desc_SAMFluctuator_C", 0.7528f, 0.3190f, 0.0851f, 0.2635f, 0.1117f, 0.0298f)  // SAM Fluctuator
+DTT_BAKED_COLOR("Desc_SAMIngot_C", 0.7233f, 0.2647f, 0.0650f, 0.2090f, 0.0741f, 0.5032f)  // Reanimated SAM
+DTT_BAKED_COLOR("Desc_SAM_C", 0.1108f, 0.0332f, 0.2820f, 0.0388f, 0.0116f, 0.0987f)  // SAM ping=0.000/0.000/0.000
+DTT_BAKED_COLOR("Desc_Shroom_C", 0.3139f, 0.0666f, 0.0487f, 0.1098f, 0.0233f, 0.0170f)  // Bacon Agaric
+DTT_BAKED_COLOR("Desc_SignPole_Huge_C", 0.3108f, 0.2402f, 0.0690f, 0.1705f, 0.2310f, 0.2624f)
+DTT_BAKED_COLOR("Desc_SignPole_Large_C", 0.3108f, 0.2402f, 0.0690f, 0.1705f, 0.2310f, 0.2624f)
+DTT_BAKED_COLOR("Desc_SignPole_Medium_C", 0.3108f, 0.2402f, 0.0690f, 0.1705f, 0.2310f, 0.2624f)
+DTT_BAKED_COLOR("Desc_SignPole_Portrait_C", 0.3108f, 0.2402f, 0.0690f, 0.1705f, 0.2310f, 0.2624f)
+DTT_BAKED_COLOR("Desc_SignPole_Small_C", 0.3108f, 0.2402f, 0.0690f, 0.1705f, 0.2310f, 0.2624f)
+DTT_BAKED_COLOR("Desc_Silica_C", 0.4173f, 0.4640f, 0.6419f, 0.1460f, 0.1624f, 0.2247f)  // Silica
+DTT_BAKED_COLOR("Desc_SingularityCell_C", 0.0868f, 0.1296f, 0.2984f, 0.7237f, 0.4074f, 0.2052f)  // Singularity Cell
+DTT_BAKED_COLOR("Desc_Skin_Buildgun_Cammo_C", 0.5029f, 0.1964f, 0.0868f, 0.0870f, 0.0738f, 0.1654f)  // Camo FICSIT Build Gun
+DTT_BAKED_COLOR("Desc_Skin_Buildgun_ColoredSides_C", 0.0776f, 0.0683f, 0.1698f, 0.4828f, 0.1805f, 0.0800f)  // Alternative FICSIT Build Gun
+DTT_BAKED_COLOR("Desc_Skin_Buildgun_Default_C", 0.5402f, 0.2282f, 0.0866f, 0.1891f, 0.0799f, 0.0303f)  // Standard FICSIT Build Gun
+DTT_BAKED_COLOR("Desc_Skin_Buildgun_Golden_C", 0.2493f, 0.1119f, 0.0393f, 0.1506f, 0.1341f, 0.2127f)  // Golden FICSIT Build Gun
+DTT_BAKED_COLOR("Desc_Skin_Buildgun_HalfNHalf_C", 0.5933f, 0.2621f, 0.1043f, 0.0766f, 0.0659f, 0.1447f)  // Half 'n' Half FICSIT Build Gun
+DTT_BAKED_COLOR("Desc_Skin_Buildgun_Neon_C", 0.4520f, 0.1961f, 0.0724f, 0.1582f, 0.0686f, 0.0253f)  // Neon FICSIT Build Gun
+DTT_BAKED_COLOR("Desc_Skin_Buildgun_Striped_C", 0.5162f, 0.2086f, 0.0895f, 0.0895f, 0.0758f, 0.1654f)  // Striped FICSIT Build Gun
+DTT_BAKED_COLOR("Desc_Skin_Buildgun_Worn_C", 0.4751f, 0.2021f, 0.1002f, 0.1663f, 0.0707f, 0.0351f)  // Worn FICSIT Build Gun
+DTT_BAKED_COLOR("Desc_SmelterMk1_C", 0.5215f, 0.2913f, 0.1738f, 0.1452f, 0.1638f, 0.2234f)  // Smelter
+DTT_BAKED_COLOR("Desc_SnowCannon_C", 0.6440f, 0.3080f, 0.1155f, 0.2254f, 0.1078f, 0.0404f)  // FICSMAS Snow Cannon
+DTT_BAKED_COLOR("Desc_SnowDispenser_C", 0.3527f, 0.2534f, 0.1819f, 0.1816f, 0.1655f, 0.2547f)  // FICSMAS Snow Dispenser
+DTT_BAKED_COLOR("Desc_Snow_C", 0.3647f, 0.4000f, 0.5611f, 0.1276f, 0.1400f, 0.1964f)  // FICSMAS Actual Snow
+DTT_BAKED_COLOR("Desc_SnowballProjectile_C", 0.5976f, 0.5440f, 0.8369f, 0.2092f, 0.1904f, 0.2929f)  // Snowball
+DTT_BAKED_COLOR("Desc_Snowman_C", 0.5694f, 0.3174f, 0.2095f, 0.1993f, 0.1111f, 0.0733f)  // FICSMAS Snowman
+DTT_BAKED_COLOR("Desc_SpaceElevatorBlocker_C", 0.8500f, 0.5525f, 0.5525f, 0.2975f, 0.1934f, 0.1934f)  // UNAVAILABLE
+DTT_BAKED_COLOR("Desc_SpaceElevatorPart_10_C", 0.6251f, 0.1726f, 0.1288f, 0.1435f, 0.1672f, 0.2982f)  // Biochemical Sculptor
+DTT_BAKED_COLOR("Desc_SpaceElevatorPart_11_C", 0.4688f, 0.1072f, 0.0265f, 0.1641f, 0.0375f, 0.0093f)  // Ballistic Warp Drive
+DTT_BAKED_COLOR("Desc_SpaceElevatorPart_12_C", 0.4102f, 0.0988f, 0.0664f, 0.1436f, 0.0346f, 0.0232f)  // AI Expansion Server
+DTT_BAKED_COLOR("Desc_SpaceElevatorPart_1_C", 0.0924f, 0.1055f, 0.1956f, 0.3777f, 0.1087f, 0.0852f)  // Smart Plating
+DTT_BAKED_COLOR("Desc_SpaceElevatorPart_2_C", 0.2014f, 0.0348f, 0.0233f, 0.0705f, 0.0122f, 0.0082f)  // Versatile Framework
+DTT_BAKED_COLOR("Desc_SpaceElevatorPart_3_C", 0.2374f, 0.0678f, 0.0456f, 0.0831f, 0.0237f, 0.0160f)  // Automated Wiring
+DTT_BAKED_COLOR("Desc_SpaceElevatorPart_4_C", 0.3667f, 0.2967f, 0.0241f, 0.1284f, 0.1039f, 0.0084f)  // Modular Engine
+DTT_BAKED_COLOR("Desc_SpaceElevatorPart_5_C", 0.4834f, 0.1838f, 0.0711f, 0.1692f, 0.0643f, 0.0249f)  // Adaptive Control Unit
+DTT_BAKED_COLOR("Desc_SpaceElevatorPart_6_C", 0.1497f, 0.1790f, 0.2670f, 0.2493f, 0.0710f, 0.0602f)  // Magnetic Field Generator
+DTT_BAKED_COLOR("Desc_SpaceElevatorPart_7_C", 0.3465f, 0.0924f, 0.0501f, 0.1213f, 0.0323f, 0.0175f)  // Assembly Director System
+DTT_BAKED_COLOR("Desc_SpaceElevatorPart_8_C", 0.3982f, 0.1170f, 0.0848f, 0.1394f, 0.0409f, 0.0297f)  // Thermal Propulsion Rocket
+DTT_BAKED_COLOR("Desc_SpaceElevatorPart_9_C", 0.5104f, 0.2428f, 0.1192f, 0.1786f, 0.0850f, 0.0417f)  // Nuclear Pasta
+DTT_BAKED_COLOR("Desc_SpaceElevator_C", 0.3020f, 0.1508f, 0.0692f, 0.1057f, 0.0528f, 0.0242f)  // Space Elevator
+DTT_BAKED_COLOR("Desc_SpaceGiraffeStatue_C", 0.2506f, 0.1230f, 0.0388f, 0.0877f, 0.0431f, 0.0136f)  // Confusing Creature Statue
+DTT_BAKED_COLOR("Desc_SpaceGiraffe_C", 0.1251f, 0.0722f, 0.0564f, 0.0850f, 0.0780f, 0.1200f)  // Unknown File Error #6265616e
+DTT_BAKED_COLOR("Desc_SpaceRabbit_C", 0.6361f, 0.2064f, 0.1559f, 0.2226f, 0.0722f, 0.0546f)  // Lizard Doggo
+DTT_BAKED_COLOR("Desc_SpikedRebar_C", 0.5753f, 0.1982f, 0.0190f, 0.2014f, 0.0694f, 0.0067f)  // Iron Rebar
+DTT_BAKED_COLOR("Desc_SpitterAquatic_Alpha_C", 0.0732f, 0.1412f, 0.2919f, 0.0256f, 0.0494f, 0.1022f)  // Alpha Aquatic Spitter
+DTT_BAKED_COLOR("Desc_SpitterAquatic_Small_C", 0.0843f, 0.1325f, 0.2600f, 0.0295f, 0.0464f, 0.0910f)  // Small Aquatic Spitter
+DTT_BAKED_COLOR("Desc_SpitterDesert_Alpha_C", 0.4386f, 0.1600f, 0.0781f, 0.1535f, 0.0560f, 0.0273f)  // Alpha Desert Spitter
+DTT_BAKED_COLOR("Desc_SpitterDesert_Small_C", 0.5217f, 0.2048f, 0.0951f, 0.1826f, 0.0717f, 0.0333f)  // Small Desert Spitter
+DTT_BAKED_COLOR("Desc_SpitterForest_Alpha_C", 0.0946f, 0.1978f, 0.0399f, 0.3646f, 0.0839f, 0.0758f)  // Alpha Forest Spitter
+DTT_BAKED_COLOR("Desc_SpitterForest_Red_Alpha_C", 0.2782f, 0.0572f, 0.0777f, 0.0974f, 0.0200f, 0.0272f)  // Alpha Forest Spitter
+DTT_BAKED_COLOR("Desc_SpitterForest_Small_C", 0.0829f, 0.1857f, 0.0333f, 0.4101f, 0.0963f, 0.0738f)  // Small Forest Spitter
+DTT_BAKED_COLOR("Desc_SpitterForest_Small_Red_C", 0.2871f, 0.0604f, 0.0811f, 0.1005f, 0.0212f, 0.0284f)  // Small Forest Spitter
+DTT_BAKED_COLOR("Desc_SpitterParts_C", 0.2799f, 0.0955f, 0.1174f, 0.0980f, 0.0334f, 0.0411f)  // Spitter Remains
+DTT_BAKED_COLOR("Desc_StackableShelf_C", 0.4990f, 0.2133f, 0.0460f, 0.1746f, 0.0747f, 0.0161f)  // Basic Shelf Unit
+DTT_BAKED_COLOR("Desc_Stair_Asphalt_8x1_C", 0.0835f, 0.0780f, 0.1200f, 0.1600f, 0.1218f, 0.1040f)  // Foundation Stairs (1 m)
+DTT_BAKED_COLOR("Desc_Stair_Asphalt_8x2_C", 0.0835f, 0.0780f, 0.1200f, 0.1427f, 0.1067f, 0.0928f)  // Foundation Stairs (2 m)
+DTT_BAKED_COLOR("Desc_Stair_Asphalt_8x4_C", 0.0830f, 0.0780f, 0.1200f, 0.1294f, 0.0943f, 0.0841f)  // Foundation Stairs (4 m)
+DTT_BAKED_COLOR("Desc_Stair_Concrete_8x1_C", 0.2149f, 0.2447f, 0.1591f, 0.0752f, 0.0857f, 0.0557f)  // Foundation Stairs (1 m)
+DTT_BAKED_COLOR("Desc_Stair_Concrete_8x2_C", 0.2008f, 0.2310f, 0.1501f, 0.0703f, 0.0808f, 0.0525f)  // Foundation Stairs (2 m)
+DTT_BAKED_COLOR("Desc_Stair_Concrete_8x4_C", 0.1834f, 0.2127f, 0.1382f, 0.0642f, 0.0744f, 0.0484f)  // Foundation Stairs (4 m)
+DTT_BAKED_COLOR("Desc_Stair_FicsitSet_8x1_01_C", 0.1443f, 0.1398f, 0.2151f, 0.0505f, 0.0489f, 0.0753f)  // Foundation Stairs (1 m)
+DTT_BAKED_COLOR("Desc_Stair_FicsitSet_8x2_01_C", 0.1406f, 0.1374f, 0.2114f, 0.0492f, 0.0481f, 0.0740f)  // Foundation Stairs (2 m)
+DTT_BAKED_COLOR("Desc_Stair_FicsitSet_8x4_01_C", 0.1273f, 0.1333f, 0.1959f, 0.0446f, 0.0467f, 0.0686f)  // Foundation Stairs (4 m)
+DTT_BAKED_COLOR("Desc_Stair_GripMetal_8x1_C", 0.1780f, 0.1917f, 0.3132f, 0.0623f, 0.0671f, 0.1096f)  // Foundation Stairs (1 m)
+DTT_BAKED_COLOR("Desc_Stair_GripMetal_8x2_C", 0.1684f, 0.1810f, 0.2947f, 0.0589f, 0.0634f, 0.1031f)  // Foundation Stairs (2 m)
+DTT_BAKED_COLOR("Desc_Stair_GripMetal_8x4_C", 0.1500f, 0.1608f, 0.2598f, 0.0525f, 0.0563f, 0.0909f)  // Foundation Stairs (4 m)
+DTT_BAKED_COLOR("Desc_Stair_PolishedConcrete_8x1_C", 0.2440f, 0.2215f, 0.1586f, 0.0854f, 0.0775f, 0.0555f)  // Foundation Stairs (1 m)
+DTT_BAKED_COLOR("Desc_Stair_PolishedConcrete_8x2_C", 0.2502f, 0.2260f, 0.1626f, 0.0876f, 0.0791f, 0.0569f)  // Foundation Stairs (2 m)
+DTT_BAKED_COLOR("Desc_Stair_PolishedConcrete_8x4_C", 0.2519f, 0.2237f, 0.1637f, 0.0829f, 0.1275f, 0.0872f)  // Foundation Stairs (4 m)
+DTT_BAKED_COLOR("Desc_Stairs_Left_01_C", 0.1548f, 0.2199f, 0.2423f, 0.0542f, 0.0770f, 0.0848f)  // Stairs Left
+DTT_BAKED_COLOR("Desc_Stairs_Right_01_C", 0.1519f, 0.2183f, 0.2395f, 0.0532f, 0.0764f, 0.0838f)  // Stairs Right
+DTT_BAKED_COLOR("Desc_StandaloneWidgetSign_Huge_C", 0.4976f, 0.3439f, 0.1972f, 0.1742f, 0.1204f, 0.0690f)  // Large Billboard
+DTT_BAKED_COLOR("Desc_StandaloneWidgetSign_Large_C", 0.6274f, 0.3682f, 0.1339f, 0.1485f, 0.1607f, 0.2285f)  // Small Billboard
+DTT_BAKED_COLOR("Desc_StandaloneWidgetSign_Medium_C", 0.1917f, 0.2092f, 0.2949f, 0.5100f, 0.3195f, 0.1100f)  // Display Sign
+DTT_BAKED_COLOR("Desc_StandaloneWidgetSign_Portrait_C", 0.4721f, 0.3447f, 0.1645f, 0.1652f, 0.1207f, 0.0576f)  // Portrait Sign
+DTT_BAKED_COLOR("Desc_StandaloneWidgetSign_SmallVeryWide_C", 0.1554f, 0.1672f, 0.2391f, 0.0544f, 0.0585f, 0.0837f)  // Label Sign (4 m)
+DTT_BAKED_COLOR("Desc_StandaloneWidgetSign_SmallWide_C", 0.1588f, 0.1742f, 0.2512f, 0.0556f, 0.0610f, 0.0879f)  // Label Sign (3 m)
+DTT_BAKED_COLOR("Desc_StandaloneWidgetSign_Small_C", 0.1815f, 0.1966f, 0.2793f, 0.0635f, 0.0688f, 0.0977f)  // Label Sign (2 m)
+DTT_BAKED_COLOR("Desc_StandaloneWidgetSign_Square_C", 0.6099f, 0.3824f, 0.1768f, 0.1430f, 0.1568f, 0.2200f)  // Square Sign (2 m)
+DTT_BAKED_COLOR("Desc_StandaloneWidgetSign_Square_Small_C", 0.1866f, 0.2036f, 0.2871f, 0.5983f, 0.4215f, 0.1857f)  // Square Sign (1 m)
+DTT_BAKED_COLOR("Desc_StandaloneWidgetSign_Square_Tiny_C", 0.1892f, 0.2090f, 0.3048f, 0.0662f, 0.0731f, 0.1067f)  // Square Sign (0.5 m)
+DTT_BAKED_COLOR("Desc_Stator_C", 0.1434f, 0.1785f, 0.2866f, 0.2287f, 0.1341f, 0.1077f)  // Stator
+DTT_BAKED_COLOR("Desc_SteelIngot_C", 0.0922f, 0.1045f, 0.1419f, 0.0323f, 0.0366f, 0.0497f)  // Steel Ingot
+DTT_BAKED_COLOR("Desc_SteelPipe_C", 0.2718f, 0.1310f, 0.1116f, 0.0951f, 0.0458f, 0.0391f)  // Steel Pipe
+DTT_BAKED_COLOR("Desc_SteelPlateReinforced_C", 0.5908f, 0.5149f, 0.3642f, 0.2068f, 0.1802f, 0.1275f)  // Encased Industrial Beam
+DTT_BAKED_COLOR("Desc_SteelPlate_C", 0.1306f, 0.0533f, 0.0421f, 0.0457f, 0.0186f, 0.0147f)  // Steel Beam
+DTT_BAKED_COLOR("Desc_SteelWall_8x1_C", 0.0854f, 0.0938f, 0.1314f, 0.0299f, 0.0328f, 0.0460f)  // Basic Wall (1 m)
+DTT_BAKED_COLOR("Desc_SteelWall_8x4_C", 0.0939f, 0.1057f, 0.1445f, 0.0329f, 0.0370f, 0.0506f)  // Tilted Wall (4 m)
+DTT_BAKED_COLOR("Desc_SteelWall_8x4_Gate_01_C", 0.1747f, 0.1289f, 0.0422f, 0.0870f, 0.0968f, 0.1338f)  // Gate Hole Wall
+DTT_BAKED_COLOR("Desc_SteelWall_8x4_Window_01_C", 0.0946f, 0.1079f, 0.1455f, 0.0331f, 0.0378f, 0.0509f)  // Single Window
+DTT_BAKED_COLOR("Desc_SteelWall_8x4_Window_02_C", 0.0912f, 0.0842f, 0.1295f, 0.0319f, 0.0295f, 0.0453f)  // Reinforced Window
+DTT_BAKED_COLOR("Desc_SteelWall_8x4_Window_03_C", 0.0998f, 0.1166f, 0.1561f, 0.0349f, 0.0408f, 0.0546f)  // Frame Window
+DTT_BAKED_COLOR("Desc_SteelWall_8x4_Window_04_C", 0.0915f, 0.0997f, 0.1408f, 0.0320f, 0.0349f, 0.0493f)  // Panel Window
+DTT_BAKED_COLOR("Desc_SteelWall_FlipTris_8x1_C", 0.1227f, 0.1122f, 0.1727f, 0.1396f, 0.0907f, 0.1396f)  // Inverted Ramp Wall (1 m)
+DTT_BAKED_COLOR("Desc_SteelWall_FlipTris_8x2_C", 0.1537f, 0.1375f, 0.2115f, 0.1625f, 0.1056f, 0.1625f)  // Inverted Ramp Wall (2 m)
+DTT_BAKED_COLOR("Desc_SteelWall_FlipTris_8x4_C", 0.2706f, 0.2344f, 0.3607f, 0.2570f, 0.1671f, 0.2570f)  // Inverted Ramp Wall (4 m)
+DTT_BAKED_COLOR("Desc_SteelWall_FlipTris_8x8_C", 0.3143f, 0.2717f, 0.4180f, 0.5540f, 0.3601f, 0.5540f)  // Inverted Ramp Wall (8 m)
+DTT_BAKED_COLOR("Desc_SteelWall_Tris_8x1_C", 0.1308f, 0.1193f, 0.1835f, 0.2320f, 0.1508f, 0.2320f)  // Ramp Wall (1 m)
+DTT_BAKED_COLOR("Desc_SteelWall_Tris_8x2_C", 0.1648f, 0.1459f, 0.2245f, 0.1953f, 0.1269f, 0.1953f)  // Ramp Wall (2 m)
+DTT_BAKED_COLOR("Desc_SteelWall_Tris_8x4_C", 0.2383f, 0.2069f, 0.3183f, 0.2484f, 0.1614f, 0.2484f)  // Ramp Wall (4 m)
+DTT_BAKED_COLOR("Desc_SteelWall_Tris_8x8_C", 0.2481f, 0.2161f, 0.3325f, 0.3748f, 0.2436f, 0.3748f)  // Ramp Wall (8 m)
+DTT_BAKED_COLOR("Desc_StingerAlpha_C", 0.1412f, 0.0600f, 0.0751f, 0.0494f, 0.0210f, 0.0263f)  // Alpha Stinger
+DTT_BAKED_COLOR("Desc_StingerElite_C", 0.0770f, 0.1200f, 0.0115f, 0.0269f, 0.0420f, 0.0040f)  // Gas Stinger
+DTT_BAKED_COLOR("Desc_StingerParts_C", 0.2462f, 0.1320f, 0.1495f, 0.0862f, 0.0462f, 0.0523f)  // Stinger Remains
+DTT_BAKED_COLOR("Desc_StingerSmall_C", 0.1283f, 0.0554f, 0.0681f, 0.0449f, 0.0194f, 0.0238f)  // Small Stinger
+DTT_BAKED_COLOR("Desc_Stone_C", 0.3220f, 0.2521f, 0.2014f, 0.1127f, 0.0882f, 0.0705f)  // Limestone ping=0.241/0.319/0.415
+DTT_BAKED_COLOR("Desc_StorageContainerMk1_C", 0.4035f, 0.2188f, 0.1365f, 0.1412f, 0.0766f, 0.0478f)  // Storage Container
+DTT_BAKED_COLOR("Desc_StorageContainerMk2_C", 0.4160f, 0.1866f, 0.0901f, 0.1456f, 0.0653f, 0.0315f)  // Industrial Storage Container
+DTT_BAKED_COLOR("Desc_StorageHazard_C", 0.4588f, 0.3867f, 0.0241f, 0.1606f, 0.1354f, 0.0084f)  // Hazard Storage Box
+DTT_BAKED_COLOR("Desc_StorageMedkit_C", 0.0210f, 0.0624f, 0.2329f, 0.0074f, 0.0218f, 0.0815f)  // Medical Storage Box
+DTT_BAKED_COLOR("Desc_StoragePlayer_C", 0.6379f, 0.2359f, 0.0573f, 0.2232f, 0.0826f, 0.0201f)  // Personal Storage Box
+DTT_BAKED_COLOR("Desc_StreetLight_C", 0.5757f, 0.3297f, 0.1817f, 0.0952f, 0.1424f, 0.2406f)  // Street Light
+DTT_BAKED_COLOR("Desc_Sulfur_C", 0.4488f, 0.3609f, 0.1055f, 0.1571f, 0.1263f, 0.0369f)  // Sulfur ping=1.000/0.956/0.260
+DTT_BAKED_COLOR("Desc_SulfuricAcid_C", 0.7619f, 0.8348f, 0.0063f, 0.3274f, 0.1260f, 0.0299f)  // Sulfuric Acid
+DTT_BAKED_COLOR("Desc_SuperFuelRod_C", 0.5104f, 0.2428f, 0.1192f, 0.1786f, 0.0850f, 0.0417f)  // Super Fuel Rod
+DTT_BAKED_COLOR("Desc_TarpFence_C", 0.2037f, 0.2235f, 0.3886f, 0.8486f, 0.5708f, 0.2761f)  // Tarp Construction Fence
+DTT_BAKED_COLOR("Desc_TemporalProcessor_C", 0.4625f, 0.1441f, 0.0395f, 0.0517f, 0.0351f, 0.1658f)  // Neural-Quantum Processor
+DTT_BAKED_COLOR("Desc_TimeCrystal_C", 0.7894f, 0.3566f, 0.1096f, 0.2763f, 0.1248f, 0.0384f)  // Time Crystal
+DTT_BAKED_COLOR("Desc_ToolBelt_C", 0.0325f, 0.0663f, 0.1340f, 0.0114f, 0.0232f, 0.0469f)  // Tool Belt
+DTT_BAKED_COLOR("Desc_Tractor_C", 0.4804f, 0.2190f, 0.0672f, 0.1681f, 0.0766f, 0.0235f)  // Tractor
+DTT_BAKED_COLOR("Desc_TradingPost_C", 0.2157f, 0.0954f, 0.0430f, 0.0755f, 0.0334f, 0.0150f)  // The HUB
+DTT_BAKED_COLOR("Desc_TrainDockingStationLiquid_C", 0.4243f, 0.1822f, 0.0863f, 0.1485f, 0.0638f, 0.0302f)  // Fluid Freight Platform
+DTT_BAKED_COLOR("Desc_TrainDockingStation_C", 0.4112f, 0.1827f, 0.0914f, 0.1055f, 0.1201f, 0.2013f)  // Freight Platform
+DTT_BAKED_COLOR("Desc_TrainPlatformEmpty_02_C", 0.1742f, 0.1962f, 0.2680f, 0.0610f, 0.0687f, 0.0938f)  // Empty Platform With Catwalk
+DTT_BAKED_COLOR("Desc_TrainPlatformEmpty_C", 0.4887f, 0.3839f, 0.2210f, 0.1711f, 0.1344f, 0.0774f)  // Empty Platform
+DTT_BAKED_COLOR("Desc_TrainStation_C", 0.3894f, 0.1986f, 0.1097f, 0.1354f, 0.1516f, 0.2120f)  // Train Station
+DTT_BAKED_COLOR("Desc_TreeGiftProducer_C", 0.1041f, 0.1306f, 0.0352f, 0.4061f, 0.1795f, 0.0629f)  // FICSMAS Gift Tree
+DTT_BAKED_COLOR("Desc_Trinket_AirFrechener_C", 0.6625f, 0.2240f, 0.0700f, 0.2319f, 0.0784f, 0.0245f)  // Fresh Factory Trinket
+DTT_BAKED_COLOR("Desc_Trinket_Alpaca_C", 0.5946f, 0.4121f, 0.3865f, 0.2081f, 0.1443f, 0.1353f)  // Alpaca Trinket
+DTT_BAKED_COLOR("Desc_Trinket_Checkit_C", 0.0855f, 0.3427f, 0.5051f, 0.5315f, 0.1894f, 0.0645f)  // Checkit Trinket
+DTT_BAKED_COLOR("Desc_Trinket_Default_C", 0.1335f, 0.1520f, 0.2078f, 0.0467f, 0.0532f, 0.0727f)  // Wrench Trinket
+DTT_BAKED_COLOR("Desc_Trinket_FicsitCoupon_C", 0.5721f, 0.1967f, 0.0502f, 0.2002f, 0.0689f, 0.0176f)  // Coupon Trinket
+DTT_BAKED_COLOR("Desc_Trinket_FicsmasBall_C", 0.3027f, 0.0029f, 0.0069f, 0.1060f, 0.0010f, 0.0024f)  // Red Ornament Trinket
+DTT_BAKED_COLOR("Desc_Trinket_FicsmasStar_C", 0.2074f, 0.0871f, 0.0047f, 0.0726f, 0.0305f, 0.0016f)  // Wonder Star Trinket
+DTT_BAKED_COLOR("Desc_Trinket_NuclearWaste_C", 0.5178f, 0.4511f, 0.0706f, 0.1812f, 0.1579f, 0.0247f)  // Nuclear Waste Trinket
+DTT_BAKED_COLOR("Desc_Trinket_Nut_C", 0.1971f, 0.0928f, 0.0282f, 0.0690f, 0.0325f, 0.0099f)  // Golden Nut Trinket
+DTT_BAKED_COLOR("Desc_Trinket_Somersloop_C", 0.5049f, 0.0340f, 0.0853f, 0.1767f, 0.0119f, 0.0298f)  // Somersloop Trinket
+DTT_BAKED_COLOR("Desc_TruckStation_C", 0.4465f, 0.2119f, 0.0583f, 0.1563f, 0.0742f, 0.0204f)  // Truck Station
+DTT_BAKED_COLOR("Desc_Truck_C", 0.4136f, 0.1958f, 0.0644f, 0.1447f, 0.0685f, 0.0225f)  // Truck
+DTT_BAKED_COLOR("Desc_TurboFuel_C", 0.5520f, 0.0300f, 0.0369f, 0.1932f, 0.0105f, 0.0129f)  // Packaged Turbofuel
+DTT_BAKED_COLOR("Desc_UraniumCell_C", 0.4839f, 0.4464f, 0.0131f, 0.1694f, 0.1562f, 0.0046f)  // Encased Uranium Cell
+DTT_BAKED_COLOR("Desc_UraniumPellet_C", 0.1200f, 0.1046f, 0.0518f, 0.0420f, 0.0366f, 0.0181f)  // Uranium Pellet
+DTT_BAKED_COLOR("Desc_Valve_C", 0.3590f, 0.1449f, 0.0659f, 0.1257f, 0.0507f, 0.0231f)  // Valve
+DTT_BAKED_COLOR("Desc_VehiclePath_Explorer_C", 0.5961f, 0.1500f, 0.0725f, 0.2086f, 0.0525f, 0.0254f)  // Explorer Vehicle Path
+DTT_BAKED_COLOR("Desc_VehiclePath_FactoryCart_C", 0.4139f, 0.1445f, 0.0271f, 0.0480f, 0.1744f, 0.5249f)  // Factory Cart Vehicle Path
+DTT_BAKED_COLOR("Desc_VehiclePath_Tractor_C", 0.5059f, 0.1407f, 0.0605f, 0.1770f, 0.0492f, 0.0212f)  // Tractor Vehicle Path
+DTT_BAKED_COLOR("Desc_VehiclePath_Truck_C", 0.5753f, 0.1753f, 0.0636f, 0.2013f, 0.0614f, 0.0222f)  // Truck Vehicle Path
+DTT_BAKED_COLOR("Desc_VehiclePath_Universal_C", 0.6408f, 0.1284f, 0.0601f, 0.0909f, 0.1847f, 0.3815f)  // Universal Vehicle Path
+DTT_BAKED_COLOR("Desc_Vines_C", 0.2468f, 0.2666f, 0.1081f, 0.0864f, 0.0933f, 0.0378f)  // Vines
+DTT_BAKED_COLOR("Desc_VolcanicGas_C", 0.7859f, 0.8500f, 0.0051f, 0.3800f, 0.1349f, 0.0220f)  // Volcanic Gas
+DTT_BAKED_COLOR("Desc_WAT1_C", 0.8500f, 0.0789f, 0.1771f, 0.2975f, 0.0276f, 0.0620f)  // Somersloop
+DTT_BAKED_COLOR("Desc_WAT2_C", 0.2826f, 0.0533f, 0.3761f, 0.0989f, 0.0187f, 0.1316f)  // Mercer Sphere
+DTT_BAKED_COLOR("Desc_WalkwayCross_C", 0.4159f, 0.4554f, 0.6399f, 0.1456f, 0.1594f, 0.2239f)  // Walkway Intersection
+DTT_BAKED_COLOR("Desc_WalkwayRamp_C", 0.3569f, 0.4014f, 0.5491f, 0.3202f, 0.1609f, 0.1047f)  // Walkway Ramp
+DTT_BAKED_COLOR("Desc_WalkwayStraight_C", 0.4408f, 0.2576f, 0.1840f, 0.3721f, 0.4098f, 0.5724f)  // Straight Walkway
+DTT_BAKED_COLOR("Desc_WalkwayT_C", 0.4179f, 0.4605f, 0.6429f, 0.5176f, 0.3175f, 0.2178f)  // Walkway T-Junction
+DTT_BAKED_COLOR("Desc_WalkwayTurn_C", 0.3899f, 0.4339f, 0.5998f, 0.5172f, 0.3301f, 0.2310f)  // Walkway Corner
+DTT_BAKED_COLOR("Desc_WallSet_Steel_Angular_8x4_C", 0.3190f, 0.3588f, 0.4908f, 0.1116f, 0.1256f, 0.1718f)  // Tilted Wall (4 m)
+DTT_BAKED_COLOR("Desc_WallSet_Steel_Angular_8x8_C", 0.1846f, 0.2162f, 0.3156f, 0.0646f, 0.0757f, 0.1105f)  // Tilted Wall (8 m)
+DTT_BAKED_COLOR("Desc_Wall_8x4_01_C", 0.6486f, 0.2257f, 0.0511f, 0.2270f, 0.0790f, 0.0179f)  // Basic Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_8x4_02_C", 0.0939f, 0.1057f, 0.1445f, 0.0329f, 0.0370f, 0.0506f)  // Basic Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x1_C", 0.1986f, 0.1441f, 0.1291f, 0.2174f, 0.1413f, 0.2174f)  // Basic Wall (1 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x1_FlipTris_C", 0.2044f, 0.1328f, 0.2044f, 0.1048f, 0.1193f, 0.1612f)  // Inverted Ramp Wall (1 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x1_Tris_C", 0.2140f, 0.1391f, 0.2135f, 0.1128f, 0.1288f, 0.1736f)  // Ramp Wall (1 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x2_FlipTris_C", 0.2165f, 0.1407f, 0.2165f, 0.0758f, 0.0493f, 0.0758f)  // Inverted Ramp Wall (2 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x2_Tris_C", 0.2238f, 0.1455f, 0.2237f, 0.0783f, 0.0509f, 0.0783f)  // Ramp Wall (2 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x4_C", 0.1989f, 0.1293f, 0.1989f, 0.0696f, 0.0452f, 0.0696f)  // Basic Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x4_ConveyorHole_01_C", 0.2724f, 0.2042f, 0.0713f, 0.1967f, 0.1279f, 0.1966f)  // Conveyor Wall x 1
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x4_ConveyorHole_02_C", 0.2662f, 0.1999f, 0.0748f, 0.1939f, 0.1260f, 0.1939f)  // Conveyor Wall x 2
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x4_ConveyorHole_03_C", 0.2725f, 0.2025f, 0.0734f, 0.0954f, 0.0709f, 0.0257f)  // Conveyor Wall x 3
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x4_Corner_01_C", 0.1063f, 0.1006f, 0.1548f, 0.0372f, 0.0352f, 0.0542f)  // Tilted Corner Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x4_Corner_2_C", 0.0951f, 0.1100f, 0.1463f, 0.0333f, 0.0385f, 0.0512f)  // Tilted Concave Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x4_FlipTris_C", 0.2296f, 0.1492f, 0.2283f, 0.0803f, 0.0522f, 0.0799f)  // Inverted Ramp Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x4_Tris_C", 0.2402f, 0.1561f, 0.2388f, 0.0841f, 0.0546f, 0.0836f)  // Ramp Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x4_Window_01_C", 0.2155f, 0.1401f, 0.2155f, 0.1501f, 0.1308f, 0.2012f)  // Single Window
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x4_Window_02_C", 0.2245f, 0.1459f, 0.2245f, 0.1489f, 0.1304f, 0.2006f)  // Frame Window
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x4_Window_03_C", 0.2548f, 0.1656f, 0.2548f, 0.2045f, 0.1520f, 0.1329f)  // Panel Window
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x4_Window_04_C", 0.1108f, 0.0977f, 0.1504f, 0.1984f, 0.1290f, 0.1977f)  // Reinforced Window
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x8_Corner_01_C", 0.1047f, 0.0940f, 0.1446f, 0.0367f, 0.0329f, 0.0506f)  // Tilted Corner Wall (8 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x8_Corner_2_C", 0.0780f, 0.0922f, 0.1200f, 0.2996f, 0.1947f, 0.2996f)  // Tilted Concave Wall (8 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x8_FlipTris_C", 0.2585f, 0.1680f, 0.2585f, 0.0905f, 0.0588f, 0.0905f)  // Inverted Ramp Wall (8 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_8x8_Tris_C", 0.2466f, 0.1603f, 0.2462f, 0.0863f, 0.0561f, 0.0862f)  // Ramp Wall (8 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_Angular_8x4_C", 0.1089f, 0.1241f, 0.1675f, 0.0381f, 0.0434f, 0.0586f)  // Tilted Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_Angular_8x8_C", 0.0780f, 0.0899f, 0.1200f, 0.0273f, 0.0315f, 0.0420f)  // Tilted Wall (8 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_CDoor_8x4_C", 0.1978f, 0.1286f, 0.1978f, 0.2142f, 0.1548f, 0.1392f)  // Center Door Wall
+DTT_BAKED_COLOR("Desc_Wall_Concrete_Gate_8x4_C", 0.1582f, 0.1200f, 0.0548f, 0.0554f, 0.0420f, 0.0192f)  // Gate Hole Wall
+DTT_BAKED_COLOR("Desc_Wall_Concrete_SDoor_8x4_C", 0.2031f, 0.1320f, 0.2029f, 0.0711f, 0.0462f, 0.0710f)  // Side Door Wall
+DTT_BAKED_COLOR("Desc_Wall_Concrete_Tris_Curved_8x8_C", 0.2140f, 0.1391f, 0.2135f, 0.1128f, 0.1288f, 0.1736f)  // Ramp Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Concrete_Tris_Glass_8x8_C", 0.0780f, 0.0899f, 0.1200f, 0.0273f, 0.0315f, 0.0420f)  // Ramp Wall (8 m)
+DTT_BAKED_COLOR("Desc_Wall_Conveyor_8x4_01_C", 0.6100f, 0.2189f, 0.0532f, 0.2135f, 0.0766f, 0.0186f)  // Conveyor Wall x 3
+DTT_BAKED_COLOR("Desc_Wall_Conveyor_8x4_01_Steel_C", 0.2594f, 0.1996f, 0.0753f, 0.0997f, 0.1105f, 0.1533f)  // Conveyor Wall x 3
+DTT_BAKED_COLOR("Desc_Wall_Conveyor_8x4_02_C", 0.6208f, 0.2208f, 0.0525f, 0.2173f, 0.0773f, 0.0184f)  // Conveyor Wall x 2
+DTT_BAKED_COLOR("Desc_Wall_Conveyor_8x4_02_Steel_C", 0.2539f, 0.1976f, 0.0810f, 0.1014f, 0.1144f, 0.1560f)  // Conveyor Wall x 2
+DTT_BAKED_COLOR("Desc_Wall_Conveyor_8x4_03_C", 0.6360f, 0.2219f, 0.0511f, 0.2226f, 0.0777f, 0.0179f)  // Conveyor Wall x 1
+DTT_BAKED_COLOR("Desc_Wall_Conveyor_8x4_03_Steel_C", 0.0997f, 0.1110f, 0.1534f, 0.2757f, 0.2104f, 0.0723f)  // Conveyor Wall x 1
+DTT_BAKED_COLOR("Desc_Wall_Conveyor_8x4_04_C", 0.8500f, 0.5525f, 0.5525f, 0.2975f, 0.1934f, 0.1934f)  // Perpendicular Wall Conveyor
+DTT_BAKED_COLOR("Desc_Wall_Door_8x4_01_C", 0.6291f, 0.2164f, 0.0502f, 0.2202f, 0.0757f, 0.0176f)  // Center Door Wall
+DTT_BAKED_COLOR("Desc_Wall_Door_8x4_01_Steel_C", 0.0937f, 0.1048f, 0.1442f, 0.0328f, 0.0367f, 0.0505f)  // Center Door Wall
+DTT_BAKED_COLOR("Desc_Wall_Door_8x4_03_C", 0.6366f, 0.2211f, 0.0512f, 0.2228f, 0.0774f, 0.0179f)  // Side Door Wall
+DTT_BAKED_COLOR("Desc_Wall_Door_8x4_03_Steel_C", 0.0928f, 0.1050f, 0.1428f, 0.0325f, 0.0368f, 0.0500f)  // Side Door Wall
+DTT_BAKED_COLOR("Desc_Wall_Frame_01_C", 0.0912f, 0.1050f, 0.1539f, 0.0319f, 0.0368f, 0.0539f)  // Frame Wall
+DTT_BAKED_COLOR("Desc_Wall_Gate_8x4_01_C", 0.6267f, 0.2324f, 0.0659f, 0.2194f, 0.0813f, 0.0231f)  // Gate Hole Wall
+DTT_BAKED_COLOR("Desc_Wall_Inverted_Concrete_Tris_Curved_8x8_C", 0.2662f, 0.1999f, 0.0748f, 0.1939f, 0.1260f, 0.1939f)  // Ramp Wall (2 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_8x1_C", 0.7017f, 0.2561f, 0.0626f, 0.2456f, 0.0896f, 0.0219f)  // Basic Wall (1 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_8x1_FlipTris_C", 0.4299f, 0.1656f, 0.0772f, 0.1505f, 0.0580f, 0.0270f)  // Inverted Ramp Wall (1 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_8x1_Tris_C", 0.4515f, 0.1657f, 0.0621f, 0.1580f, 0.0580f, 0.0217f)  // Ramp Wall (1 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_8x2_FlipTris_C", 0.4022f, 0.1404f, 0.0543f, 0.1408f, 0.0491f, 0.0190f)  // Inverted Ramp Wall (2 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_8x2_Tris_C", 0.4139f, 0.1457f, 0.0531f, 0.1449f, 0.0510f, 0.0186f)  // Ramp Wall (2 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_8x4_Corner_01_C", 0.6686f, 0.3283f, 0.1782f, 0.2340f, 0.1149f, 0.0624f)  // Tilted Corner Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_8x4_Corner_02_C", 0.4888f, 0.1955f, 0.0736f, 0.1711f, 0.0684f, 0.0258f)  // Tilted Concave Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_8x4_FlipTris_C", 0.4053f, 0.1365f, 0.0479f, 0.1419f, 0.0478f, 0.0168f)  // Inverted Ramp Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_8x4_Tris_C", 0.4001f, 0.1405f, 0.0520f, 0.1400f, 0.0492f, 0.0182f)  // Ramp Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_8x8_Corner_01_C", 0.7023f, 0.3750f, 0.2240f, 0.2458f, 0.1313f, 0.0784f)  // Tilted Corner Wall (8 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_8x8_Corner_02_C", 0.4960f, 0.2160f, 0.0906f, 0.1736f, 0.0756f, 0.0317f)  // Tilted Concave Wall (8 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_8x8_FlipTris_C", 0.4008f, 0.1418f, 0.0569f, 0.1403f, 0.0496f, 0.0199f)  // Inverted Ramp Wall (8 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_8x8_Tris_C", 0.3917f, 0.1389f, 0.0553f, 0.1371f, 0.0486f, 0.0194f)  // Ramp Wall (8 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_Angular_8x4_C", 0.5765f, 0.2631f, 0.1233f, 0.2018f, 0.0921f, 0.0432f)  // Tilted Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Orange_Angular_8x8_C", 0.5934f, 0.3047f, 0.1735f, 0.2077f, 0.1066f, 0.0607f)  // Tilted Wall (8 m)
+DTT_BAKED_COLOR("Desc_Wall_Steel_8x4_Corner_01_C", 0.2945f, 0.3280f, 0.4530f, 0.1031f, 0.1148f, 0.1586f)  // Tilted Corner Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Steel_8x4_Corner_2_C", 0.2983f, 0.3291f, 0.4589f, 0.1044f, 0.1152f, 0.1606f)  // Tilted Concave Wall (4 m)
+DTT_BAKED_COLOR("Desc_Wall_Steel_8x8_Corner_01_C", 0.2516f, 0.2725f, 0.3871f, 0.0881f, 0.0954f, 0.1355f)  // Tilted Corner Wall (8 m)
+DTT_BAKED_COLOR("Desc_Wall_Steel_8x8_Corner_2_C", 0.3213f, 0.3425f, 0.4943f, 0.1124f, 0.1199f, 0.1730f)  // Tilted Concave Wall (8 m)
+DTT_BAKED_COLOR("Desc_Wall_Window_8x4_01_C", 0.6474f, 0.2497f, 0.0802f, 0.2266f, 0.0874f, 0.0281f)  // Single Window
+DTT_BAKED_COLOR("Desc_Wall_Window_8x4_02_C", 0.6432f, 0.2462f, 0.0797f, 0.2251f, 0.0862f, 0.0279f)  // Frame Window
+DTT_BAKED_COLOR("Desc_Wall_Window_8x4_03_C", 0.6370f, 0.2508f, 0.0862f, 0.2229f, 0.0878f, 0.0302f)  // Panel Window
+DTT_BAKED_COLOR("Desc_Wall_Window_8x4_04_C", 0.6004f, 0.2315f, 0.0762f, 0.2102f, 0.0810f, 0.0267f)  // Reinforced Window
+DTT_BAKED_COLOR("Desc_Wall_Window_8x4_05_C", 0.5782f, 0.3929f, 0.1942f, 0.2024f, 0.1375f, 0.0680f)  // Angled Frame Window
+DTT_BAKED_COLOR("Desc_Wall_Window_8x4_06_C", 0.1935f, 0.1717f, 0.1258f, 0.0677f, 0.0601f, 0.0440f)  // Honeycomb Frame Window
+DTT_BAKED_COLOR("Desc_Wall_Window_8x4_07_C", 0.3803f, 0.3433f, 0.2472f, 0.1331f, 0.1202f, 0.0865f)  // Triple Frame Window
+DTT_BAKED_COLOR("Desc_Wall_Window_Thin_8x4_01_C", 0.2647f, 0.1721f, 0.2647f, 0.0777f, 0.0846f, 0.1200f)  // Full Frame Window
+DTT_BAKED_COLOR("Desc_Wall_Window_Thin_8x4_02_C", 0.0889f, 0.1216f, 0.1808f, 0.0311f, 0.0425f, 0.0633f)  // Hex Frame Window
+DTT_BAKED_COLOR("Desc_WaterPump_C", 0.2885f, 0.1253f, 0.0603f, 0.1080f, 0.1224f, 0.1662f)  // Water Extractor
+DTT_BAKED_COLOR("Desc_Water_C", 0.3782f, 0.1466f, 0.0444f, 0.2833f, 0.4880f, 0.6372f)  // Water ping=0.000/0.000/0.000
+DTT_BAKED_COLOR("Desc_Wildcard_C", 0.8500f, 0.5525f, 0.5525f, 0.2975f, 0.1934f, 0.1934f)  // Any
+DTT_BAKED_COLOR("Desc_Wire_C", 0.4033f, 0.1895f, 0.1026f, 0.1411f, 0.0663f, 0.0359f)  // Wire
+DTT_BAKED_COLOR("Desc_Wood_C", 0.3307f, 0.2655f, 0.1705f, 0.1157f, 0.0929f, 0.0597f)  // Wood
+DTT_BAKED_COLOR("Desc_WorkBench_C", 0.4360f, 0.1941f, 0.0850f, 0.1526f, 0.0679f, 0.0297f)  // Crafting Bench
+DTT_BAKED_COLOR("Desc_Workshop_C", 0.3179f, 0.1401f, 0.0634f, 0.1113f, 0.0490f, 0.0222f)  // Equipment Workshop
+DTT_BAKED_COLOR("Desc_WreathDecor_C", 0.5418f, 0.0046f, 0.0074f, 0.0867f, 0.1215f, 0.0231f)  // FICSMAS Decoration
+DTT_BAKED_COLOR("Desc_XMassTree_C", 0.1078f, 0.1348f, 0.0368f, 0.0377f, 0.0472f, 0.0129f)  // Giant FICSMAS Tree
+DTT_BAKED_COLOR("Desc_XmasBall1_C", 0.3933f, 0.0236f, 0.0057f, 0.1377f, 0.0083f, 0.0020f)  // Red FICSMAS Ornament
+DTT_BAKED_COLOR("Desc_XmasBall2_C", 0.0008f, 0.0008f, 0.3545f, 0.0003f, 0.0003f, 0.1241f)  // Blue FICSMAS Ornament
+DTT_BAKED_COLOR("Desc_XmasBall3_C", 0.2983f, 0.2452f, 0.0548f, 0.1044f, 0.0858f, 0.0192f)  // Copper FICSMAS Ornament
+DTT_BAKED_COLOR("Desc_XmasBall4_C", 0.2916f, 0.2290f, 0.0934f, 0.2317f, 0.2791f, 0.4629f)  // Iron FICSMAS Ornament
+DTT_BAKED_COLOR("Desc_XmasBallCluster_C", 0.3035f, 0.2398f, 0.0481f, 0.0021f, 0.0018f, 0.2803f)  // FICSMAS Ornament Bundle
+DTT_BAKED_COLOR("Desc_XmasBow_C", 0.8024f, 0.0111f, 0.0180f, 0.2808f, 0.0039f, 0.0063f)  // FICSMAS Bow
+DTT_BAKED_COLOR("Desc_XmasBranch_C", 0.2163f, 0.2856f, 0.0778f, 0.0757f, 0.1000f, 0.0272f)  // FICSMAS Tree Branch
+DTT_BAKED_COLOR("Desc_XmasDataCartridge1_C", 0.7414f, 0.3611f, 0.0822f, 0.1111f, 0.1162f, 0.1869f)  // FICSMAS Data Cartridge Day 1
+DTT_BAKED_COLOR("Desc_XmasDataCartridge2_C", 0.7414f, 0.3611f, 0.0822f, 0.1111f, 0.1162f, 0.1869f)  // FICSMAS Data Cartridge Day 4
+DTT_BAKED_COLOR("Desc_XmasDataCartridge3_C", 0.7414f, 0.3611f, 0.0822f, 0.1111f, 0.1162f, 0.1869f)  // FICSMAS Data Cartridge Day 8
+DTT_BAKED_COLOR("Desc_XmasDataCartridge4_C", 0.7414f, 0.3611f, 0.0822f, 0.1111f, 0.1162f, 0.1869f)  // FICSMAS Data Cartridge Day 14
+DTT_BAKED_COLOR("Desc_XmasLights_C", 0.0239f, 0.4394f, 0.7949f, 0.4107f, 0.3843f, 0.1524f)  // FICSMAS Lights
+DTT_BAKED_COLOR("Desc_XmasStar_C", 0.3815f, 0.2885f, 0.0892f, 0.1335f, 0.1010f, 0.0312f)  // FICSMAS Wonder Star
+DTT_BAKED_COLOR("Desc_XmasWreath_C", 0.0899f, 0.1257f, 0.0253f, 0.0315f, 0.0440f, 0.0089f)  // FICSMAS Wreath
+DTT_BAKED_COLOR("Desc_Zipline_C", 0.5512f, 0.2053f, 0.0328f, 0.1929f, 0.0719f, 0.0115f)  // Zipline
+DTT_BAKED_COLOR("Desc_xmassLights_C", 0.0239f, 0.4394f, 0.7949f, 0.4107f, 0.3843f, 0.1524f)  // FICSMAS Power Light
+DTT_BAKED_COLOR("MaterialDesc_All_C", 0.8500f, 0.5525f, 0.5525f, 0.2975f, 0.1934f, 0.1934f)  // No Filter
+DTT_BAKED_COLOR("MaterialDesc_Wall_Concrete_C", 0.1989f, 0.1293f, 0.1989f, 0.0696f, 0.0452f, 0.0696f)  // Concrete Wall
+DTT_BAKED_COLOR("MaterialDesc_Wall_Glass_C", 0.6474f, 0.2497f, 0.0802f, 0.2266f, 0.0874f, 0.0281f)  // Glass Wall
+DTT_BAKED_COLOR("MaterialDesc_Wall_Orange_C", 0.6486f, 0.2257f, 0.0511f, 0.2270f, 0.0790f, 0.0179f)  // FICSIT Wall
+DTT_BAKED_COLOR("MaterialDesc_Wall_Steel_C", 0.0939f, 0.1057f, 0.1445f, 0.0329f, 0.0370f, 0.0506f)  // Steel Wall
+DTT_BAKED_COLOR("PaintFinishDesc_CarbonSteel_C", 0.0640f, 0.0939f, 0.1645f, 0.0224f, 0.0329f, 0.0576f)  // Carbon Steel Finish
+DTT_BAKED_COLOR("PaintFinishDesc_Caterium_C", 0.5960f, 0.4768f, 0.1858f, 0.2086f, 0.1669f, 0.0650f)  // Caterium Finish
+DTT_BAKED_COLOR("PaintFinishDesc_Chrome_C", 0.1970f, 0.2282f, 0.3031f, 0.0690f, 0.0799f, 0.1061f)  // Chrome Finish
+DTT_BAKED_COLOR("PaintFinishDesc_Copper_C", 0.3337f, 0.1444f, 0.1105f, 0.1168f, 0.0505f, 0.0387f)  // Copper Finish
+DTT_BAKED_COLOR("PaintFinishDesc_Default_C", 0.1041f, 0.1152f, 0.1778f, 0.0364f, 0.0403f, 0.0622f)  // Default
+DTT_BAKED_COLOR("PaintFinishDesc_Matte_C", 0.6099f, 0.2617f, 0.0708f, 0.2134f, 0.0916f, 0.0248f)  // Matte
+DTT_BAKED_COLOR("PaintFinishDesc_Shiny_C", 0.6099f, 0.2617f, 0.0708f, 0.2134f, 0.0916f, 0.0248f)  // Shiny
+DTT_BAKED_COLOR("PaintFinishDesc_Unpainted_C", 0.1041f, 0.1152f, 0.1778f, 0.0364f, 0.0403f, 0.0622f)  // Unpainted
+DTT_BAKED_COLOR("PatternDesc_Remover_Arrows_C", 0.7787f, 0.2908f, 0.0580f, 0.2726f, 0.1018f, 0.0203f)  // Pattern Removal
+DTT_BAKED_COLOR("PatternDesc_Remover_C", 0.7787f, 0.2908f, 0.0580f, 0.2726f, 0.1018f, 0.0203f)  // Pattern Removal
+DTT_BAKED_COLOR("PatternDesc_Remover_Icons_C", 0.7787f, 0.2908f, 0.0580f, 0.2726f, 0.1018f, 0.0203f)  // Pattern Removal
+DTT_BAKED_COLOR("PatternDesc_Remover_Lines_C", 0.7787f, 0.2908f, 0.0580f, 0.2726f, 0.1018f, 0.0203f)  // Pattern Removal
+DTT_BAKED_COLOR("PatternDesc_Remover_Numbers_C", 0.7787f, 0.2908f, 0.0580f, 0.2726f, 0.1018f, 0.0203f)  // Pattern Removal
+DTT_BAKED_COLOR("PatternDesc_Remover_Paths_C", 0.7787f, 0.2908f, 0.0580f, 0.2726f, 0.1018f, 0.0203f)  // Pattern Removal
+DTT_BAKED_COLOR("PatternDesc_Remover_Zones_C", 0.7787f, 0.2908f, 0.0580f, 0.2726f, 0.1018f, 0.0203f)  // Pattern Removal
+DTT_BAKED_COLOR("SkinDesc_Ficsmas_Default_C", 0.4383f, 0.2073f, 0.0519f, 0.1534f, 0.0726f, 0.0182f)  // Basic FICSMAS Skins
+DTT_BAKED_COLOR("SkinDesc_Ficsmas_Premium_C", 0.8500f, 0.5488f, 0.0468f, 0.0235f, 0.0415f, 0.1200f)  // Premium FICSMAS Skins

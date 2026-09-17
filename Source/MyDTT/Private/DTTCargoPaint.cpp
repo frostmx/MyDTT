@@ -1,6 +1,7 @@
 #include "DTTCargoPaint.h"
 
 #include "Resources/FGItemDescriptor.h"
+#include "Resources/FGResourceDescriptor.h"
 #include "Misc/Crc.h"
 #include "UObject/UnrealType.h"
 #include "UObject/ConstructorHelpers.h"
@@ -51,28 +52,37 @@ namespace
         return Swatch;
     }
 
-    /** Saturated enough to read as a colour on a truck, bright enough to see in the rain. */
+    /**
+     * Saturated enough to read as a colour on a truck, bright enough to see in the rain. The
+     * clamps are in linear space, where a value of 0.12 is already a mid grey on screen.
+     */
     FLinearColor DTPReadable(const FLinearColor& In)
     {
         FLinearColor HSV = In.LinearRGBToHSV();
-        HSV.G = FMath::Clamp(HSV.G, 0.45f, 1.0f);   // saturation
-        HSV.B = FMath::Clamp(HSV.B, 0.35f, 0.95f);  // value
+        HSV.G = FMath::Clamp(HSV.G, 0.35f, 1.0f);   // saturation
+        HSV.B = FMath::Clamp(HSV.B, 0.12f, 0.85f);  // value
         FLinearColor Out = HSV.HSVToLinearRGB();
         Out.A = 1.0f;
         return Out;
     }
+
+    /** The trim for an item that has only one colour: the same colour, darker. */
+    FLinearColor DTPTrim(const FLinearColor& In)
+    {
+        return FLinearColor(In.R * 0.35f, In.G * 0.35f, In.B * 0.35f, 1.0f);
+    }
 }
 
-const TMap<FName, FLinearColor>& FDTTCargoPaint::BakedTable()
+const TMap<FName, FDTTCargoColors>& FDTTCargoPaint::BakedTable()
 {
-    static TMap<FName, FLinearColor> Table;
+    static TMap<FName, FDTTCargoColors> Table;
     static bool bBuilt = false;
     if (!bBuilt)
     {
         bBuilt = true;
         // One line per item in the generated table, which may legitimately be empty (a build made
         // before the first bake) - hence a macro rather than an array initialiser.
-#define DTT_BAKED_COLOR(ClassName, R, G, B) Table.Add(FName(TEXT(ClassName)), FLinearColor(R, G, B, 1.0f));
+#define DTT_BAKED_COLOR(ClassName, R, G, B, R2, G2, B2)         { FDTTCargoColors Colors; Colors.Primary = FLinearColor(R, G, B, 1.0f);           Colors.Secondary = FLinearColor(R2, G2, B2, 1.0f); Table.Add(FName(TEXT(ClassName)), Colors); }
 #include "DTTCargoPaintTable.inc"
 #undef DTT_BAKED_COLOR
         UE_LOG(LogDTTCargoPaint, Log, TEXT("CARGO_PAINT_TABLE Entries=%d"), Table.Num());
@@ -80,12 +90,14 @@ const TMap<FName, FLinearColor>& FDTTCargoPaint::BakedTable()
     return Table;
 }
 
-FLinearColor FDTTCargoPaint::ColorFor(TSubclassOf<UFGItemDescriptor> Item)
+FDTTCargoColors FDTTCargoPaint::ColorsFor(TSubclassOf<UFGItemDescriptor> Item)
 {
-    if (!Item) return FLinearColor::White;
+    FDTTCargoColors Colors;
+    if (!Item) return Colors;
 
     // Fluids and gases carry their colour on the descriptor, and it is the colour the player sees
-    // in every pipe and gauge - no reason to invent another one.
+    // in every pipe and gauge - no reason to invent another one. They have only the one, so the
+    // trim is that colour darkened.
     const EResourceForm Form = UFGItemDescriptor::GetForm(Item);
     if (Form == EResourceForm::RF_LIQUID || Form == EResourceForm::RF_GAS)
     {
@@ -94,11 +106,16 @@ FLinearColor FDTTCargoPaint::ColorFor(TSubclassOf<UFGItemDescriptor> Item)
             : UFGItemDescriptor::GetGasColorLinear(Item);
         // The alpha of those two is the fluid's transparency, not a colour channel.
         Fluid.A = 1.0f;
-        if (!Fluid.Equals(FLinearColor::Black, 0.01f)) return DTPReadable(Fluid);
+        if (!Fluid.Equals(FLinearColor::Black, 0.01f))
+        {
+            Colors.Primary = DTPReadable(Fluid);
+            Colors.Secondary = DTPTrim(Colors.Primary);
+            return Colors;
+        }
     }
 
     const FName ClassName = Item->GetFName();
-    if (const FLinearColor* Baked = BakedTable().Find(ClassName))
+    if (const FDTTCargoColors* Baked = BakedTable().Find(ClassName))
     {
         return *Baked;
     }
@@ -107,7 +124,9 @@ FLinearColor FDTTCargoPaint::ColorFor(TSubclassOf<UFGItemDescriptor> Item)
     // still gets a colour, and the same one every session: the hue is the hash of the class name.
     // CRC rather than GetTypeHash, which is only promised to be stable within one process.
     const uint32 Hash = FCrc::StrCrc32(*ClassName.ToString());
-    return FLinearColor::MakeFromHSV8(static_cast<uint8>(Hash % 256), 190, 230);
+    Colors.Primary = FLinearColor::MakeFromHSV8(static_cast<uint8>(Hash % 256), 190, 230);
+    Colors.Secondary = DTPTrim(Colors.Primary);
+    return Colors;
 }
 
 bool FDTTCargoPaint::IsAvailable()
@@ -115,35 +134,38 @@ bool FDTTCargoPaint::IsAvailable()
     return DTPCustomSwatch() != nullptr;
 }
 
-FFactoryCustomizationData FDTTCargoPaint::MakePaint(const FFactoryCustomizationData& Base, const FLinearColor& Primary)
+FFactoryCustomizationData FDTTCargoPaint::MakePaint(const FFactoryCustomizationData& Base, const FDTTCargoColors& Colors)
 {
     FFactoryCustomizationData Data = Base;
     Data.SwatchDesc = DTPCustomSwatch();
-    Data.OverrideColorData.PrimaryColor = Primary;
-    // The secondary is the trim; a darkened primary keeps the truck one colour instead of two.
-    Data.OverrideColorData.SecondaryColor = FLinearColor(Primary.R * 0.35f, Primary.G * 0.35f, Primary.B * 0.35f, 1.0f);
+    Data.OverrideColorData.PrimaryColor = Colors.Primary;
+    Data.OverrideColorData.SecondaryColor = Colors.Secondary;
     // Cached from the swatch by Initialize() and not replicated, but the server applies the paint
     // to its own copy straight away and reads this on the way.
     Data.ColorSlot = INDEX_CUSTOM_COLOR_SLOT;
     return Data;
 }
 
-bool FDTTCargoPaint::IsPainted(const FFactoryCustomizationData& Data, const FLinearColor& Primary)
+bool FDTTCargoPaint::IsPainted(const FFactoryCustomizationData& Data, const FDTTCargoColors& Colors)
 {
     return Data.SwatchDesc == DTPCustomSwatch()
-        && Data.OverrideColorData.PrimaryColor.Equals(Primary, 0.01f);
+        && Data.OverrideColorData.PrimaryColor.Equals(Colors.Primary, 0.01f)
+        && Data.OverrideColorData.SecondaryColor.Equals(Colors.Secondary, 0.01f);
 }
 
 #if !UE_SERVER
 namespace
 {
     /**
-     * The average colour of one icon, ignoring what is transparent and leaning on what is coloured:
-     * most item icons are a grey machine part with the telling colour in a corner, so a flat mean
-     * comes out grey for everything. Saturation is the weight, with a floor so a genuinely grey
-     * icon (concrete, steel) still averages to its own grey rather than to nothing.
+     * The two colours of one icon.
+     *
+     * A flat mean is grey for almost every icon: most are a grey machine part with the telling
+     * colour in a corner. So the pixels are put into twelve hue buckets weighted by saturation
+     * squared, the heaviest bucket is the main colour, and the heaviest bucket at least a sixth of
+     * a circle away from it - and carrying at least a sixth of the weight - is the trim. An item
+     * that is really one colour has no such second bucket, and gets its own colour darkened.
      */
-    bool DTPIconColor(UObject* WorldContext, UTextureRenderTarget2D* Target, UTexture2D* Icon, FLinearColor& OutColor)
+    bool DTPIconColors(UObject* WorldContext, UTextureRenderTarget2D* Target, UTexture2D* Icon, FDTTCargoColors& OutColors)
     {
         if (!IsValid(Target) || !IsValid(Icon)) return false;
 
@@ -159,35 +181,73 @@ namespace
         UKismetRenderingLibrary::BeginDrawCanvasToRenderTarget(WorldContext, Target, Canvas, Size, Context);
         if (IsValid(Canvas))
         {
+            // Translucent, not opaque: an opaque draw copies the texture's colour where the icon
+            // is transparent too, and that colour is neither black nor the icon's - it is whatever
+            // the artist left outside the shape. Blended over a transparent target, alpha is
+            // coverage and says which pixels are the icon.
             Canvas->K2_DrawTexture(Icon, FVector2D::ZeroVector, Size, FVector2D::ZeroVector,
-                FVector2D::UnitVector, FLinearColor::White, BLEND_Opaque);
+                FVector2D::UnitVector, FLinearColor::White, BLEND_Translucent);
         }
         UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(WorldContext, Context);
 
-        TArray<FColor> Pixels;
-        if (!UKismetRenderingLibrary::ReadRenderTarget(WorldContext, Target, Pixels, true) || Pixels.Num() == 0)
+        // Raw, not ReadRenderTarget: that one quantises to FColor, and reading those bytes as sRGB
+        // (they are already linear) is what made the first bake come out near-black.
+        TArray<FLinearColor> Pixels;
+        if (!UKismetRenderingLibrary::ReadRenderTargetRaw(WorldContext, Target, Pixels, true) || Pixels.Num() == 0)
         {
             return false;
         }
 
-        double SumR = 0.0, SumG = 0.0, SumB = 0.0, SumWeight = 0.0;
-        for (const FColor& Pixel : Pixels)
+        constexpr int32 BucketCount = 12;
+        double SumR[BucketCount] = {}, SumG[BucketCount] = {}, SumB[BucketCount] = {}, Weight[BucketCount] = {};
+        double TotalWeight = 0.0;
+        for (const FLinearColor& Pixel : Pixels)
         {
-            if (Pixel.A < 128) continue;
-            const FLinearColor Linear = FLinearColor::FromSRGBColor(Pixel);
+            if (Pixel.A < 0.5f) continue;
+            // The blend leaves the colour multiplied by coverage; undo it, or a soft edge reads as
+            // a darker shade of the same hue and drags the average down.
+            const FLinearColor Linear(Pixel.R / Pixel.A, Pixel.G / Pixel.A, Pixel.B / Pixel.A, 1.0f);
             const FLinearColor HSV = Linear.LinearRGBToHSV();
             // Near-black outlines say nothing about the item and are most of some icons.
             if (HSV.B < 0.08f) continue;
-            const double Weight = 0.15 + HSV.G;
-            SumR += Linear.R * Weight; SumG += Linear.G * Weight; SumB += Linear.B * Weight;
-            SumWeight += Weight;
+            const int32 Bucket = FMath::Clamp(
+                static_cast<int32>(HSV.R / 360.0f * BucketCount), 0, BucketCount - 1);
+            // Saturation squared, not saturation: copper ore is a cool grey rock with copper veins,
+            // and a linear weight let the large grey body outvote the small orange one - the ore
+            // came out grey-blue. The epsilon keeps a genuinely colourless item (concrete, steel)
+            // averaging to its own grey instead of to nothing.
+            const double PixelWeight = FMath::Square(static_cast<double>(HSV.G)) + 0.02;
+            SumR[Bucket] += Linear.R * PixelWeight;
+            SumG[Bucket] += Linear.G * PixelWeight;
+            SumB[Bucket] += Linear.B * PixelWeight;
+            Weight[Bucket] += PixelWeight;
+            TotalWeight += PixelWeight;
         }
-        if (SumWeight <= 0.0) return false;
+        if (TotalWeight <= 0.0) return false;
 
-        OutColor = DTPReadable(FLinearColor(
-            static_cast<float>(SumR / SumWeight),
-            static_cast<float>(SumG / SumWeight),
-            static_cast<float>(SumB / SumWeight), 1.0f));
+        auto BucketColor = [&](int32 Bucket)
+        {
+            return DTPReadable(FLinearColor(
+                static_cast<float>(SumR[Bucket] / Weight[Bucket]),
+                static_cast<float>(SumG[Bucket] / Weight[Bucket]),
+                static_cast<float>(SumB[Bucket] / Weight[Bucket]), 1.0f));
+        };
+
+        int32 Main = 0;
+        for (int32 Bucket = 1; Bucket < BucketCount; ++Bucket)
+        {
+            if (Weight[Bucket] > Weight[Main]) Main = Bucket;
+        }
+        OutColors.Primary = BucketColor(Main);
+
+        int32 Trim = INDEX_NONE;
+        for (int32 Bucket = 0; Bucket < BucketCount; ++Bucket)
+        {
+            const int32 Apart = FMath::Min(FMath::Abs(Bucket - Main), BucketCount - FMath::Abs(Bucket - Main));
+            if (Apart < 2 || Weight[Bucket] < TotalWeight * 0.15) continue;
+            if (Trim == INDEX_NONE || Weight[Bucket] > Weight[Trim]) Trim = Bucket;
+        }
+        OutColors.Secondary = Trim == INDEX_NONE ? DTPTrim(OutColors.Primary) : BucketColor(Trim);
         return true;
     }
 
@@ -238,13 +298,18 @@ namespace
         TArray<UClass*> Items;
         DTPCollectItemDescriptors(Items);
 
+        // 16f: eight bits of linear are coarse in the darks, which is most of an icon. 64 px
+        // because the same draw is exported as a picture for the preview page.
         UTextureRenderTarget2D* Target = UKismetRenderingLibrary::CreateRenderTarget2D(
-            World, 32, 32, RTF_RGBA8, FLinearColor::Transparent, false, false);
+            World, 64, 64, RTF_RGBA16f, FLinearColor::Transparent, false, false);
         if (!IsValid(Target))
         {
             UE_LOG(LogDTTCargoPaint, Error, TEXT("DUMP_NO_RENDER_TARGET"));
             return;
         }
+
+        const FString IconDir = FPaths::ProjectSavedDir() / TEXT("DTT") / TEXT("Icons");
+        IFileManager::Get().MakeDirectory(*IconDir, true);
 
         TArray<FString> Lines;
         int32 Skipped = 0;
@@ -252,15 +317,32 @@ namespace
         {
             UTexture2D* Icon = UFGItemDescriptor::GetSmallIcon(Item);
             if (!IsValid(Icon)) Icon = UFGItemDescriptor::GetBigIcon(Item);
-            FLinearColor Color;
-            if (!IsValid(Icon) || !DTPIconColor(World, Target, Icon, Color)) { ++Skipped; continue; }
-            Lines.Add(FString::Printf(TEXT("%s %.4f %.4f %.4f  # %s"),
-                *Item->GetName(), Color.R, Color.G, Color.B,
-                *UFGItemDescriptor::GetItemName(Item).ToString()));
+            FDTTCargoColors Colors;
+            if (!IsValid(Icon) || !DTPIconColors(World, Target, Icon, Colors)) { ++Skipped; continue; }
+            // The icon is already drawn in the target, so writing it out costs nothing and gives
+            // the preview page the real picture to hold the computed colours against.
+            UKismetRenderingLibrary::ExportRenderTarget(
+                World, Target, IconDir, Item->GetName() + TEXT(".png"));
+            // A resource also has the colour the game pings it with on the map. It is not used for
+            // the paint - most items have none - but printing it next to the computed colour is
+            // the one independent check that the icon was read the right way round.
+            FString PingNote;
+            if (Item->IsChildOf(UFGResourceDescriptor::StaticClass()))
+            {
+                const FLinearColor Ping = UFGResourceDescriptor::GetPingColor(Item);
+                PingNote = FString::Printf(TEXT(" ping=%.3f/%.3f/%.3f"), Ping.R, Ping.G, Ping.B);
+            }
+            Lines.Add(FString::Printf(TEXT("%s %.4f %.4f %.4f %.4f %.4f %.4f  # %s%s"),
+                *Item->GetName(),
+                Colors.Primary.R, Colors.Primary.G, Colors.Primary.B,
+                Colors.Secondary.R, Colors.Secondary.G, Colors.Secondary.B,
+                *UFGItemDescriptor::GetItemName(Item).ToString(), *PingNote));
         }
 
         const FString Path = FPaths::ProjectSavedDir() / TEXT("DTT") / TEXT("ItemColors.txt");
-        const bool bWritten = FFileHelper::SaveStringArrayToFile(Lines, *Path);
+        // UTF-8: the default is UTF-16, which every text tool downstream reads as mojibake.
+        const bool bWritten = FFileHelper::SaveStringArrayToFile(
+            Lines, *Path, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
         UE_LOG(LogDTTCargoPaint, Display, TEXT("DUMP_DONE Items=%d Written=%d Skipped=%d File='%s' Ok=%s"),
             Items.Num(), Lines.Num(), Skipped, *Path, bWritten ? TEXT("true") : TEXT("false"));
     }
