@@ -1,5 +1,22 @@
 # Changelog
 
+## 3.1.0
+
+- A station can ask for the full load. "=" right behind the resource in its tag - `(Bauxite=)`,
+  `(Bauxite=-10)` - keeps the truck standing at that station, draining into it and topping it up,
+  until its cargo is gone. It is what the StayUntilEmpty setting asks of every requester in the
+  world, asked here by one station, so the two or three lines that want a whole truckload no
+  longer force it on all of them. A station that stops consuming keeps the truck, which is why
+  this is written per station and off unless the name says otherwise.
+- The game's own station window carries a "Full unload" button under the vehicle settings that
+  turns the marker on and off. The marker lives in the station's name, so the button only ever
+  shows what the station is called, and typing the "=" by hand does exactly the same thing.
+- Auto-naming keeps the marker when it rewrites a tag, the way it already keeps a hand-written
+  limit. A station the belts turn into a producer loses it: standing until empty is a requester's
+  business.
+- `/dtt why` says which of the two asked the truck to wait - the station's tag or the setting.
+- Client build changed: `RemoteVersionRange` is now `>=3.1.0 <3.2.0`, window protocol 14.
+
 ## 3.0.2
 
 - The pool serves the request that has waited longest. The dispatcher used to rank open requests
