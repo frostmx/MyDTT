@@ -158,6 +158,16 @@ public:
 
     /** Pool trucks for ADTTSaveDataActor to write into the save. */
     void ExportPoolTrucks(TArray<FDTTSavedPoolTruck>& OutTrucks) const;
+
+    // Cargo paint. An autopilot truck wears the colour of what it carries; the paint is the
+    // vehicle's own replicated customization, so a client without the mod sees it too. The colour
+    // comes from FDTTCargoPaint; this half decides who wears what and remembers what they wore.
+    bool IsPaintByCargoEnabled() const { return bPaintByCargo; }
+    /** Switching off repaints every truck this mod had painted. Server only. */
+    void SetPaintByCargo(bool bEnabled, const TCHAR* Source);
+    int32 GetPaintedTruckCount() const;
+    /** The paints trucks wore before this mod touched them, for ADTTSaveDataActor. */
+    void ExportTruckPaints(TArray<FDTTSavedTruckPaint>& OutPaints) const;
     /** /dtt depots: one line per depot with its claim, plus the pool trucks. */
     void GetDepotStatusLines(TArray<FString>& OutLines) const;
     /** /dtt park <truck>: sends a truck to the nearest free depot, joining the pool if needed. */
@@ -344,6 +354,17 @@ private:
      * runs at parking, so that dispatch must not count it.
      */
     bool IsCargoDrainedAtDepot(const FDTTPoolTruckState& State) const;
+    /** The item most of the cargo is, by item count; null for an empty or unreadable hold. */
+    TSubclassOf<class UFGItemDescriptor> DominantCargoClass(AFGWheeledVehicleIdentifier* Vehicle) const;
+    /** Paints one truck for its cargo, or gives its own paint back when it carries nothing. */
+    void TickCargoPaint(AFGWheeledVehicleIdentifier* Vehicle);
+    /** Puts back the paint remembered for this truck, if any. */
+    void RestoreTruckPaint(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason);
+    /** True while this mod paints trucks by their cargo. Saved (DataVersion 8), off by default. */
+    bool bPaintByCargo = false;
+    /** What a truck wore before the first cargo colour went on it. Saved with the world. */
+    TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FFactoryCustomizationData> OriginalTruckPaints;
+
     /** "Plastic x3, Screws x1" for what the truck carries. */
     FString DescribeCargo(AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<class UFGItemDescriptor>* OutSingleClass = nullptr) const;
     // Item names in every language the game ships, built on demand. Mutable because resolving a

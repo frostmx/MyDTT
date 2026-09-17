@@ -38,12 +38,14 @@ void ADTTSaveDataActor::PreSaveGame_Implementation(int32 saveVersion, int32 game
         {
             Subsystem->ExportTruckAnchors(SavedTruckAnchors);
             Subsystem->ExportPoolTrucks(SavedPoolTrucks);
+            Subsystem->ExportTruckPaints(SavedTruckPaints);
             SavedSettings = Subsystem->GetSettings();
+            bSavedPaintByCargo = Subsystem->IsPaintByCargoEnabled();
         }
     }
     UE_LOG(LogDynamicTimeTableSaveData, Display,
-        TEXT("Saving dTT configuration. Groups=%d TruckAnchors=%d PoolTrucks=%d DataVersion=%d"),
-        SavedGroups.Num(), SavedTruckAnchors.Num(), SavedPoolTrucks.Num(), DataVersion);
+        TEXT("Saving dTT configuration. Groups=%d TruckAnchors=%d PoolTrucks=%d TruckPaints=%d DataVersion=%d"),
+        SavedGroups.Num(), SavedTruckAnchors.Num(), SavedPoolTrucks.Num(), SavedTruckPaints.Num(), DataVersion);
 }
 
 void ADTTSaveDataActor::PostSaveGame_Implementation(int32 saveVersion, int32 gameVersion)
@@ -85,6 +87,13 @@ void ADTTSaveDataActor::GatherDependencies_Implementation(TArray<UObject*>& out_
         }
     }
     for (const FDTTSavedPoolTruck& Saved : SavedPoolTrucks)
+    {
+        if (IsValid(Saved.Vehicle.Get()))
+        {
+            out_dependentObjects.AddUnique(Saved.Vehicle.Get());
+        }
+    }
+    for (const FDTTSavedTruckPaint& Saved : SavedTruckPaints)
     {
         if (IsValid(Saved.Vehicle.Get()))
         {

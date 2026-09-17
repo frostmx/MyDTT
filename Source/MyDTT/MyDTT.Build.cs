@@ -20,7 +20,12 @@ public class MyDTT : ModuleRules
         {
             "UMG",
             "Slate",
-            "SlateCore"
+            "SlateCore",
+            // Cargo paint: the dev command that bakes item colours reads every descriptor from the
+            // asset registry and renders its icon into a render target. Client-side only, but the
+            // module has to link either way.
+            "AssetRegistry",
+            "RenderCore"
         });
     }
 }

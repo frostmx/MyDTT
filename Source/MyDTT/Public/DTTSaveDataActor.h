@@ -32,14 +32,17 @@ public:
     const TArray<FDTTSavedPoolTruck>& GetPoolTrucks() const { return SavedPoolTrucks; }
     const FDTTSettings& GetSettings() const { return SavedSettings; }
     void SetSettings(const FDTTSettings& InSettings) { SavedSettings = InSettings; }
+    bool IsPaintByCargo() const { return bSavedPaintByCargo; }
+    void SetPaintByCargo(bool bInPaintByCargo) { bSavedPaintByCargo = bInPaintByCargo; }
+    const TArray<FDTTSavedTruckPaint>& GetTruckPaints() const { return SavedTruckPaints; }
 
 private:
     // 4 and later store no groups: the configuration lives in the station names themselves. The
     // actor stays because older saves reference the class, and an empty one is cheaper than the
     // risk of pulling a class out from under a load. 5 adds dispatch trucks' fuel anchors, 6 the
-    // shared-pool trucks, 7 the settings.
+    // shared-pool trucks, 7 the settings, 8 the cargo paint.
     UPROPERTY(SaveGame)
-    int32 DataVersion = 7;
+    int32 DataVersion = 8;
 
     UPROPERTY(SaveGame)
     TArray<FDTTStationGroup> SavedGroups;
@@ -56,4 +59,12 @@ private:
     // The tunables, edited from the Settings tab. Read only when DataVersion is 7 or later.
     UPROPERTY(SaveGame)
     FDTTSettings SavedSettings;
+
+    // Cargo paint (DataVersion 8). The trucks' current colours are saved by the game with the
+    // vehicles; these two say whether the colours are this mod's and what was underneath.
+    UPROPERTY(SaveGame)
+    bool bSavedPaintByCargo = false;
+
+    UPROPERTY(SaveGame)
+    TArray<FDTTSavedTruckPaint> SavedTruckPaints;
 };

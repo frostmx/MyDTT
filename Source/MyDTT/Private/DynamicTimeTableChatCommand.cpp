@@ -18,7 +18,7 @@ ADynamicTimeTableChatCommand::ADynamicTimeTableChatCommand()
     Usage = NSLOCTEXT(
         "DynamicTimeTable",
         "ChatCommand.DTT.Usage",
-        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt trucks [resource] - list dispatch and pool trucks; /dtt why <truck> - what one truck is doing and what stands in its way; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt settings - show the settings; /dtt set <field> <value> - change one setting; /dtt autoname [apply|strip|gamenames [apply]|<station>] - name stations from their belts; /dtt recalc - rebuild active bookings");
+        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt trucks [resource] - list dispatch and pool trucks; /dtt why <truck> - what one truck is doing and what stands in its way; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt settings - show the settings; /dtt set <field> <value> - change one setting; /dtt autoname [apply|strip|gamenames [apply]|<station>] - name stations from their belts; /dtt paint [on|off] - colour autopilot trucks by what they carry; /dtt recalc - rebuild active bookings");
     Aliases.Add(TEXT("dynamictimetable"));
 }
 
@@ -269,6 +269,35 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
                 FString::Printf(TEXT("dTT: %d more line(s) in the log (LogDynamicTimeTableSubsystem)."), Lines.Num() - MaxChatLines),
                 FLinearColor(0.20f, 0.80f, 1.00f));
         }
+        return EExecutionStatus::COMPLETED;
+    }
+
+    if (Arguments.Num() >= 1 && Arguments[0].Equals(TEXT("paint"), ESearchCase::IgnoreCase))
+    {
+        if (Arguments.Num() < 2)
+        {
+            Sender->SendChatMessage(
+                FString::Printf(TEXT("dTT: cargo paint is %s; %d truck(s) wear a cargo colour. /dtt paint on|off"),
+                    Subsystem->IsPaintByCargoEnabled() ? TEXT("on") : TEXT("off"),
+                    Subsystem->GetPaintedTruckCount()),
+                FLinearColor(0.20f, 0.80f, 1.00f));
+            return EExecutionStatus::COMPLETED;
+        }
+        const bool bOn = Arguments[1].Equals(TEXT("on"), ESearchCase::IgnoreCase);
+        if (!bOn && !Arguments[1].Equals(TEXT("off"), ESearchCase::IgnoreCase))
+        {
+            Sender->SendChatMessage(TEXT("dTT: /dtt paint on|off"), FLinearColor::Red);
+            return EExecutionStatus::BAD_ARGUMENTS;
+        }
+        const bool bWas = Subsystem->IsPaintByCargoEnabled();
+        Subsystem->SetPaintByCargo(bOn, TEXT("chat"));
+        Sender->SendChatMessage(
+            bWas == bOn
+                ? FString::Printf(TEXT("dTT: cargo paint was already %s."), bOn ? TEXT("on") : TEXT("off"))
+                : (bOn
+                    ? FString(TEXT("dTT: cargo paint on. Autopilot trucks take the colour of their cargo and their own paint comes back when they empty."))
+                    : FString(TEXT("dTT: cargo paint off. Every truck this mod painted has its own colour back."))),
+            FLinearColor(0.20f, 0.80f, 1.00f));
         return EExecutionStatus::COMPLETED;
     }
 

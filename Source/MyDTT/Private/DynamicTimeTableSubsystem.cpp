@@ -1,6 +1,7 @@
 #include "DynamicTimeTableSubsystem.h"
 
 #include "DTTAutoName.h"
+#include "DTTCargoPaint.h"
 #include "DTTSaveDataActor.h"
 #include "DynamicTimeTableChatCommand.h"
 #include "MyDTTHooks.h"
@@ -27,6 +28,7 @@
 #include "EngineUtils.h"
 #include "TimerManager.h"
 #include "Misc/SecureHash.h"
+#include "UObject/UnrealType.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDynamicTimeTableSubsystem, Log, All);
 
@@ -1451,6 +1453,24 @@ void UDynamicTimeTableSubsystem::InitializePersistence()
         {
             UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("SETTINGS_DEFAULT DataVersion=%d %s"), Found->GetDataVersion(), *Settings.Describe());
         }
+
+        if (Found->GetDataVersion() >= 8)
+        {
+            // The trucks already wear the cargo colours - the game saved those with the vehicles.
+            // What has to come back is what they wore before, or switching the paint off would
+            // leave every truck in the last colour it carried.
+            bPaintByCargo = Found->IsPaintByCargo();
+            int32 PaintsRestored = 0;
+            for (const FDTTSavedTruckPaint& Saved : Found->GetTruckPaints())
+            {
+                if (!IsValid(Saved.Vehicle.Get())) continue;
+                OriginalTruckPaints.Add(Saved.Vehicle.Get(), Saved.Original);
+                ++PaintsRestored;
+            }
+            UE_LOG(LogDynamicTimeTableSubsystem, Display,
+                TEXT("CARGO_PAINT_RESTORED Enabled=%s Count=%d Saved=%d"),
+                bPaintByCargo ? TEXT("true") : TEXT("false"), PaintsRestored, Found->GetTruckPaints().Num());
+        }
     }
     else if (GetWorld()->GetNetMode() != NM_Client)
     {
@@ -1483,8 +1503,9 @@ void UDynamicTimeTableSubsystem::SyncConfigurationToSaveActor()
     if (SaveDataActor.IsValid() && IsServer())
     {
         SaveDataActor->SetGroups(TArray<FDTTStationGroup>());
-        SaveDataActor->SetDataVersion(7);
+        SaveDataActor->SetDataVersion(8);
         SaveDataActor->SetSettings(Settings);
+        SaveDataActor->SetPaintByCargo(bPaintByCargo);
     }
 }
 
@@ -3834,6 +3855,8 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
 
     for (auto It = TruckPollStates.CreateIterator(); It; ++It)
         if (!It.Key().IsValid()) It.RemoveCurrent();
+    for (auto It = OriginalTruckPaints.CreateIterator(); It; ++It)
+        if (!It.Key().IsValid()) It.RemoveCurrent();
 
     for (AFGWheeledVehicleIdentifier* Vehicle : V->GetAllVehicles())
     {
@@ -3843,6 +3866,8 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
             // Claims go, anchors stay: an own (F) that the current lap left out of the route exists
             // only in the anchors, and switching the autopilot off and on must not forget it.
             ReleaseRequesterClaimsForVehicle(Vehicle, TEXT("autopilot disabled"));
+            // The paint goes: a truck the player drives is the player's, in their own colour.
+            RestoreTruckPaint(Vehicle, TEXT("autopilot disabled"));
             TruckPollStates.Remove(Vehicle);
             continue;
         }
@@ -3882,6 +3907,7 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
             UpdatePoolVehicleName(Vehicle, *Pool);
         else if (!ResourceId.IsEmpty())
             UpdateDispatchVehicleName(Vehicle, ResourceId, Route, TargetIndex);
+        TickCargoPaint(Vehicle);
         FDTTTruckPollState* Previous = TruckPollStates.Find(Vehicle);
 
         // First sighting only records. Acting here would redirect a vehicle that is already most
@@ -4622,6 +4648,139 @@ FString UDynamicTimeTableSubsystem::DescribeCargo(AFGWheeledVehicleIdentifier* V
     }
     Parts.Sort();
     return FString::Join(Parts, TEXT(", "));
+}
+
+TSubclassOf<UFGItemDescriptor> UDynamicTimeTableSubsystem::DominantCargoClass(AFGWheeledVehicleIdentifier* Vehicle) const
+{
+    AFGWheeledVehicle* WheeledVehicle = IsValid(Vehicle) ? Vehicle->GetOwnerVehicle() : nullptr;
+    UFGInventoryComponent* Storage = IsValid(WheeledVehicle) ? WheeledVehicle->GetStorageInventory() : nullptr;
+    if (!IsValid(Storage)) return nullptr;
+
+    TArray<FInventoryStack> Stacks;
+    Storage->GetInventoryStacks(Stacks);
+    TSubclassOf<UFGItemDescriptor> Best = nullptr;
+    int64 BestCount = 0;
+    TMap<TSubclassOf<UFGItemDescriptor>, int64> Items;
+    for (const FInventoryStack& Stack : Stacks)
+    {
+        if (!Stack.HasItems()) continue;
+        const TSubclassOf<UFGItemDescriptor> ItemClass = Stack.Item.GetItemClass();
+        if (!ItemClass) continue;
+        const int64 Count = Items.FindOrAdd(ItemClass) += Stack.NumItems;
+        // Ties keep the first seen, which for a single-item hold - what a managed truck carries
+        // almost always - is the only item there is.
+        if (Count > BestCount) { BestCount = Count; Best = ItemClass; }
+    }
+    return Best;
+}
+
+void UDynamicTimeTableSubsystem::TickCargoPaint(AFGWheeledVehicleIdentifier* Vehicle)
+{
+    if (!bPaintByCargo || !IsValid(Vehicle)) return;
+    if (!FDTTCargoPaint::IsAvailable()) return;
+
+    AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
+    if (!IsValid(WheeledVehicle)) return;
+
+    // A vehicle that follows its owner's player-state colour would be repainted by the game right
+    // back, every time. Read by reflection: the flag is a UPROPERTY but protected, and an access
+    // transformer for one bool would cost a full FactoryGame rebuild.
+    static const FBoolProperty* MatchProperty =
+        CastField<FBoolProperty>(AFGVehicle::StaticClass()->FindPropertyByName(TEXT("mMatchCustomizationDataWithPlayerState")));
+    if (MatchProperty && MatchProperty->GetPropertyValue_InContainer(WheeledVehicle))
+    {
+        static TSet<FString> Announced;
+        const FString Key = WheeledVehicle->GetClass()->GetName();
+        if (!Announced.Contains(Key))
+        {
+            Announced.Add(Key);
+            UE_LOG(LogDynamicTimeTableSubsystem, Log,
+                TEXT("CARGO_PAINT_SKIPPED Class='%s' Reason=matches player state"), *Key);
+        }
+        return;
+    }
+
+    const TSubclassOf<UFGItemDescriptor> Cargo = DominantCargoClass(Vehicle);
+    if (!Cargo)
+    {
+        RestoreTruckPaint(Vehicle, TEXT("empty"));
+        return;
+    }
+
+    const FLinearColor Color = FDTTCargoPaint::ColorFor(Cargo);
+    const FFactoryCustomizationData& Current = WheeledVehicle->GetCustomizationData_Native();
+    // The 1 Hz poll asks this of every truck: without this test the paint would replicate to every
+    // client every second, for every truck in the world.
+    if (FDTTCargoPaint::IsPainted(Current, Color)) return;
+
+    if (!OriginalTruckPaints.Contains(Vehicle))
+    {
+        OriginalTruckPaints.Add(Vehicle, Current);
+    }
+    // skipCombine: the cargo colour replaces what is there rather than merging into it, or the
+    // previous cargo's swatch would keep winning over the override.
+    WheeledVehicle->SetCustomizationData_Native(FDTTCargoPaint::MakePaint(Current, Color), /*skipCombine*/ true);
+    UE_LOG(LogDynamicTimeTableSubsystem, Log, TEXT("CARGO_PAINT Truck='%s' Item='%s' Color=%s"),
+        *DTSVehicleName(Vehicle), *UFGItemDescriptor::GetItemName(Cargo).ToString(), *Color.ToString());
+}
+
+void UDynamicTimeTableSubsystem::RestoreTruckPaint(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Reason)
+{
+    if (!IsValid(Vehicle)) return;
+    const FFactoryCustomizationData* Original = OriginalTruckPaints.Find(Vehicle);
+    if (!Original) return;
+
+    AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
+    if (IsValid(WheeledVehicle))
+    {
+        WheeledVehicle->SetCustomizationData_Native(*Original, /*skipCombine*/ true);
+        UE_LOG(LogDynamicTimeTableSubsystem, Log, TEXT("CARGO_PAINT_RESTORED Truck='%s' Reason=%s"),
+            *DTSVehicleName(Vehicle), Reason);
+    }
+    OriginalTruckPaints.Remove(Vehicle);
+}
+
+void UDynamicTimeTableSubsystem::SetPaintByCargo(bool bEnabled, const TCHAR* Source)
+{
+    if (!IsServer() || bPaintByCargo == bEnabled) return;
+    bPaintByCargo = bEnabled;
+    if (!bEnabled)
+    {
+        // Every truck gets its own paint back now, not at the next poll: the poll skips trucks
+        // whose autopilot is off, and those are exactly the ones a player is looking at.
+        TArray<TWeakObjectPtr<AFGWheeledVehicleIdentifier>> Painted;
+        OriginalTruckPaints.GetKeys(Painted);
+        for (const TWeakObjectPtr<AFGWheeledVehicleIdentifier>& Key : Painted)
+        {
+            RestoreTruckPaint(Key.Get(), TEXT("paint off"));
+        }
+        OriginalTruckPaints.Reset();
+    }
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("CARGO_PAINT_SET Enabled=%s Source=%s"),
+        bEnabled ? TEXT("true") : TEXT("false"), Source);
+}
+
+int32 UDynamicTimeTableSubsystem::GetPaintedTruckCount() const
+{
+    int32 Count = 0;
+    for (const auto& Pair : OriginalTruckPaints)
+    {
+        if (Pair.Key.IsValid()) ++Count;
+    }
+    return Count;
+}
+
+void UDynamicTimeTableSubsystem::ExportTruckPaints(TArray<FDTTSavedTruckPaint>& OutPaints) const
+{
+    OutPaints.Reset();
+    for (const auto& Pair : OriginalTruckPaints)
+    {
+        if (!Pair.Key.IsValid()) continue;
+        FDTTSavedTruckPaint Saved;
+        Saved.Vehicle = Pair.Key.Get();
+        Saved.Original = Pair.Value;
+        OutPaints.Add(Saved);
+    }
 }
 
 void UDynamicTimeTableSubsystem::TickLeftoverHolds(double Now)

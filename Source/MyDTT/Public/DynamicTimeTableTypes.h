@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/SoftObjectPtr.h"
+#include "FGFactoryColoringTypes.h"
 #include "DynamicTimeTableTypes.generated.h"
 
 class AFGTrainStationIdentifier;
@@ -150,6 +151,24 @@ struct FDTTDispatchTruckAnchors
     // still drains (IsLastPlannedRequester), instead of one lap of leftovers riding on.
     UPROPERTY(SaveGame)
     TMap<FGuid, int32> PlannedItems;
+};
+
+/**
+ * One truck's own paint, kept while this mod wears its cargo colour instead.
+ *
+ * The game saves the vehicle's current customization itself, so after a load the truck comes back
+ * in the cargo colour; what it was before that is only here.
+ */
+USTRUCT()
+struct FDTTSavedTruckPaint
+{
+    GENERATED_BODY()
+
+    UPROPERTY(SaveGame)
+    TObjectPtr<class AFGWheeledVehicleIdentifier> Vehicle = nullptr;
+
+    UPROPERTY(SaveGame)
+    FFactoryCustomizationData Original;
 };
 
 /** One dispatch truck's anchors as stored by ADTTSaveDataActor. */
