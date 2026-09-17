@@ -1064,6 +1064,15 @@ const FLinearColor DTTCardTintWait(0.16f, 0.14f, 0.07f, 1.0f);
         int32 Hash = INDEX_NONE;
         return Name.FindLastChar(TEXT('#'), Hash) ? Name.Left(Hash) : Name;
     }
+    /** The mod names a dispatch truck "<resource> -> <dock>", so the head would print the resource
+        twice and the dock a second time after the route line: that name carries nothing the card
+        does not already show. A name the player chose stays as the head's right-hand summary. */
+    FString DTTTruckTail(const FString& Title, const FString& Resource)
+    {
+        if (Resource.IsEmpty() || !Title.StartsWith(Resource, ESearchCase::CaseSensitive)) return Title;
+        const FString Rest = Title.Mid(Resource.Len()).TrimStart();
+        return (Rest.IsEmpty() || Rest.StartsWith(FString::Chr(0x2192))) ? FString() : Title;
+    }
     /** Runs of the same stop (a pool lap starts with copies of its depot that only carry the target index) collapse into one chip. */
     int32 DTTRouteChips(const TArray<FString>& Stops)
     {
@@ -1341,8 +1350,11 @@ void UDynamicTimeTableWidget::PopulateTruckCard(const FDTTTruckRow& Row, FDTTCar
 
     UHorizontalBox* Head = Sink.HBox(Body, FMargin(0, 0, 0, 2));
     Sink.Icon(Head, IconFor(Row.ItemClass), 28, FMargin(0, 0, 8, 0));
-    Sink.Text(Head, DTTTruckTitle(Row.Name), 17, FLinearColor::White, false, FMargin(0, 0, 10, 0));
-    Sink.Text(Head, Row.ResourceId.IsEmpty() ? TEXT("no resource") : Row.ResourceId, 14, Row.ResourceId.IsEmpty() ? DTTDim : DTTCyan, false, FMargin(0, 0, 10, 0), true);
+    // The cargo leads: the truck's own name is the mod's "<resource> -> <dock>" and would say it twice.
+    const FString TruckTitle = DTTTruckTitle(Row.Name);
+    const bool bResource = !Row.ResourceId.IsEmpty();
+    Sink.Text(Head, bResource ? Row.ResourceId : TruckTitle, 17, bResource ? DTTCyan : FLinearColor::White, false, FMargin(0, 0, 10, 0), true);
+    Sink.Text(Head, bResource ? DTTTruckTail(TruckTitle, Row.ResourceId) : FString(TEXT("no resource")), 14, bResource ? FLinearColor::White : DTTDim, false, FMargin(0, 0, 10, 0));
     Sink.Badge(Head, PhaseLabel, PhaseColor);
     Sink.Badge(Head, TEXT("Autopilot off"), FLinearColor(0.6f, 0.3f, 0.05f), !Row.bAutopilot);
     Sink.Badge(Head, TEXT("Docked"), FLinearColor(0.2f, 0.35f, 0.45f), Row.bDocking);
