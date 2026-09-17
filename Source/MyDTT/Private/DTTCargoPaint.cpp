@@ -53,14 +53,18 @@ namespace
     }
 
     /**
-     * Saturated enough to read as a colour on a truck, bright enough to see in the rain. The
-     * clamps are in linear space, where a value of 0.12 is already a mid grey on screen.
+     * Saturated enough to read as a colour on a truck, bright enough to see in the rain.
+     *
+     * The brightness is lifted rather than clamped: most item icons are dark, and taking their
+     * value as it stands made every truck a dark brown-grey. The curve keeps the order between
+     * items - coal still ends up darker than sulfur - while pulling the darkest ones up to where
+     * a hue is visible at all. All of it is linear space, where 0.2 is already a mid grey.
      */
     FLinearColor DTPReadable(const FLinearColor& In)
     {
         FLinearColor HSV = In.LinearRGBToHSV();
-        HSV.G = FMath::Clamp(HSV.G, 0.35f, 1.0f);   // saturation
-        HSV.B = FMath::Clamp(HSV.B, 0.12f, 0.85f);  // value
+        HSV.G = FMath::Clamp(HSV.G, 0.40f, 1.0f);   // saturation
+        HSV.B = FMath::Clamp(FMath::Pow(HSV.B, 0.55f), 0.22f, 0.90f);  // value
         FLinearColor Out = HSV.HSVToLinearRGB();
         Out.A = 1.0f;
         return Out;
@@ -314,8 +318,10 @@ namespace
             return;
         }
 
+        // _SRGB, or the written bytes are linear and every picture comes out dark: the exporter
+        // stores what the target holds, and a viewer reads a PNG as sRGB.
         UTextureRenderTarget2D* ExportTarget = UKismetRenderingLibrary::CreateRenderTarget2D(
-            World, 64, 64, RTF_RGBA8, FLinearColor::Transparent, false, false);
+            World, 64, 64, RTF_RGBA8_SRGB, FLinearColor::Transparent, false, false);
 
         const FString IconDir = FPaths::ProjectSavedDir() / TEXT("DTT") / TEXT("Icons");
         IFileManager::Get().MakeDirectory(*IconDir, true);
