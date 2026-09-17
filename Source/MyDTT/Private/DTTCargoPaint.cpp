@@ -165,15 +165,9 @@ namespace
      * a circle away from it - and carrying at least a sixth of the weight - is the trim. An item
      * that is really one colour has no such second bucket, and gets its own colour darkened.
      */
-    bool DTPIconColors(UObject* WorldContext, UTextureRenderTarget2D* Target, UTexture2D* Icon, FDTTCargoColors& OutColors)
+    /** Draws the icon over a transparent target, filling it edge to edge. */
+    void DTPDrawIcon(UObject* WorldContext, UTextureRenderTarget2D* Target, UTexture2D* Icon)
     {
-        if (!IsValid(Target) || !IsValid(Icon)) return false;
-
-        // A streamed-out icon draws as a blurred lowest mip, which would still give a colour - but
-        // the wrong one for a small icon whose mip 0 is all that carries the detail.
-        Icon->SetForceMipLevelsToBeResident(30.0f);
-        Icon->WaitForStreaming();
-
         UKismetRenderingLibrary::ClearRenderTarget2D(WorldContext, Target, FLinearColor::Transparent);
         UCanvas* Canvas = nullptr;
         FVector2D Size = FVector2D::ZeroVector;
@@ -189,6 +183,18 @@ namespace
                 FVector2D::UnitVector, FLinearColor::White, BLEND_Translucent);
         }
         UKismetRenderingLibrary::EndDrawCanvasToRenderTarget(WorldContext, Context);
+    }
+
+    bool DTPIconColors(UObject* WorldContext, UTextureRenderTarget2D* Target, UTexture2D* Icon, FDTTCargoColors& OutColors)
+    {
+        if (!IsValid(Target) || !IsValid(Icon)) return false;
+
+        // A streamed-out icon draws as a blurred lowest mip, which would still give a colour - but
+        // the wrong one for a small icon whose mip 0 is all that carries the detail.
+        Icon->SetForceMipLevelsToBeResident(30.0f);
+        Icon->WaitForStreaming();
+
+        DTPDrawIcon(WorldContext, Target, Icon);
 
         // Raw, not ReadRenderTarget: that one quantises to FColor, and reading those bytes as sRGB
         // (they are already linear) is what made the first bake come out near-black.
@@ -308,6 +314,9 @@ namespace
             return;
         }
 
+        UTextureRenderTarget2D* ExportTarget = UKismetRenderingLibrary::CreateRenderTarget2D(
+            World, 64, 64, RTF_RGBA8, FLinearColor::Transparent, false, false);
+
         const FString IconDir = FPaths::ProjectSavedDir() / TEXT("DTT") / TEXT("Icons");
         IFileManager::Get().MakeDirectory(*IconDir, true);
 
@@ -319,10 +328,16 @@ namespace
             if (!IsValid(Icon)) Icon = UFGItemDescriptor::GetBigIcon(Item);
             FDTTCargoColors Colors;
             if (!IsValid(Icon) || !DTPIconColors(World, Target, Icon, Colors)) { ++Skipped; continue; }
-            // The icon is already drawn in the target, so writing it out costs nothing and gives
-            // the preview page the real picture to hold the computed colours against.
-            UKismetRenderingLibrary::ExportRenderTarget(
-                World, Target, IconDir, Item->GetName() + TEXT(".png"));
+            // Drawn a second time, into an 8-bit target, only to be written out: ExportRenderTarget
+            // writes a float target as OpenEXR whatever the file is called, and nothing outside a
+            // renderer reads that. From an RGBA8 target it writes a real PNG, which is what the
+            // preview page shows next to the computed colours.
+            if (IsValid(ExportTarget))
+            {
+                DTPDrawIcon(World, ExportTarget, Icon);
+                UKismetRenderingLibrary::ExportRenderTarget(
+                    World, ExportTarget, IconDir, Item->GetName() + TEXT(".png"));
+            }
             // A resource also has the colour the game pings it with on the map. It is not used for
             // the paint - most items have none - but printing it next to the computed colour is
             // the one independent check that the icon was read the right way round.
