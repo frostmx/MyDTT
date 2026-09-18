@@ -455,15 +455,24 @@ void UDynamicTimeTableWidget::SyncCards(UScrollBox* Page, TArray<FDTTCardWidgets
     }
     Cards = MoveTemp(Next);
 
-    // Left to right: everything before Index already sits where it belongs, so pulling a card out
-    // of a later slot and inserting it here cannot disturb them. InsertChildAt makes a slot rather
-    // than moving one, hence the removal first and the padding again after.
-    for (int32 Index = 0; Index < Cards.Num(); ++Index)
+    // A UMG panel does not reorder what it draws. InsertChildAt is AddChild plus ShiftChild, and
+    // ShiftChild moves the slot in the panel's own array while the live Slate box keeps the order
+    // things were added in - so a rebuilt card went to the bottom of the page whatever index it
+    // was given, and the row a player clicked flew down the list. Only removing and adding again
+    // reaches Slate. So: find the first card that is not where it is drawn, take the tail off the
+    // page and put it back in order. A page whose cards all kept their places does nothing at all,
+    // which is every refresh that rebuilt no card.
+    int32 First = 0;
+    while (First < Cards.Num() && Cards[First].Root && Page->GetChildAt(First) == Cards[First].Root) ++First;
+    for (int32 Index = First; Index < Cards.Num(); ++Index)
+    {
+        if (Cards[Index].Root) Page->RemoveChild(Cards[Index].Root);
+    }
+    for (int32 Index = First; Index < Cards.Num(); ++Index)
     {
         UWidget* Root = Cards[Index].Root;
-        if (!Root || Page->GetChildIndex(Root) == Index) continue;
-        Page->RemoveChild(Root);
-        Page->InsertChildAt(Index, Root);
+        if (!Root) continue;
+        Page->AddChild(Root);
         FDTTCardSink::Pad<UScrollBoxSlot>(Root, FMargin(2, 1));
     }
 }
