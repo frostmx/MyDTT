@@ -1,5 +1,26 @@
 ﻿# Changelog
 
+## 3.4.0
+
+- A Timetable tab, which answers the question the other tabs only circle around: what is happening
+  right now. Three blocks on one page - the laps being driven, the requests waiting, and what the
+  dispatcher could not do on its last pass.
+- A lap is drawn as its stops, one mark each, with the one the truck is driving to lit. Where a
+  truck is in its round is a glance now; as a line of station names it was text nobody read.
+- Next to it, the metres of road left before the lap ends. It is road, walked leg by leg over the
+  vehicle path network, not a line drawn across the map - only the first piece, from wherever the
+  truck stands to the stop it is heading for, is straight, because a truck between two nodes is
+  not somewhere the network can be asked about. There is deliberately no arrival time: the game
+  never says what speed a truck will hold, and a made-up ETA is worse than none. "/dtt why" prints
+  the same number, so the window can be checked against something.
+- The queue is the open requests in the order the dispatcher itself will take them - an empty
+  station first, then whoever has waited longest - so the page cannot invent an order of its own.
+- "Why nothing moved" counts the reasons the last pool pass gave up, per resource: no producer
+  with stock, no free truck that fits, the truck is carrying something else, solid against fluid,
+  no road. They are recorded where the dispatcher already logs them, as it runs, rather than
+  worked out again afterwards - which would be a second opinion, and a path search per resource
+  on every refresh.
+
 ## 3.3.0
 
 - A Stations tab: every docking station in the world in one table, whatever it carries - the
