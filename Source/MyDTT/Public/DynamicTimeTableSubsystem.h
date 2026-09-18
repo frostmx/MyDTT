@@ -139,6 +139,14 @@ public:
      * the name anew would drop it. False when the name carries no requester tag to mark.
      */
     static bool SetStayMarkerInName(const FString& FullName, bool bOn, FString& OutName);
+    /**
+     * Writes the limit into a requester tag the same way and for the same reason: only the inside
+     * of the tag is rewritten, so the auto-name caption behind it and the player's own text in
+     * front of it survive byte for byte. Composing the name anew loses both. Threshold 0 removes
+     * the number, which puts the station back on the limit from the settings. False when the name
+     * carries no requester tag to write into.
+     */
+    static bool SetThresholdInName(const FString& FullName, int32 Threshold, FString& OutName);
     /** Exact, resource-independent marker for an optional dedicated refuelling waypoint. */
     static bool ParseFuelStopTag(const FString& FullName, FString& OutBaseName);
     /** Exact marker "(D)" for a depot: where a pool truck waits, held docked, between laps. */
@@ -210,6 +218,26 @@ public:
     bool SetTruckAutopilot(AFGWheeledVehicleIdentifier* Vehicle, bool bEnabled, FString& OutMessage);
     /** Runs the planner over this truck again, as if it had just reached its current waypoint. */
     bool RebuildTruckLap(AFGWheeledVehicleIdentifier* Vehicle, FString& OutMessage);
+
+    /**
+     * The station operations behind the Stations tab. A dock is named by its identifier actor,
+     * which is replicated to every client at all times - the station building itself only reaches
+     * a client standing in front of it, which is why SetStationStayUntilEmpty takes one of those
+     * and this does not. Server only; OutMessage is what the player is told either way.
+     */
+    bool SetDockThreshold(AFGDockingStationIdentifier* Dock, int32 Threshold, FString& OutMessage);
+    /**
+     * The same for a list of docks, renaming them all and rebuilding the groups once at the end:
+     * RebuildGroupsFromNames walks every station in the world, and calling it per dock would make
+     * a twelve-dock edit twelve full sweeps - and re-entering it from inside a renaming loop is
+     * exactly what InternalNameChanges exists to prevent.
+     */
+    bool SetDockThresholdMany(const TArray<AFGDockingStationIdentifier*>& Docks, int32 Threshold, FString& OutMessage);
+    bool SetDockStay(AFGDockingStationIdentifier* Dock, bool bOn, FString& OutMessage);
+    /** Drops a requester's claim, as if the truck holding it had given up, and dispatches again. */
+    bool ClearRequesterClaim(const FGuid& PathNodeGuid, FString& OutMessage);
+    /** Asks the dispatcher to look at the open requests now instead of at its next interval. */
+    bool SendTruckToRequester(AFGDockingStationIdentifier* Dock, FString& OutMessage);
 
     UPROPERTY(BlueprintAssignable, Category = "Dynamic Time Table")
     FDTTGroupsChangedDelegate OnGroupsChanged;

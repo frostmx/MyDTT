@@ -6189,6 +6189,181 @@ bool UDynamicTimeTableSubsystem::RebuildTruckLap(AFGWheeledVehicleIdentifier* Ve
 }
 
 // ---------------------------------------------------------------------------
+// Station operations: the Stations tab's side of the window. Everything here renames a real
+// station in the world, so all of it goes through SetThresholdInName / SetStayMarkerInName and
+// RenameDockGuarded, and none of it composes a name from scratch.
+// ---------------------------------------------------------------------------
+
+bool UDynamicTimeTableSubsystem::SetThresholdInName(const FString& InFullName, int32 Threshold, FString& OutName)
+{
+    OutName = InFullName;
+
+    FString AutoHead, AutoTag, AutoTail;
+    const bool bAuto = DTSSplitAutoBlock(InFullName, AutoHead, AutoTag, AutoTail);
+    const FString Region = bAuto ? AutoTag : AutoHead;
+
+    FDTTDispatchTagScan Scan;
+    if (!DTSScanDispatchTag(Region, Scan) || Scan.Role == EDTTDispatchRole::Producer) return false;
+
+    FString Inner = Scan.Resource;
+    if (Scan.bStayUntilEmpty) Inner += TEXT("=");
+    // Zero is not a limit of zero: it is the tag without a number, which hands the station back
+    // to the limits in the settings.
+    if (Threshold > 0) Inner += FString::Printf(TEXT("-%d"), Threshold);
+
+    const FString NewRegion = Region.Left(Scan.Open + 1) + Inner + Region.Mid(Scan.Close);
+    OutName = bAuto ? DTSJoinAutoBlock(AutoHead, NewRegion, AutoTail) : NewRegion;
+    return true;
+}
+
+bool UDynamicTimeTableSubsystem::SetDockThreshold(AFGDockingStationIdentifier* Dock, int32 Threshold, FString& OutMessage)
+{
+    TArray<AFGDockingStationIdentifier*> One;
+    One.Add(Dock);
+    return SetDockThresholdMany(One, Threshold, OutMessage);
+}
+
+bool UDynamicTimeTableSubsystem::SetDockThresholdMany(const TArray<AFGDockingStationIdentifier*>& Docks, int32 Threshold, FString& OutMessage)
+{
+    OutMessage.Reset();
+    if (!IsServer()) { OutMessage = TEXT("dTT: only the server changes station names."); return false; }
+    if (Docks.Num() == 0) { OutMessage = TEXT("dTT: no station selected."); return false; }
+    // A selection is a handful of rows a player ticked, not a world sweep; the cap is here so a
+    // bug on the other side of the wire cannot rename a thousand stations in one call.
+    static constexpr int32 MaxDocksPerEdit = 64;
+    if (Docks.Num() > MaxDocksPerEdit)
+    {
+        OutMessage = FString::Printf(TEXT("dTT: %d stations at once is too many; %d is the limit."), Docks.Num(), MaxDocksPerEdit);
+        return false;
+    }
+    Threshold = FMath::Clamp(Threshold, 0, 9999);
+
+    int32 Changed = 0, Skipped = 0;
+    FString FirstName;
+    for (AFGDockingStationIdentifier* Dock : Docks)
+    {
+        if (!IsValid(Dock)) { ++Skipped; continue; }
+        const FString Current = Dock->GetStationName().ToString();
+        FString NewName;
+        if (!SetThresholdInName(Current, Threshold, NewName)) { ++Skipped; continue; }
+        if (FirstName.IsEmpty()) FirstName = Current;
+        if (NewName == Current) continue;
+        // One line per station, because this is the operation that can quietly damage a name a
+        // player wrote by hand, and the log is where that would be caught.
+        UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("STATION_LIMIT_SET Old='%s' New='%s'"), *Current, *NewName);
+        if (RenameDockGuarded(Dock, NewName)) ++Changed;
+        else ++Skipped;
+    }
+    // Once, at the end: see the comment on the declaration.
+    if (Changed > 0) RebuildGroupsFromNames();
+
+    if (Changed == 0)
+    {
+        OutMessage = Skipped > 0
+            ? FString::Printf(TEXT("dTT: nothing to set - %d station(s) carry no requester tag."), Skipped)
+            : FString::Printf(TEXT("dTT: the limit is already %d."), Threshold);
+        return false;
+    }
+    const FString Limit = Threshold > 0 ? FString::Printf(TEXT("%d"), Threshold) : FString(TEXT("the default"));
+    const FString Tail = Skipped > 0 ? FString::Printf(TEXT(", %d skipped"), Skipped) : FString();
+    OutMessage = Docks.Num() == 1
+        ? FString::Printf(TEXT("dTT: limit of '%s' set to %s."), *StripAllTags(FirstName), *Limit)
+        : FString::Printf(TEXT("dTT: limit of %d station(s) set to %s%s."), Changed, *Limit, *Tail);
+    return true;
+}
+
+bool UDynamicTimeTableSubsystem::SetDockStay(AFGDockingStationIdentifier* Dock, bool bOn, FString& OutMessage)
+{
+    OutMessage.Reset();
+    if (!IsServer()) { OutMessage = TEXT("dTT: only the server changes station names."); return false; }
+    if (!IsValid(Dock)) { OutMessage = TEXT("dTT: that station is gone."); return false; }
+
+    const FString Current = Dock->GetStationName().ToString();
+    FString NewName;
+    if (!SetStayMarkerInName(Current, bOn, NewName))
+    {
+        OutMessage = FString::Printf(TEXT("dTT: '%s' carries no (Resource) tag to mark."), *StripAllTags(Current));
+        return false;
+    }
+    if (NewName != Current)
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("STATION_STAY_SET Old='%s' New='%s'"), *Current, *NewName);
+        if (!RenameDockGuarded(Dock, NewName))
+        {
+            OutMessage = FString::Printf(TEXT("dTT: renaming '%s' failed."), *StripAllTags(Current));
+            return false;
+        }
+        RebuildGroupsFromNames();
+    }
+    OutMessage = FString::Printf(TEXT("dTT: '%s' %s until empty."), *StripAllTags(NewName),
+        bOn ? TEXT("now keeps the truck") : TEXT("no longer keeps the truck"));
+    return true;
+}
+
+bool UDynamicTimeTableSubsystem::ClearRequesterClaim(const FGuid& PathNodeGuid, FString& OutMessage)
+{
+    OutMessage.Reset();
+    if (!IsServer()) { OutMessage = TEXT("dTT: only the server holds the claims."); return false; }
+    const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Owner = RequesterClaims.Find(PathNodeGuid);
+    if (!Owner)
+    {
+        OutMessage = FString::Printf(TEXT("dTT: '%s' is not claimed."), *DockDisplayName(PathNodeGuid));
+        return false;
+    }
+    const FString Who = Owner->IsValid() ? DTSVehicleName(Owner->Get()) : TEXT("a truck that is gone");
+    RequesterClaims.Remove(PathNodeGuid);
+    RequesterClaimedAtWorldSeconds.Remove(PathNodeGuid);
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("DISPATCH_CLAIM_RELEASED Station='%s' Truck='%s' Reason=window"),
+        *DockDisplayName(PathNodeGuid), *Who);
+    // The truck that held it may still be on its way here; the dispatcher is told at once so the
+    // station does not sit open for a whole interval with a truck already pointed at it.
+    RunPoolDispatch(TEXT("claim cleared"));
+    OutMessage = FString::Printf(TEXT("dTT: dropped the claim of '%s' on '%s'."), *Who, *DockDisplayName(PathNodeGuid));
+    return true;
+}
+
+bool UDynamicTimeTableSubsystem::SendTruckToRequester(AFGDockingStationIdentifier* Dock, FString& OutMessage)
+{
+    OutMessage.Reset();
+    if (!IsServer()) { OutMessage = TEXT("dTT: only the server dispatches."); return false; }
+    if (!IsValid(Dock)) { OutMessage = TEXT("dTT: that station is gone."); return false; }
+    const FDTTDispatchStation* Station = nullptr;
+    for (const FDTTDispatchStation& Candidate : DispatchStations)
+    {
+        if (Candidate.DockingStationIdentifier.Get() == Dock) { Station = &Candidate; break; }
+    }
+    if (!Station)
+    {
+        OutMessage = FString::Printf(TEXT("dTT: '%s' carries no (Resource) tag."), *StripAllTags(Dock->GetStationName().ToString()));
+        return false;
+    }
+    if (GetEffectiveDispatchRole(*Station) != EDTTDispatchRole::Requester)
+    {
+        OutMessage = FString::Printf(TEXT("dTT: '%s' is not a requester."), *StripAllTags(Station->DisplayName));
+        return false;
+    }
+    if (RequesterClaims.Contains(Station->DockingPathNodeGuid))
+    {
+        OutMessage = FString::Printf(TEXT("dTT: '%s' is already claimed."), *StripAllTags(Station->DisplayName));
+        return false;
+    }
+    if (!IsRequesterOpen(*Station, ResolveItemClassForResource(Station->ResourceId)))
+    {
+        OutMessage = FString::Printf(TEXT("dTT: '%s' is above its limit, so it is asking for nothing."), *StripAllTags(Station->DisplayName));
+        return false;
+    }
+    // Deliberately not "send that truck there": choosing the truck is the dispatcher's whole job,
+    // and a button reaching into AssignPoolTruck would be a second dispatcher with its own idea
+    // of which truck is free. This asks the one dispatcher to look now.
+    RunPoolDispatch(TEXT("window send"));
+    const bool bTaken = RequesterClaims.Contains(Station->DockingPathNodeGuid);
+    OutMessage = bTaken
+        ? FString::Printf(TEXT("dTT: a truck is on its way to '%s'."), *StripAllTags(Station->DisplayName))
+        : FString::Printf(TEXT("dTT: nothing free for '%s' right now; it stays first in line."), *StripAllTags(Station->DisplayName));
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Rows for the Dispatch and Trucks tabs, the chat listings and the RCO snapshot. Built here so
 // that every view shows the same thing; formatting is static so the client can format a
 // snapshot row without a subsystem.

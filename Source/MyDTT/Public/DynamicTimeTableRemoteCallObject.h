@@ -99,6 +99,17 @@ public:
     void RequestReleaseTruck(class AFGWheeledVehicleIdentifier* Truck);
     void RequestSetAutopilot(class AFGWheeledVehicleIdentifier* Truck, bool bEnabled);
     void RequestRebuildLap(class AFGWheeledVehicleIdentifier* Truck);
+    /**
+     * The Stations tab's controls. A dock is named by its identifier actor for the same reason a
+     * truck is; what comes back is the result plus the Stations section. The many-form is one
+     * call on purpose: the server renames every dock and rebuilds the groups once, which a row
+     * at a time could not do.
+     */
+    void RequestSetDockTrigger(class AFGDockingStationIdentifier* Dock, int32 Threshold);
+    void RequestSetDockTriggerMany(const TArray<class AFGDockingStationIdentifier*>& Docks, int32 Threshold);
+    void RequestSetDockStay(class AFGDockingStationIdentifier* Dock, bool bOn);
+    void RequestClearDockClaim(FGuid PathNodeGuid);
+    void RequestSendTruckNow(class AFGDockingStationIdentifier* Dock);
     UFUNCTION(Client, Reliable)
     void Client_OpenWindow();
 private:
@@ -118,11 +129,17 @@ private:
     UFUNCTION(Server, Reliable) void Server_ReleaseTruck(class AFGWheeledVehicleIdentifier* Truck, int32 ClientProtocol);
     UFUNCTION(Server, Reliable) void Server_SetAutopilot(class AFGWheeledVehicleIdentifier* Truck, bool bEnabled, int32 ClientProtocol);
     UFUNCTION(Server, Reliable) void Server_RebuildLap(class AFGWheeledVehicleIdentifier* Truck, int32 ClientProtocol);
+    UFUNCTION(Server, Reliable) void Server_SetDockTrigger(const TArray<class AFGDockingStationIdentifier*>& Docks, int32 Threshold, int32 ClientProtocol);
+    UFUNCTION(Server, Reliable) void Server_SetDockStay(class AFGDockingStationIdentifier* Dock, bool bOn, int32 ClientProtocol);
+    UFUNCTION(Server, Reliable) void Server_ClearDockClaim(FGuid PathNodeGuid, int32 ClientProtocol);
+    UFUNCTION(Server, Reliable) void Server_SendTruckNow(class AFGDockingStationIdentifier* Dock, int32 ClientProtocol);
     UFUNCTION(Client, Reliable) void Client_ReceiveSnapshot(const FDTTClientSnapshot& Snapshot);
     UFUNCTION(Client, Reliable) void Client_OperationResult(bool bSuccess, const FString& Message);
     bool Check(int32 ClientProtocol);
     /** The tail every truck operation shares: the result, then the rows the player is looking at. */
     void FinishTruckOperation(bool bSuccess, const FString& Message);
+    /** The same for a station operation, with the Stations rows instead. */
+    void FinishStationOperation(bool bSuccess, const FString& Message);
     void SendSnapshot(int32 Sections);
     void StartLiveUpdates();
     void PollLiveSnapshot();
