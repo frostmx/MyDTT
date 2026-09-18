@@ -6276,11 +6276,9 @@ float UDynamicTimeTableSubsystem::EstimateDistanceLeftMetres(AFGWheeledVehicleId
     const UFGVehiclePathPreset* Preset = IsValid(Wheeled) ? Wheeled->GetVehiclePathPreset() : nullptr;
     if (!IsValid(VehicleSubsystem) || !Preset) return -1.0f;
 
-    float Centimetres = 0.0f;
-    if (AFGDockingStationIdentifier* Target = FindDockByPathNode(Route[Index]))
-    {
-        Centimetres = FVector::Dist(Vehicle->GetRealActorLocation(), Target->GetRealActorLocation());
-    }
+    // The leg the truck is on as NEXT has it, so the lap left is never shorter than the way to
+    // the next stop.
+    float Centimetres = FMath::Max(0.0f, EstimateNextStopMetres(Vehicle, Cache)) * 100.0f;
     for (int32 Stop = Index; Stop + 1 < Route.Num(); ++Stop)
     {
         const float Leg = EstimatePathLengthCm(VehicleSubsystem, Preset, Route[Stop], Route[Stop + 1], Cache);
@@ -7175,7 +7173,7 @@ void UDynamicTimeTableSubsystem::GetTruckWhyLines(const FString& TruckQuery, TAr
     {
         const float Metres = EstimateDistanceLeftMetres(Vehicle);
         OutLines.Add(Metres >= 0.0f
-            ? FString::Printf(TEXT("  distance left this lap: ~%d m (straight line to the next stop, road for the rest)"), FMath::RoundToInt(Metres))
+            ? FString::Printf(TEXT("  distance left this lap: ~%d m (the next stop as below, road for the rest)"), FMath::RoundToInt(Metres))
             : FString(TEXT("  distance left this lap: unknown (no costable path from here)")));
         // The Timetable's SPEED and NEXT columns, from the same calls.
         int32 Samples = 0, DrivingSamples = 0;

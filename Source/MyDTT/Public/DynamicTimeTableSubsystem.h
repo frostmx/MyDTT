@@ -627,10 +627,8 @@ private:
     float EstimatePathLengthCm(class AFGVehicleSubsystem* VehicleSubsystem, const class UFGVehiclePathPreset* Preset,
         const FGuid& From, const FGuid& To, TMap<TPair<FGuid, FGuid>, float>* Cache = nullptr) const;
     /**
-     * Metres of road left before the truck finishes the lap it is on: the straight line to the
-     * stop it is heading for, plus the path over the stops after it. The remainder of the leg the
-     * truck is standing in cannot be had from the network - a truck sits between nodes - and on a
-     * lap of kilometres the straight line is a small share of one leg and costs nothing.
+     * Metres of road left before the truck finishes the lap it is on: the road to the stop it is
+     * heading for (EstimateNextStopMetres), plus the path over the stops after it.
      */
     float EstimateDistanceLeftMetres(AFGWheeledVehicleIdentifier* Vehicle, TMap<TPair<FGuid, FGuid>, float>* Cache = nullptr) const;
     /**
