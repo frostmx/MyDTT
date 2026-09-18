@@ -7,6 +7,7 @@
 
 class AFGTrainStationIdentifier;
 class AFGDockingStationIdentifier;
+class AFGWheeledVehicleIdentifier;
 
 /** Kind of vehicle a station group balances. A group never mixes kinds: trains and trucks travel different networks. */
 UENUM(BlueprintType)
@@ -328,8 +329,16 @@ struct FDTTDispatchRow
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 CapacityStacks = -1;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bFluid = false;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bOpen = false;
+    /**
+     * The dock itself, for the window's row buttons. The identifier is replicated to every
+     * client at all times, unlike the station, so a row can act on its dock wherever it is on
+     * the map. Null only while the client has yet to resolve it, which greys the row's buttons.
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TObjectPtr<AFGDockingStationIdentifier> Dock = nullptr;
     /** Requester: the truck holding the claim; depot: the truck parked or heading there. Empty when free. */
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString ClaimOwner;
+    /** ClaimOwner's place in the snapshot's truck-name table; see FDTTClientSnapshot. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 ClaimTruckId = INDEX_NONE;
     /** Requester: stacks the claiming truck's lap plans to leave here. */
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 PlannedStacks = 0;
     /** Requester: how long it has been open with nobody claiming it; 0 when closed or claimed. */
@@ -352,6 +361,8 @@ struct FDTTTruckRow
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TSoftClassPtr<class UFGItemDescriptor> ItemClass;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TSoftClassPtr<class UFGItemDescriptor> CargoItemClass;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TArray<FString> RouteStops;
+    /** The same stops as places in the snapshot's dock-name table; see FDTTClientSnapshot. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TArray<int32> RouteStopIds;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 TargetIndex = -1;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 CargoStacks = -1;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 CargoCapacityStacks = -1;
@@ -361,6 +372,8 @@ struct FDTTTruckRow
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bDocking = false;
     /** What is on board by item, and why that matters ("waits for Plastic", "foreign cargo"). */
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString CargoNote;
+    /** The truck itself, for the window's row buttons; see FDTTDispatchRow::Dock. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TObjectPtr<AFGWheeledVehicleIdentifier> Truck = nullptr;
 };
 
 /**

@@ -45,16 +45,47 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
             }
         }
     }
-    // Rough size, for the log: strings dominate, everything else is a few bytes per row.
+    // Names go into the snapshot's two tables and the rows keep a place in them. This is what
+    // holds the route stops to a few KB; see FDTTClientSnapshot for the arithmetic. It happens
+    // before the measurement below, because the measurement is of what goes on the wire.
+    {
+        auto Intern = [](TMap<FString, int32>& Seen, TArray<FString>& Table, const FString& Name) -> int32
+        {
+            if (Name.IsEmpty()) return INDEX_NONE;
+            if (const int32* Found = Seen.Find(Name)) return *Found;
+            const int32 Id = Table.Add(Name);
+            Seen.Add(Name, Id);
+            return Id;
+        };
+        TMap<FString, int32> SeenDocks, SeenTrucks;
+        for (FDTTTruckRow& R : X.TruckRows)
+        {
+            R.RouteStopIds.Reserve(R.RouteStops.Num());
+            // A name that came back empty still takes a place, or the stop count would change and
+            // with it the card's key.
+            for (const FString& Stop : R.RouteStops) R.RouteStopIds.Add(Intern(SeenDocks, X.DockNames, Stop));
+            R.RouteStops.Empty();
+        }
+        for (FDTTDispatchRow& R : X.DispatchRows)
+        {
+            R.ClaimTruckId = Intern(SeenTrucks, X.TruckNames, R.ClaimOwner);
+            R.ClaimOwner.Empty();
+        }
+    }
+
+    // Rough size, for the log: strings dominate, everything else is a few bytes per row. The row
+    // constants carry the new integer and the actor handle, which resolves as a NetGUID.
     int64 Bytes = 64;
     for (const auto& G : X.Groups) { Bytes += 48 + G.GroupName.Len(); for (const auto& E : G.Stations) Bytes += 32 + E.DisplayName.Len(); }
     for (const auto& N : X.AvailableStations) Bytes += 4 + N.Len();
     for (const auto& N : X.AvailableTruckStations) Bytes += 4 + N.Len();
+    for (const auto& N : X.DockNames) Bytes += 4 + N.Len();
+    for (const auto& N : X.TruckNames) Bytes += 4 + N.Len();
     for (const auto& L : X.RuntimeLoads) Bytes += 20 + L.StationName.Len();
-    for (const auto& R : X.DispatchRows) Bytes += 48 + R.ResourceId.Len() + R.StationName.Len() + R.ClaimOwner.Len() + R.Note.Len();
-    for (const auto& R : X.TruckRows) { Bytes += 40 + R.Name.Len() + R.ResourceId.Len() + R.DepotName.Len() + R.PlannedSummary.Len(); for (const auto& Stop : R.RouteStops) Bytes += 4 + Stop.Len(); }
-    UE_LOG(LogDynamicTimeTableRCO, Verbose, TEXT("SNAPSHOT_SIZE Sections=%d Groups=%d DispatchRows=%d TruckRows=%d ApproxBytes=%lld"),
-        X.Sections, X.Groups.Num(), X.DispatchRows.Num(), X.TruckRows.Num(), Bytes);
+    for (const auto& R : X.DispatchRows) Bytes += 56 + R.ResourceId.Len() + R.StationName.Len() + R.Note.Len();
+    for (const auto& R : X.TruckRows) Bytes += 48 + R.Name.Len() + R.ResourceId.Len() + R.DepotName.Len() + R.PlannedSummary.Len() + R.CargoNote.Len() + 4 * R.RouteStopIds.Num();
+    UE_LOG(LogDynamicTimeTableRCO, Verbose, TEXT("SNAPSHOT_SIZE Sections=%d Groups=%d DispatchRows=%d TruckRows=%d DockNames=%d TruckNames=%d ApproxBytes=%lld"),
+        X.Sections, X.Groups.Num(), X.DispatchRows.Num(), X.TruckRows.Num(), X.DockNames.Num(), X.TruckNames.Num(), Bytes);
     Client_ReceiveSnapshot(X);
 }
 void UDynamicTimeTableRemoteCallObject::RequestSnapshot(int32 Sections){Server_RequestSnapshot(ProtocolVersion,Sections);}void UDynamicTimeTableRemoteCallObject::RequestCreateGroup(const FString&N,EDTTGroupKind K){Server_CreateGroup(N,K,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestRenameGroup(FGuid G,const FString&N){Server_RenameGroup(G,N,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestDeleteGroup(FGuid G){Server_DeleteGroup(G,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestAddStation(FGuid G,const FString&N){Server_AddStation(G,N,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestRemoveStation(FGuid G,const FString&N){Server_RemoveStation(G,N,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestSetTargetSlots(FGuid G,const FString&N,int32 V){Server_SetTargetSlots(G,N,FMath::Clamp(V,1,999),ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestRecalculate(){Server_Recalculate(ProtocolVersion);}
@@ -94,8 +125,23 @@ void UDynamicTimeTableRemoteCallObject::Client_ReceiveSnapshot_Implementation(co
         CachedSnapshot.RuntimeLoads = X.RuntimeLoads;
         CachedSnapshot.Settings = X.Settings;
     }
-    if (X.Sections & EDTTSnapshotSection::Dispatch) CachedSnapshot.DispatchRows = X.DispatchRows;
-    if (X.Sections & EDTTSnapshotSection::Trucks) CachedSnapshot.TruckRows = X.TruckRows;
+    // The names come back out of the tables here, once, so that every reader downstream - the
+    // window, the cards, the keys - sees the same row it would see on a listen host.
+    auto Expand = [](const TArray<FString>& Table, int32 Id) { return Table.IsValidIndex(Id) ? Table[Id] : FString(); };
+    if (X.Sections & EDTTSnapshotSection::Dispatch)
+    {
+        CachedSnapshot.DispatchRows = X.DispatchRows;
+        for (FDTTDispatchRow& R : CachedSnapshot.DispatchRows) R.ClaimOwner = Expand(X.TruckNames, R.ClaimTruckId);
+    }
+    if (X.Sections & EDTTSnapshotSection::Trucks)
+    {
+        CachedSnapshot.TruckRows = X.TruckRows;
+        for (FDTTTruckRow& R : CachedSnapshot.TruckRows)
+        {
+            R.RouteStops.Reset(R.RouteStopIds.Num());
+            for (const int32 Id : R.RouteStopIds) R.RouteStops.Add(Expand(X.DockNames, Id));
+        }
+    }
     OnSnapshotChanged.Broadcast();
 }
 void UDynamicTimeTableRemoteCallObject::Client_OperationResult_Implementation(bool O,const FString&M){OnOperationResult.Broadcast(O,M);}

@@ -28,6 +28,15 @@ struct FDTTClientSnapshot
     UPROPERTY(BlueprintReadOnly) TArray<FDTTStationRuntimeLoad> RuntimeLoads;
     UPROPERTY(BlueprintReadOnly) TArray<FDTTDispatchRow> DispatchRows;
     UPROPERTY(BlueprintReadOnly) TArray<FDTTTruckRow> TruckRows;
+    /**
+     * Every station and truck name the rows above refer to, each written once. A truck's route
+     * stops used to ride as full names on every truck: 400 trucks with six stops each is about
+     * 105 KB of mostly the same dozen station names, against a 64 KB reliable bunch that the
+     * server drops in silence. The rows carry places in these tables instead, and the client
+     * puts the names back in Client_ReceiveSnapshot, so nothing downstream sees the difference.
+     */
+    UPROPERTY(BlueprintReadOnly) TArray<FString> DockNames;
+    UPROPERTY(BlueprintReadOnly) TArray<FString> TruckNames;
     // Sent with the Groups section: small, and it changes with the configuration revision.
     UPROPERTY(BlueprintReadOnly) FDTTSettings Settings;
 };

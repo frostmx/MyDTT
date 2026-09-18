@@ -6265,6 +6265,7 @@ void UDynamicTimeTableSubsystem::BuildDispatchRows(TArray<FDTTDispatchRow>& OutR
         const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(Station.ResourceId);
 
         FDTTDispatchRow& Row = OutRows.AddDefaulted_GetRef();
+        Row.Dock = Station.DockingStationIdentifier.Get();
         Row.ResourceId = Station.ResourceId;
         Row.ItemClass = TSoftClassPtr<UFGItemDescriptor>(ItemClass.Get());
         // The card already names the resource, so the tag goes; the auto-name caption stays,
@@ -6318,9 +6319,10 @@ void UDynamicTimeTableSubsystem::BuildDispatchRows(TArray<FDTTDispatchRow>& OutR
     Depots.Sort([](const FGuid& A, const FGuid& B) { return A.ToString() < B.ToString(); });
     for (const FGuid& Depot : Depots)
     {
-        const AFGDockingStationIdentifier* Dock = FindDockByPathNode(Depot);
+        AFGDockingStationIdentifier* Dock = FindDockByPathNode(Depot);
         const AFGBuildableDockingStation* Station = IsValid(Dock) ? Dock->GetStation() : nullptr;
         FDTTDispatchRow& Row = OutRows.AddDefaulted_GetRef();
+        Row.Dock = Dock;
         Row.bDepot = true;
         Row.StationName = DockDisplayName(Depot);
         Row.DockingPathNodeGuid = Depot;
@@ -6343,8 +6345,9 @@ void UDynamicTimeTableSubsystem::BuildDispatchRows(TArray<FDTTDispatchRow>& OutR
     FuelStops.Sort([](const FGuid& A, const FGuid& B) { return A.ToString() < B.ToString(); });
     for (const FGuid& FuelGuid : FuelStops)
     {
-        const AFGDockingStationIdentifier* FuelDock = FindDockByPathNode(FuelGuid);
+        AFGDockingStationIdentifier* FuelDock = FindDockByPathNode(FuelGuid);
         FDTTDispatchRow& Row = OutRows.AddDefaulted_GetRef();
+        Row.Dock = FuelDock;
         Row.bFuelStop = true;
         Row.StationName = IsValid(FuelDock) ? FuelDock->GetStationName().ToString() : TEXT("<missing dock>");
         Row.DockingPathNodeGuid = FuelGuid;
@@ -6396,6 +6399,7 @@ void UDynamicTimeTableSubsystem::BuildTruckRows(TArray<FDTTTruckRow>& OutRows, c
     OutRows.Reset();
     auto FillCommon = [&](FDTTTruckRow& Row, AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<UFGItemDescriptor> ItemClass)
     {
+        Row.Truck = Vehicle;
         Row.Name = DTSVehicleName(Vehicle);
         Row.ItemClass = TSoftClassPtr<UFGItemDescriptor>(ItemClass.Get());
         TSubclassOf<UFGItemDescriptor> CargoClass;
