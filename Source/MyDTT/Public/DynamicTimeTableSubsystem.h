@@ -382,12 +382,22 @@ private:
     {
         FDTTSpeedRing All;
         FDTTSpeedRing Driving;
+        /**
+         * An odometer for the current leg: metres driven since the truck's target last changed,
+         * added up every second from the speed. The target moves on when the truck docks, so this
+         * is the road behind it on the way to the next stop.
+         */
+        FGuid LegTarget;
+        float LegMetres = 0.0f;
+        double LegClock = -1.0;
     };
     TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTSpeedSamples> SpeedSamples;
     /** PollTruckStates runs every second; the speed is sampled on every fifth. */
     int32 SpeedSampleTick = 0;
     static constexpr int32 SpeedSampleEverySeconds = 5;
     void SampleTruckSpeeds();
+    /** Every second: the leg odometers. */
+    void UpdateLegOdometers();
     // Client side only: watches for the game's own docking-station window and puts this mod's
     // button in it. Slower than a frame and faster than the eye - the window is opened by hand.
     FTimerHandle StationWindowTimerHandle;

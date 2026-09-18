@@ -14,8 +14,9 @@
 - Time to the next stop: the road left on the current leg over the average speed of the last
   minute of driving. Samples taken on a dock are left out of that average, or a truck that has just
   pulled out would be promised its stop at a third of the speed it is about to drive at. The road
-  is the straight line to the stop, stretched by how much longer than its own straight line that
-  leg's road is. It is an estimate, and says so with a "~".
+  is the leg's length less what the truck has driven since its target changed, which the server
+  adds up every second; the straight line to the stop is its floor. It is an estimate, and says so
+  with a "~".
 - Left: the metres of road to the end of the lap, walked leg by leg over the vehicle path network,
   not a line drawn across the map. "/dtt why" prints the same metres, both averages and the time,
   so the window can be checked against something.

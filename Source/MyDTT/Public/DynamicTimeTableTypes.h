@@ -483,8 +483,9 @@ struct FDTTLapRow
      */
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 DistanceLeftMetres = -1;
     /**
-     * Metres of road left to the stop the truck is heading for: the straight line to it, stretched
-     * by how much longer than its straight line the road of that leg is. -1 when unknown.
+     * Metres of road left to the stop the truck is heading for: the leg's road less what the truck
+     * has driven since its target changed, never under the straight line to the stop nor over
+     * that line stretched by the leg's winding. -1 when unknown.
      */
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 NextStopMetres = -1;
     /**
