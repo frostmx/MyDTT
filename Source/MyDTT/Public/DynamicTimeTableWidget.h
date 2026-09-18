@@ -33,6 +33,7 @@ struct FDTTCardWidgets
     UPROPERTY() TArray<TObjectPtr<UBorder>> Borders;
     UPROPERTY() TArray<TObjectPtr<UProgressBar>> Bars;
     UPROPERTY() TArray<TObjectPtr<UImage>> Images;
+    UPROPERTY() TArray<TObjectPtr<class UDTTRowButton>> Buttons;
 };
 class USpinBox;
 class UTextBlock;
@@ -196,6 +197,8 @@ private:
     void RefreshTruckDisplay();
     void SyncCards(UScrollBox* Page, TArray<FDTTCardWidgets>& Cards, const TArray<FString>& Keys,
         TFunctionRef<void(int32, FDTTCardSink&)> Fill);
+    /** Bound to HandleRowAction once and handed to every sink, which binds it to every control. */
+    FDTTRowActionDelegate RowActionDelegate;
     void PopulateResourceCard(const FString& Resource, const TArray<const FDTTDispatchRow*>& Rows, FDTTCardSink& Sink);
     void PopulateDepotCard(const TArray<const FDTTDispatchRow*>& Depots, FDTTCardSink& Sink);
     void PopulateFuelCard(const TArray<const FDTTDispatchRow*>& FuelStops, FDTTCardSink& Sink);

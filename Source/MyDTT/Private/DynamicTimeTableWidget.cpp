@@ -111,6 +111,7 @@ void UDynamicTimeTableWidget::NativeConstruct()
             if (IsRemoteClient()) RemoteCallObject->RequestSnapshot();
         }
     }
+    if (!RowActionDelegate.IsBound()) RowActionDelegate.BindUObject(this, &UDynamicTimeTableWidget::HandleRowAction);
     RefreshData();
     ApplyWindowSize();
     SetActiveTab(ActiveTab);
@@ -407,6 +408,7 @@ void UDynamicTimeTableWidget::SyncCards(UScrollBox* Page, TArray<FDTTCardWidgets
             Claimed[*Found] = true;
             Next[Index] = MoveTemp(Cards[*Found]);
             FDTTCardSink Sink(WidgetTree, false, Next[Index]);
+            Sink.RowAction = RowActionDelegate;
             Fill(Index, Sink);
             // The shape changed without the key noticing: rebuild this card on the next refresh.
             // Say so, because such a card then rebuilds every 1.5 s for as long as the window is
@@ -424,6 +426,7 @@ void UDynamicTimeTableWidget::SyncCards(UScrollBox* Page, TArray<FDTTCardWidgets
         }
         Next[Index].Key = Keys[Index];
         FDTTCardSink Sink(WidgetTree, true, Next[Index]);
+        Sink.RowAction = RowActionDelegate;
         Fill(Index, Sink);
         UE_LOG(LogDynamicTimeTableWidget, Verbose, TEXT("CARD_BUILT Index=%d Key=%s"), Index, *Keys[Index]);
     }

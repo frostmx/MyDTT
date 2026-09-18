@@ -5,15 +5,21 @@
 
 #include "CoreMinimal.h"
 #include "DynamicTimeTableWidget.h"
+#include "DTTRowButton.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Styling/SlateBrush.h"
+#include "Styling/SlateTypes.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/Image.h"
+#include "Components/Overlay.h"
+#include "Components/OverlaySlot.h"
 #include "Components/PanelWidget.h"
 #include "Components/ProgressBar.h"
 #include "Components/SizeBox.h"
+#include "Components/SizeBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
@@ -26,6 +32,19 @@ DECLARE_LOG_CATEGORY_EXTERN(LogDynamicTimeTableWidget, Log, All);
 
 namespace DTTUI
 {
+    inline const FLinearColor DTTCardTint(0.08f, 0.12f, 0.15f, 1.0f);
+    inline const FLinearColor DTTCardTintOpen(0.09f, 0.16f, 0.13f, 1.0f);
+    inline const FLinearColor DTTCardTintWait(0.16f, 0.14f, 0.07f, 1.0f);
+    inline const FLinearColor DTTCardTintWarn(0.17f, 0.11f, 0.08f, 1.0f);
+    inline const FLinearColor DTTCyan(0.2f, 0.8f, 1.0f);
+    inline const FLinearColor DTTGreen(0.3f, 1.0f, 0.5f);
+    inline const FLinearColor DTTYellow(1.0f, 0.85f, 0.3f);
+    inline const FLinearColor DTTOrange(1.0f, 0.55f, 0.1f);
+    inline const FLinearColor DTTRed(1.0f, 0.35f, 0.3f);
+    inline const FLinearColor DTTGrey(0.6f, 0.68f, 0.74f);
+    inline const FLinearColor DTTDim(0.45f, 0.5f, 0.55f);
+    inline const FLinearColor DTTSteel(0.6f, 0.7f, 0.85f);
+
     inline UTextBlock* MakeText(UWidgetTree* Tree, const FString& Value, int32 Size, const FLinearColor& Color)
     {
         UTextBlock* Text = Tree->ConstructWidget<UTextBlock>();
@@ -35,6 +54,34 @@ namespace DTTUI
         Font.Size = Size;
         Text->SetFont(Font);
         return Text;
+    }
+
+    /** A solid rounded rectangle, which is a brush with no texture behind it. */
+    inline FSlateBrush FlatBrush(const FLinearColor& Tint, float Radius = 3.0f)
+    {
+        FSlateBrush Brush;
+        Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+        Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+        Brush.OutlineSettings.CornerRadii = FVector4(Radius, Radius, Radius, Radius);
+        Brush.TintColor = FSlateColor(Tint);
+        return Brush;
+    }
+
+    /**
+     * Makes a button look like part of a table rather than like a game button: flat, square-ish
+     * and with padding of our own. The tint is left to SetBackgroundColor, which multiplies
+     * every state at once, so the row can recolour itself on an update pass.
+     */
+    inline void Flatten(UButton* Button, const FMargin& Padding)
+    {
+        FButtonStyle Style = Button->GetStyle();
+        Style.SetNormal(FlatBrush(FLinearColor(1.0f, 1.0f, 1.0f, 0.10f)));
+        Style.SetHovered(FlatBrush(FLinearColor(1.0f, 1.0f, 1.0f, 0.20f)));
+        Style.SetPressed(FlatBrush(FLinearColor(1.0f, 1.0f, 1.0f, 0.30f)));
+        Style.SetDisabled(FlatBrush(FLinearColor(1.0f, 1.0f, 1.0f, 0.04f)));
+        Style.SetNormalPadding(Padding);
+        Style.SetPressedPadding(Padding);
+        Button->SetStyle(Style);
     }
 
     inline UButton* MakeButton(UWidgetTree* Tree, const FString& Label)
@@ -64,12 +111,14 @@ struct FDTTCardSink
     UWidgetTree* Tree = nullptr;
     bool bBuild = true;
     FDTTCardWidgets& Card;
-    int32 TextIndex = 0, BorderIndex = 0, BarIndex = 0, ImageIndex = 0;
+    int32 TextIndex = 0, BorderIndex = 0, BarIndex = 0, ImageIndex = 0, ButtonIndex = 0;
+    /** What every control this sink makes reports to; see UDynamicTimeTableWidget::HandleRowAction. */
+    FDTTRowActionDelegate RowAction;
 
     FDTTCardSink(UWidgetTree* InTree, bool bInBuild, FDTTCardWidgets& InCard) : Tree(InTree), bBuild(bInBuild), Card(InCard) {}
 
     /** True when an update walked past what the build stored: the shape changed without the key noticing. */
-    bool Overran() const { return TextIndex != Card.Texts.Num() || BorderIndex != Card.Borders.Num() || BarIndex != Card.Bars.Num() || ImageIndex != Card.Images.Num(); }
+    bool Overran() const { return TextIndex != Card.Texts.Num() || BorderIndex != Card.Borders.Num() || BarIndex != Card.Bars.Num() || ImageIndex != Card.Images.Num() || ButtonIndex != Card.Buttons.Num(); }
 
     template <typename TSlot>
     static void Pad(UWidget* Widget, const FMargin& Margin)
@@ -243,23 +292,179 @@ struct FDTTCardSink
         }
         ++BarIndex;
     }
+    /**
+     * One line of a table, and the line itself is the control: a click anywhere on it carries
+     * Target, which is how a row opens. Returns the box to fill, null on an update like every other
+     * container here. Height is fixed so that the columns of every row line up.
+     */
+    UHorizontalBox* Row(UPanelWidget* Parent, float Height, const FDTTRowTarget& Target,
+        const FLinearColor& Tint, const FMargin& Margin = FMargin(0, 1))
+    {
+        UDTTRowButton* B = nullptr;
+        UHorizontalBox* Line = nullptr;
+        if (bBuild)
+        {
+            B = Tree->ConstructWidget<UDTTRowButton>();
+            B->Bind(RowAction);
+            DTTUI::Flatten(B, FMargin(6, 0));
+            Line = Tree->ConstructWidget<UHorizontalBox>();
+            USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+            Box->SetHeightOverride(Height); Box->SetContent(Line);
+            B->SetContent(Box);
+            if (Parent) { Parent->AddChild(B); Pad<UVerticalBoxSlot>(B, Margin); }
+            Card.Buttons.Add(B);
+        }
+        else if (Card.Buttons.IsValidIndex(ButtonIndex))
+        {
+            B = Card.Buttons[ButtonIndex].Get();
+        }
+        ++ButtonIndex;
+        // Every pass, build and update alike: a recycled widget stands in a different row now.
+        if (B) { B->Attach(Target); B->SetBackgroundColor(Tint); }
+        return Line;
+    }
+
+    /** A column of a Row: fixed width so the columns line up, or Width 0 to take what is left. */
+    UTextBlock* Cell(UPanelWidget* Line, const FString& Value, int32 Size, const FLinearColor& Color,
+        float Width, EHorizontalAlignment Align = HAlign_Left, const FMargin& Margin = FMargin(0, 0, 6, 0))
+    {
+        UTextBlock* T = nullptr;
+        if (bBuild)
+        {
+            USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+            if (Width > 0.0f) Box->SetWidthOverride(Width);
+            T = Text(nullptr, Value, Size, Color);
+            Box->SetContent(T);
+            if (USizeBoxSlot* S = Cast<USizeBoxSlot>(T->Slot)) { S->SetHorizontalAlignment(Align); S->SetVerticalAlignment(VAlign_Center); }
+            if (Line)
+            {
+                Line->AddChild(Box);
+                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot))
+                {
+                    S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center);
+                    if (Width <= 0.0f) S->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+                }
+            }
+            return T;
+        }
+        return Text(nullptr, Value, Size, Color);
+    }
+
+    /**
+     * A control in a row. Never leave the call out on a condition: pass bVisible and let it
+     * collapse, or the card changes shape with its state and a recycled button ends up pointed at
+     * a row that is no longer there.
+     */
+    UDTTRowButton* Button(UPanelWidget* Parent, const FString& Label, const FDTTRowTarget& Target,
+        bool bVisible = true, bool bEnabled = true, float Width = 0.0f,
+        const FMargin& Margin = FMargin(0, 0, 4, 0))
+    {
+        UDTTRowButton* B = nullptr;
+        if (bBuild)
+        {
+            B = Tree->ConstructWidget<UDTTRowButton>();
+            B->Bind(RowAction);
+            DTTUI::Flatten(B, FMargin(8, 2));
+            USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+            if (Width > 0.0f) Box->SetWidthOverride(Width);
+            Box->SetContent(B);
+            if (Parent)
+            {
+                Parent->AddChild(Box);
+                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot)) { S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center); }
+                Pad<UVerticalBoxSlot>(Box, Margin);
+            }
+            Card.Buttons.Add(B);
+        }
+        else if (Card.Buttons.IsValidIndex(ButtonIndex))
+        {
+            B = Card.Buttons[ButtonIndex].Get();
+        }
+        ++ButtonIndex;
+        UTextBlock* T = Text(nullptr, Label, 12, FLinearColor::White);
+        if (bBuild && B && T) B->SetContent(T);
+        if (!B) return nullptr;
+        B->Attach(Target);
+        B->SetIsEnabled(bEnabled);
+        // The size box is what takes the space in the row, so that is what hides.
+        UWidget* Holder = B->GetParent() ? static_cast<UWidget*>(B->GetParent()) : static_cast<UWidget*>(B);
+        Holder->SetVisibility(bVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+        return B;
+    }
+
+    /**
+     * The stock of one station as a bar with the two levels marked on it: where it starts calling
+     * and what a delivery fills it to. Three numbers in prose is what the cards said before, and
+     * nobody could see at a glance which stations were about to call.
+     *
+     * The width has to be fixed: a marker is placed by the left padding of its slot, and in a bar
+     * that fills its row there is no width to place it against.
+     */
+    void MarkedBar(UPanelWidget* Parent, float Fill, float Trigger, float Target,
+        const FLinearColor& FillColor, float Width, float Height = 10.0f,
+        const FMargin& Margin = FMargin(0, 0, 8, 0))
+    {
+        UOverlay* Stack = nullptr;
+        if (bBuild)
+        {
+            Stack = Tree->ConstructWidget<UOverlay>();
+            USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+            Box->SetWidthOverride(Width); Box->SetHeightOverride(Height); Box->SetContent(Stack);
+            if (Parent)
+            {
+                Parent->AddChild(Box);
+                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot)) { S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center); }
+                Pad<UVerticalBoxSlot>(Box, Margin);
+            }
+        }
+        UProgressBar* B = nullptr;
+        if (bBuild)
+        {
+            B = Tree->ConstructWidget<UProgressBar>();
+            if (UOverlaySlot* S = Stack->AddChildToOverlay(B)) { S->SetHorizontalAlignment(HAlign_Fill); S->SetVerticalAlignment(VAlign_Fill); }
+            Card.Bars.Add(B);
+        }
+        else if (Card.Bars.IsValidIndex(BarIndex))
+        {
+            B = Card.Bars[BarIndex].Get();
+        }
+        ++BarIndex;
+        if (B) { B->SetPercent(FMath::Clamp(Fill, 0.0f, 1.0f)); B->SetFillColorAndOpacity(FillColor); }
+        BarMark(Stack, Trigger, Width, DTTUI::DTTYellow);
+        BarMark(Stack, Target, Width, DTTUI::DTTCyan);
+    }
+
+    /** One 2-point line across a MarkedBar. A level outside 0..1 has nothing to mark, so it hides. */
+    void BarMark(UOverlay* Stack, float At, float Width, const FLinearColor& Color)
+    {
+        UBorder* Mark = nullptr;
+        if (bBuild)
+        {
+            Mark = Tree->ConstructWidget<UBorder>();
+            USizeBox* Thin = Tree->ConstructWidget<USizeBox>();
+            Thin->SetWidthOverride(2.0f); Thin->SetContent(Mark);
+            if (Stack)
+            {
+                if (UOverlaySlot* S = Stack->AddChildToOverlay(Thin)) { S->SetHorizontalAlignment(HAlign_Left); S->SetVerticalAlignment(VAlign_Fill); }
+            }
+            Card.Borders.Add(Mark);
+        }
+        else if (Card.Borders.IsValidIndex(BorderIndex))
+        {
+            Mark = Card.Borders[BorderIndex].Get();
+        }
+        ++BorderIndex;
+        if (!Mark) return;
+        Mark->SetBrushColor(Color);
+        UWidget* Holder = Mark->GetParent() ? static_cast<UWidget*>(Mark->GetParent()) : static_cast<UWidget*>(Mark);
+        const bool bVisible = At >= 0.0f && At <= 1.0f;
+        Pad<UOverlaySlot>(Holder, FMargin(At * FMath::Max(0.0f, Width - 2.0f), 0, 0, 0));
+        Holder->SetVisibility(bVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+    }
 };
 
 namespace DTTUI
 {
-    inline const FLinearColor DTTCardTint(0.08f, 0.12f, 0.15f, 1.0f);
-    inline const FLinearColor DTTCardTintOpen(0.09f, 0.16f, 0.13f, 1.0f);
-    inline const FLinearColor DTTCardTintWait(0.16f, 0.14f, 0.07f, 1.0f);
-    inline const FLinearColor DTTCardTintWarn(0.17f, 0.11f, 0.08f, 1.0f);
-    inline const FLinearColor DTTCyan(0.2f, 0.8f, 1.0f);
-    inline const FLinearColor DTTGreen(0.3f, 1.0f, 0.5f);
-    inline const FLinearColor DTTYellow(1.0f, 0.85f, 0.3f);
-    inline const FLinearColor DTTOrange(1.0f, 0.55f, 0.1f);
-    inline const FLinearColor DTTRed(1.0f, 0.35f, 0.3f);
-    inline const FLinearColor DTTGrey(0.6f, 0.68f, 0.74f);
-    inline const FLinearColor DTTDim(0.45f, 0.5f, 0.55f);
-    inline const FLinearColor DTTSteel(0.6f, 0.7f, 0.85f);
-
     inline FString DTTStacks(int32 Stacks) { return Stacks >= 0 ? FString::Printf(TEXT("%d stacks"), Stacks) : FString(TEXT("unknown")); }
     /** A station named by its tag alone ("(Coal)") has an empty base name. */
     inline FString DTTStationName(const FString& Name) { return Name.IsEmpty() ? FString(TEXT("(no name)")) : Name; }
