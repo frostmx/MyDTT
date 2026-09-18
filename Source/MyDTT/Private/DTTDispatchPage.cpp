@@ -148,12 +148,13 @@ void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, cons
     const FLinearColor Accent = Overdue > 0 ? DTTRed : (bWaiting ? DTTYellow : (Open > 0 ? DTTGreen : DTTCyan));
 
     // The card is the row; opening it adds a body underneath and nothing else moves on the page.
-    UVerticalBox* Body = Sink.Root(Overdue > 0 ? DTTCardTintWarn : (bWaiting ? DTTCardTintWait : (Open > 0 ? DTTCardTintOpen : DTTCardTint)), FMargin(0));
+    const FLinearColor Tint = Overdue > 0 ? DTTCardTintWarn : (bWaiting ? DTTCardTintWait : (Open > 0 ? DTTCardTintOpen : DTTCardTint));
+    UVerticalBox* Body = Sink.Root(bExpanded ? Lighten(Tint) : Tint, FMargin(0));
 
     FDTTRowTarget Toggle;
     Toggle.Action = EDTTRowAction::ToggleExpandDispatch;
     Toggle.CardKey = CardId;
-    UHorizontalBox* Line = Sink.Row(Body, DTTRowHeight, Toggle, FLinearColor(1.0f, 1.0f, 1.0f, bExpanded ? 0.06f : 0.0f));
+    UHorizontalBox* Line = Sink.Row(Body, DTTRowHeight, Toggle, FLinearColor::White);
 
     Sink.Icon(Line, List.Num() > 0 ? IconFor(List[0]->ItemClass) : nullptr, DTTColIcon, FMargin(0, 0, 6, 0));
     Sink.Cell(Line, Resource, 15, Accent, DTTColResource);

@@ -38,12 +38,13 @@ void UDynamicTimeTableWidget::PopulateTruckCard(const FDTTTruckRow& Row, const F
     }
     if (!Row.bAutopilot) { PhaseLabel = TEXT("Manual"); PhaseColor = DTTOrange; }
     const bool bWarn = !Row.bAutopilot || (Row.bPool && Row.Phase == EDTTTruckPhase::Manual);
-    UVerticalBox* Body = Sink.Root(bWarn ? DTTCardTintWarn : DTTCardTint, FMargin(0));
+    const FLinearColor Tint = bWarn ? DTTCardTintWarn : DTTCardTint;
+    UVerticalBox* Body = Sink.Root(bExpanded ? Lighten(Tint) : Tint, FMargin(0));
 
     FDTTRowTarget Toggle;
     Toggle.Action = EDTTRowAction::ToggleExpandTruck;
     Toggle.CardKey = CardId;
-    UHorizontalBox* Line = Sink.Row(Body, DTTRowHeight, Toggle, FLinearColor(1.0f, 1.0f, 1.0f, bExpanded ? 0.06f : 0.0f));
+    UHorizontalBox* Line = Sink.Row(Body, DTTRowHeight, Toggle, FLinearColor::White);
 
     // What is on board when it is one item; the truck's own resource when only the count is known.
     UTexture2D* CargoIcon = IconFor(Row.CargoItemClass);

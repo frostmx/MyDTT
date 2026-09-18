@@ -123,7 +123,9 @@ UVerticalBox* UDynamicTimeTableWidget::BuildCardPage(TObjectPtr<UScrollBox>& Out
     // The captions stay above the scroll box rather than scrolling away with the first screen
     // of forty resources.
     OutHeader = WidgetTree->ConstructWidget<UHorizontalBox>();
-    Page->AddChildToVerticalBox(OutHeader)->SetPadding(FMargin(10, 2, 10, 2));
+    // 2 from the card's own slot plus 6 of the row button's padding: the captions have to
+    // start exactly where the first column of a row starts.
+    Page->AddChildToVerticalBox(OutHeader)->SetPadding(FMargin(8, 2, 8, 2));
     OutScroll = WidgetTree->ConstructWidget<UScrollBox>();
     Page->AddChildToVerticalBox(OutScroll)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
     return Page;

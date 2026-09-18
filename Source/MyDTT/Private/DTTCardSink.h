@@ -9,6 +9,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/ButtonSlot.h"
 #include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
 #include "Components/HorizontalBox.h"
@@ -72,16 +73,25 @@ namespace DTTUI
      * and with padding of our own. The tint is left to SetBackgroundColor, which multiplies
      * every state at once, so the row can recolour itself on an update pass.
      */
-    inline void Flatten(UButton* Button, const FMargin& Padding)
+    inline void Flatten(UButton* Button, const FMargin& Padding, bool bRow = false)
     {
+        // A row draws nothing of its own - the card's tint is already behind it - and only
+        // lights up under the pointer, which is the one thing that says a row can be clicked.
+        const float Normal = bRow ? 0.0f : 0.10f;
         FButtonStyle Style = Button->GetStyle();
-        Style.SetNormal(FlatBrush(FLinearColor(1.0f, 1.0f, 1.0f, 0.10f)));
-        Style.SetHovered(FlatBrush(FLinearColor(1.0f, 1.0f, 1.0f, 0.20f)));
-        Style.SetPressed(FlatBrush(FLinearColor(1.0f, 1.0f, 1.0f, 0.30f)));
-        Style.SetDisabled(FlatBrush(FLinearColor(1.0f, 1.0f, 1.0f, 0.04f)));
+        Style.SetNormal(FlatBrush(FLinearColor(1.0f, 1.0f, 1.0f, Normal)));
+        Style.SetHovered(FlatBrush(FLinearColor(1.0f, 1.0f, 1.0f, bRow ? 0.10f : 0.20f)));
+        Style.SetPressed(FlatBrush(FLinearColor(1.0f, 1.0f, 1.0f, bRow ? 0.16f : 0.30f)));
+        Style.SetDisabled(FlatBrush(FLinearColor(1.0f, 1.0f, 1.0f, Normal * 0.4f)));
         Style.SetNormalPadding(Padding);
         Style.SetPressedPadding(Padding);
         Button->SetStyle(Style);
+    }
+
+    /** A card tint one step brighter, for the row that is open. */
+    inline FLinearColor Lighten(const FLinearColor& Tint, float By = 0.05f)
+    {
+        return FLinearColor(Tint.R + By, Tint.G + By, Tint.B + By, Tint.A);
     }
 
     inline UButton* MakeButton(UWidgetTree* Tree, const FString& Label)
@@ -345,11 +355,19 @@ struct FDTTCardSink
         {
             B = Tree->ConstructWidget<UDTTRowButton>();
             B->Bind(RowAction);
-            DTTUI::Flatten(B, FMargin(6, 0));
+            DTTUI::Flatten(B, FMargin(6, 0), true);
             Line = Tree->ConstructWidget<UHorizontalBox>();
             USizeBox* Box = Tree->ConstructWidget<USizeBox>();
             Box->SetHeightOverride(Height); Box->SetContent(Line);
             B->SetContent(Box);
+            // A button centres its content, which would leave every column of the table
+            // floating in the middle of the window instead of under its caption.
+            if (UButtonSlot* S = Cast<UButtonSlot>(Box->Slot))
+            {
+                S->SetHorizontalAlignment(HAlign_Fill);
+                S->SetVerticalAlignment(VAlign_Fill);
+                S->SetPadding(FMargin(0));
+            }
             if (Parent) { Parent->AddChild(B); Pad<UVerticalBoxSlot>(B, Margin); }
             Card.Buttons.Add(B);
         }
