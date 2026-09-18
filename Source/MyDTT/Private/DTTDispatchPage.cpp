@@ -182,7 +182,7 @@ void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, cons
         if (Row->Role == EDTTDispatchRole::Producer) continue;
         if (Drawn >= DTTMaxStockBars) { ++Hidden; continue; }
         ++Drawn;
-        FLinearColor BarColor = DTTSteel;
+        FLinearColor BarColor = DTTStocked;
         if (!Row->bModeMatches) BarColor = DTTDim;
         else if (IsOverdue(Row)) BarColor = DTTRed;
         else if (Row->bOpen) BarColor = Row->ClaimOwner.IsEmpty() ? DTTYellow : DTTGreen;

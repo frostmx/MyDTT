@@ -45,6 +45,9 @@ namespace DTTUI
     inline const FLinearColor DTTGrey(0.6f, 0.68f, 0.74f);
     inline const FLinearColor DTTDim(0.45f, 0.5f, 0.55f);
     inline const FLinearColor DTTSteel(0.6f, 0.7f, 0.85f);
+    /** A requester that is stocked and quiet. Steel grey read as an empty bar against the
+        progress bar's own light track, which is the one thing a stock bar must never do. */
+    inline const FLinearColor DTTStocked(0.35f, 0.66f, 0.92f);
 
     inline UTextBlock* MakeText(UWidgetTree* Tree, const FString& Value, int32 Size, const FLinearColor& Color)
     {
@@ -92,6 +95,19 @@ namespace DTTUI
     inline FLinearColor Lighten(const FLinearColor& Tint, float By = 0.05f)
     {
         return FLinearColor(Tint.R + By, Tint.G + By, Tint.B + By, Tint.A);
+    }
+
+    /**
+     * A progress bar the way this window wants one: a dark track so that any fill reads as fill,
+     * and a plain white fill image for SetFillColorAndOpacity to tint. The stock engine style is
+     * a light track under a light fill, and at a glance a full station looked like an empty one.
+     */
+    inline void StyleBar(UProgressBar* Bar)
+    {
+        FProgressBarStyle Style = Bar->GetWidgetStyle();
+        Style.BackgroundImage = FlatBrush(FLinearColor(0.02f, 0.03f, 0.04f, 0.85f), 2.0f);
+        Style.FillImage = FlatBrush(FLinearColor::White, 2.0f);
+        Bar->SetWidgetStyle(Style);
     }
 
     inline UButton* MakeButton(UWidgetTree* Tree, const FString& Label)
@@ -330,6 +346,7 @@ struct FDTTCardSink
         if (bBuild)
         {
             UProgressBar* B = Tree->ConstructWidget<UProgressBar>();
+            DTTUI::StyleBar(B);
             B->SetPercent(Percent); B->SetFillColorAndOpacity(Color);
             USizeBox* Size = Tree->ConstructWidget<USizeBox>(); Size->SetHeightOverride(7); Size->SetContent(B);
             if (Parent) { Parent->AddChild(Size); Pad<UVerticalBoxSlot>(Size, Margin); }
@@ -488,6 +505,7 @@ struct FDTTCardSink
         if (bBuild)
         {
             B = Tree->ConstructWidget<UProgressBar>();
+            DTTUI::StyleBar(B);
             if (UOverlaySlot* S = Stack->AddChildToOverlay(B)) { S->SetHorizontalAlignment(HAlign_Fill); S->SetVerticalAlignment(VAlign_Fill); }
             Card.Bars.Add(B);
         }
