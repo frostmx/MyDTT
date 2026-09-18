@@ -4,6 +4,7 @@
 #include "DynamicTimeTableRemoteCallObject.h"
 #include "DTTItemNames.h"
 #include "FGPlayerController.h"
+#include "WheeledVehicles/FGWheeledVehicleIdentifier.h"
 #include "Engine/Texture2D.h"
 #include "Resources/FGItemDescriptor.h"
 #include "Blueprint/WidgetTree.h"
@@ -276,6 +277,74 @@ int32 UDynamicTimeTableWidget::GetRequestedSections() const
     case EDTTTab::Trucks: return EDTTSnapshotSection::Trucks;
     default: return EDTTSnapshotSection::Groups;
     }
+}
+
+void UDynamicTimeTableWidget::HandleRowAction(const FDTTRowTarget& Target)
+{
+    // Opening a card is the window's own business: it goes into the card's key and the page
+    // redraws that one row.
+    if (Target.Action == EDTTRowAction::ToggleExpandDispatch)
+    {
+        ExpandedDispatchKey = ExpandedDispatchKey == Target.CardKey ? FString() : Target.CardKey;
+        RefreshDispatchDisplay();
+        return;
+    }
+    if (Target.Action == EDTTRowAction::ToggleExpandTruck)
+    {
+        ExpandedTruckKey = ExpandedTruckKey == Target.CardKey ? FString() : Target.CardKey;
+        RefreshTruckDisplay();
+        return;
+    }
+
+    // Everything below writes to the world. The handle is checked here rather than when the row was
+    // drawn: the row is up to 1.5 s old, and a truck can be sold while it is on the screen.
+    AFGWheeledVehicleIdentifier* Truck = Target.Truck.Get();
+    if (!IsValid(Truck))
+    {
+        SetEditorStatus(TEXT("dTT: that truck is gone."), true);
+        return;
+    }
+
+    if (IsRemoteClient())
+    {
+        if (!RemoteCallObject)
+        {
+            SetEditorStatus(TEXT("dTT: no connection to the server."), true);
+            return;
+        }
+        switch (Target.Action)
+        {
+        case EDTTRowAction::TruckPark: RemoteCallObject->RequestParkTruck(Truck); break;
+        case EDTTRowAction::TruckRelease: RemoteCallObject->RequestReleaseTruck(Truck); break;
+        case EDTTRowAction::TruckAutopilotOn: RemoteCallObject->RequestSetAutopilot(Truck, true); break;
+        case EDTTRowAction::TruckAutopilotOff: RemoteCallObject->RequestSetAutopilot(Truck, false); break;
+        case EDTTRowAction::TruckRebuildLap: RemoteCallObject->RequestRebuildLap(Truck); break;
+        default: return;
+        }
+        // The answer and the fresh rows both come back from the server; nothing to say yet.
+        SetEditorStatus(TEXT("dTT: asked the server..."));
+        return;
+    }
+
+    UDynamicTimeTableSubsystem* Subsystem = GetWorld() ? GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>() : nullptr;
+    if (!Subsystem)
+    {
+        SetEditorStatus(TEXT("dTT: subsystem unavailable."), true);
+        return;
+    }
+    FString Message(TEXT("dTT: nothing to do."));
+    bool bOk = false;
+    switch (Target.Action)
+    {
+    case EDTTRowAction::TruckPark: bOk = Subsystem->ParkTruck(Truck, Message); break;
+    case EDTTRowAction::TruckRelease: bOk = Subsystem->ReleaseTruck(Truck, Message); break;
+    case EDTTRowAction::TruckAutopilotOn: bOk = Subsystem->SetTruckAutopilot(Truck, true, Message); break;
+    case EDTTRowAction::TruckAutopilotOff: bOk = Subsystem->SetTruckAutopilot(Truck, false, Message); break;
+    case EDTTRowAction::TruckRebuildLap: bOk = Subsystem->RebuildTruckLap(Truck, Message); break;
+    default: return;
+    }
+    SetEditorStatus(Message, !bOk);
+    RefreshRuntimeDisplay();
 }
 
 void UDynamicTimeTableWidget::SetActiveTab(EDTTTab Tab)

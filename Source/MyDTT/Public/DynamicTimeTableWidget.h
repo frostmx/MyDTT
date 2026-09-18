@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "UI/FGInteractWidget.h"
 #include "DynamicTimeTableTypes.h"
+#include "DTTRowButton.h"
 #include "DynamicTimeTableWidget.generated.h"
 
 class UBorder;
@@ -128,10 +129,20 @@ private:
     UPROPERTY() TMap<FSoftObjectPath, TObjectPtr<UTexture2D>> IconCache;
     UTexture2D* IconFor(const TSoftClassPtr<class UFGItemDescriptor>& ItemClass);
     EDTTTab ActiveTab = EDTTTab::Groups;
+    /**
+     * The one open card of each page, by key, or empty for all closed. Part of the card's key,
+     * so opening a row rebuilds that row and nothing else. The window is built afresh every
+     * time it is opened (mSupportsCaching is off), so this does not outlive a close - and it
+     * should not: a card left open over a session would hide the row the player came back for.
+     */
+    FString ExpandedDispatchKey;
+    FString ExpandedTruckKey;
 
     UPROPERTY() TObjectPtr<UScrollBox> GroupScrollBox;
     UPROPERTY() TObjectPtr<UTextBlock> SummaryText;
     UPROPERTY() TObjectPtr<UTextBlock> EditorStatusText;
+    /** The footer line, the only status the player can read from every tab. */
+    UPROPERTY() TObjectPtr<UTextBlock> StatusText;
     UPROPERTY() TObjectPtr<UButton> CloseButton;
     UPROPERTY() TObjectPtr<UButton> RecalculateButton;
 
@@ -194,6 +205,8 @@ private:
     bool RuntimeLayoutMatches() const;
     void RefreshEditorControls();
     void SetEditorStatus(const FString& Message, bool bError = false);
+    /** Every row control of every page arrives here; see FDTTRowTarget. */
+    void HandleRowAction(const FDTTRowTarget& Target);
     FString GetSelectedGroupStationName() const;
     bool IsRemoteClient() const;
     const TArray<FDTTStationGroup>& ViewGroups() const;
