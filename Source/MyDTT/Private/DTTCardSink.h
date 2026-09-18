@@ -151,6 +151,8 @@ namespace DTTUI
     inline constexpr float DTTStockBarWide = 96.0f;
     // Timetable.
     inline constexpr float DTTColLeft = 86.0f;
+    /** One stop of a lap. Fixed, or a three-stop lap would draw a bar across the window. */
+    inline constexpr float DTTStripMark = 26.0f;
     /** One requester's bar inside a resource row; eight of them fit before the row gives up. */
     inline constexpr float DTTStockBarWidth = 54.0f;
     inline constexpr int32 DTTMaxStockBars = 8;
@@ -625,13 +627,13 @@ struct FDTTCardSink
                 Mark = Tree->ConstructWidget<UBorder>();
                 USizeBox* Box = Tree->ConstructWidget<USizeBox>();
                 Box->SetHeightOverride(Height); Box->SetContent(Mark);
+                Box->SetWidthOverride(DTTUI::DTTStripMark);
                 if (Line)
                 {
                     Line->AddChild(Box);
                     if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot))
                     {
                         S->SetPadding(FMargin(0, 0, 3, 0)); S->SetVerticalAlignment(VAlign_Center);
-                        S->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
                     }
                 }
                 Card.Borders.Add(Mark);

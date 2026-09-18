@@ -6376,7 +6376,14 @@ void UDynamicTimeTableSubsystem::BuildQueueRows(TArray<FDTTQueueRow>& OutRows) c
             FDTTQueueRow& Row = OutRows.AddDefaulted_GetRef();
             Row.Dock = Request.Station->DockingStationIdentifier.Get();
             Row.DockingPathNodeGuid = Request.Station->DockingPathNodeGuid;
-            Row.Name = StripAllTags(Request.Station->DisplayName).TrimStartAndEnd();
+            // The same cleaning as everywhere else: the resource is its own column here, so the
+            // tag in the name would be the third place one station says the same thing.
+            {
+                FString Head, Tag, Tail;
+                Row.Name = DTSSplitAutoBlock(Request.Station->DisplayName, Head, Tag, Tail)
+                    ? (Head.TrimStartAndEnd() + TEXT(" ") + Tail).TrimStartAndEnd()
+                    : StripAllTags(Request.Station->DisplayName).TrimStartAndEnd();
+            }
             if (Row.Name.IsEmpty()) Row.Name = Request.Station->DisplayName;
             Row.ResourceId = Request.Station->ResourceId;
             Row.ItemClass = TSoftClassPtr<UFGItemDescriptor>(ItemClass.Get());

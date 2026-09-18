@@ -99,8 +99,12 @@ void UDynamicTimeTableWidget::RefreshTimetableDisplay()
     // and what the dispatcher could not do about it. Kind keeps them apart in the keys.
     struct FEntry { int32 Kind = 0; int32 Index = 0; FString Key; };
     TArray<FEntry> Entries;
+    // Driving is driving: a truck held at a depot or docked still has metres left on paper.
     int32 Driving = 0;
-    for (const FDTTLapRow& Lap : Laps) if (Lap.DistanceLeftMetres > 0) ++Driving;
+    for (const FDTTLapRow& Lap : Laps)
+    {
+        if (Lap.DistanceLeftMetres > 0 && Lap.bAutopilot && !Lap.bDocking && Lap.Phase != EDTTTruckPhase::Parked) ++Driving;
+    }
 
     Entries.Add(FEntry{ 3, 0, FString::Printf(TEXT("h|laps|%d"), Driving) });
     for (int32 Index = 0; Index < Laps.Num(); ++Index)
@@ -155,7 +159,7 @@ void UDynamicTimeTableWidget::PopulateSectionCard(const FString& Title, const FS
 
 void UDynamicTimeTableWidget::PopulateLapCard(const FDTTLapRow& Row, FDTTCardSink& Sink)
 {
-    const bool bMoving = Row.DistanceLeftMetres > 0 && Row.bAutopilot && !Row.bDocking;
+    const bool bMoving = Row.DistanceLeftMetres > 0 && Row.bAutopilot && !Row.bDocking && Row.Phase != EDTTTruckPhase::Parked;
     UVerticalBox* Body = Sink.Root(bMoving ? DTTCardTintOpen : DTTCardTint, FMargin(0));
 
     FDTTRowTarget None;
