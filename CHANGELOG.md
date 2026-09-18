@@ -1,5 +1,25 @@
 ﻿# Changelog
 
+## 3.3.0
+
+- A Stations tab: every docking station in the world in one table, whatever it carries - the
+  resource ones, the depots and the fuel stops, which belong to no resource and so appear in no
+  row of the Dispatch tab. Name, group, what it is, which way its switch is set, its stock against
+  the line it calls at, the limit its name spells out, what it is doing and how long it has been
+  doing it. The filter takes a name, a resource or a group.
+- The limit is editable from the window at last, instead of by renaming the station in the world.
+  Tick the rows, put a number in the box above the table, and every ticked station gets it; the
+  box is above the table and not in each row because a control inside a row is recycled into
+  another station a second and a half later. Four or more stations ask twice before the rename.
+- Setting a limit rewrites only the inside of the tag. A station named by the mod keeps the
+  caption it was given, a station named by a player keeps every character of it.
+- An open station row also offers what used to need the chat or the station's own panel: keep the
+  truck until empty (the "=" marker), drop the claim a truck is holding, and ask the dispatcher to
+  look at this station now.
+- The rows of the new table cost the wire almost nothing: the names go into the tables the snapshot
+  already carried and the eight flags of a row into one byte, so four hundred docks are about 20 KB
+  instead of the 65 KB that would have been dropped in silence.
+
 ## 3.2.0
 
 - The Dispatch tab is a table. A resource is one row: its producers, a small bar for every
