@@ -26,8 +26,22 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
             for (const auto& G : X.Groups) { TArray<FDTTStationRuntimeLoad> L; S->GetGroupRuntimeLoad(G.GroupId, L); X.RuntimeLoads.Append(L); }
             X.Settings = S->GetSettings();
         }
+        // What each section costs the server's frame. Built on the game thread inside one tick, so
+        // a slow section is a hitch every refresh for every player, not only the one looking.
+        struct FSectionClock
+        {
+            const TCHAR* Name; double Start;
+            explicit FSectionClock(const TCHAR* InName) : Name(InName), Start(FPlatformTime::Seconds()) {}
+            ~FSectionClock()
+            {
+                const double Ms = (FPlatformTime::Seconds() - Start) * 1000.0;
+                if (Ms >= 8.0) { UE_LOG(LogDynamicTimeTableRCO, Warning, TEXT("SNAPSHOT_SLOW Section=%s Ms=%.1f"), Name, Ms); }
+                else { UE_LOG(LogDynamicTimeTableRCO, Verbose, TEXT("SNAPSHOT_BUILD Section=%s Ms=%.2f"), Name, Ms); }
+            }
+        };
         if (X.Sections & EDTTSnapshotSection::Dispatch)
         {
+            FSectionClock Clock(TEXT("Dispatch"));
             S->BuildDispatchRows(X.DispatchRows);
             if (X.DispatchRows.Num() > MaxSnapshotRows)
             {
@@ -37,6 +51,7 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
         }
         if (X.Sections & EDTTSnapshotSection::Trucks)
         {
+            FSectionClock Clock(TEXT("Trucks"));
             S->BuildTruckRows(X.TruckRows);
             if (X.TruckRows.Num() > MaxSnapshotRows)
             {
@@ -46,7 +61,11 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
         }
         if (X.Sections & EDTTSnapshotSection::Timetable)
         {
-            S->BuildLapRows(X.LapRows);
+            {
+                FSectionClock Clock(TEXT("Laps"));
+                S->BuildLapRows(X.LapRows);
+            }
+            FSectionClock Clock(TEXT("Queue"));
             S->BuildQueueRows(X.QueueRows);
             S->GetPoolSkipRows(X.ReasonRows);
             if (X.LapRows.Num() > MaxSnapshotRows)
@@ -62,6 +81,7 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
         }
         if (X.Sections & EDTTSnapshotSection::Stations)
         {
+            FSectionClock Clock(TEXT("Stations"));
             S->BuildStationRows(X.StationRows);
             if (X.StationRows.Num() > MaxSnapshotRows)
             {

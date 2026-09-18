@@ -6260,9 +6260,20 @@ float UDynamicTimeTableSubsystem::EstimatePathLengthCm(AFGVehicleSubsystem* Vehi
     if (From == To) return 0.0f;
 
     // Every truck of one resource drives the same legs, so a table's worth of rows asks for the
-    // same handful of paths over and over.
+    // same handful of paths over and over - and every refresh asks for them all again.
     const TPair<FGuid, FGuid> Key(From, To);
     if (Cache) { if (const float* Found = Cache->Find(Key)) return *Found; }
+    const UWorld* World = GetWorld();
+    const double Now = World ? World->GetTimeSeconds() : 0.0;
+    const FDTTPathLength* Known = PathLengthCache.Find(Key);
+    if (Known && (Now - Known->At < PathLengthLifetimeSeconds || PathSearchBudget <= 0))
+    {
+        // Fresh, or stale with no search left in this build: a stale length beats none.
+        if (Cache) Cache->Add(Key, Known->Cm);
+        return Known->Cm;
+    }
+    if (PathSearchBudget <= 0) return -1.0f;
+    --PathSearchBudget;
 
     float Total = -1.0f;
     UFGVehiclePathNetwork* Network = VehicleSubsystem->FindNetworkByPathNodeGuid(From);
@@ -6288,6 +6299,7 @@ float UDynamicTimeTableSubsystem::EstimatePathLengthCm(AFGVehicleSubsystem* Vehi
         }
     }
     if (Cache) Cache->Add(Key, Total);
+    PathLengthCache.Add(Key, FDTTPathLength{ Total, Now });
     return Total;
 }
 
@@ -6468,6 +6480,8 @@ void UDynamicTimeTableSubsystem::GetPoolSkipRows(TArray<FDTTReasonRow>& OutRows)
 void UDynamicTimeTableSubsystem::BuildLapRows(TArray<FDTTLapRow>& OutRows) const
 {
     OutRows.Reset();
+    // A window refresh may start only a few new path searches; see PathSearchBudget.
+    TGuardValue<int32> Budget(PathSearchBudget, PathSearchesPerBuild);
     // The laps are the truck rows with the metres added. Building them a second way here would
     // be a second answer to "where is that truck going", and the two would drift apart.
     TArray<FDTTTruckRow> Trucks;

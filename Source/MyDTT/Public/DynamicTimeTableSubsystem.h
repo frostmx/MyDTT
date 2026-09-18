@@ -626,9 +626,29 @@ private:
      * the climb for fuel, which is what fuel wants and what a distance must not have.
      */
     float SumSegmentLength(class AFGVehicleSubsystem* VehicleSubsystem, const FGuid& FromNodeGuid, const FGuid& ToNodeGuid) const;
-    /** Length of the actual path between two nodes on the same network, in centimetres. */
+    /**
+     * Length of the actual path between two nodes on the same network, in centimetres; negative
+     * when there is none, or when the search budget below is spent and the length is not known yet.
+     */
     float EstimatePathLengthCm(class AFGVehicleSubsystem* VehicleSubsystem, const class UFGVehiclePathPreset* Preset,
         const FGuid& From, const FGuid& To, TMap<TPair<FGuid, FGuid>, float>* Cache = nullptr) const;
+    /**
+     * Road lengths between stops, kept across builds. A path search on a big network costs
+     * milliseconds, and the Timetable asked for one per leg of every truck's route on every
+     * refresh of every open window: with fifty trucks the server's tick rate halved while the
+     * tab was open. The roads under a route change rarely; an entry is searched again after
+     * PathLengthLifetimeSeconds.
+     */
+    struct FDTTPathLength { float Cm = -1.0f; double At = 0.0; };
+    mutable TMap<TPair<FGuid, FGuid>, FDTTPathLength> PathLengthCache;
+    static constexpr double PathLengthLifetimeSeconds = 300.0;
+    /**
+     * New searches one window build may start. What is over the budget reads as unknown ("-")
+     * and is found by a later refresh, so a cold cache costs a few searches a refresh instead of
+     * one frame with all of them.
+     */
+    mutable int32 PathSearchBudget = TNumericLimits<int32>::Max();
+    static constexpr int32 PathSearchesPerBuild = 6;
     /**
      * Metres of road left before the truck finishes the lap it is on: the road to the stop it is
      * heading for (EstimateNextStopMetres), plus the path over the stops after it.
