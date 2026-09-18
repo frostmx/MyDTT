@@ -8,8 +8,13 @@
 #include "DTTRowButton.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Border.h"
+#include "Components/BorderSlot.h"
 #include "Components/Button.h"
 #include "Components/ButtonSlot.h"
+#include "Components/CheckBox.h"
+#include "Components/ComboBoxString.h"
+#include "Components/EditableTextBox.h"
+#include "Components/SpinBox.h"
 #include "Styling/SlateBrush.h"
 #include "Styling/SlateTypes.h"
 #include "Components/HorizontalBox.h"
@@ -33,21 +38,87 @@ DECLARE_LOG_CATEGORY_EXTERN(LogDynamicTimeTableWidget, Log, All);
 
 namespace DTTUI
 {
-    inline const FLinearColor DTTCardTint(0.08f, 0.12f, 0.15f, 1.0f);
-    inline const FLinearColor DTTCardTintOpen(0.09f, 0.16f, 0.13f, 1.0f);
-    inline const FLinearColor DTTCardTintWait(0.16f, 0.14f, 0.07f, 1.0f);
-    inline const FLinearColor DTTCardTintWarn(0.17f, 0.11f, 0.08f, 1.0f);
-    inline const FLinearColor DTTCyan(0.2f, 0.8f, 1.0f);
-    inline const FLinearColor DTTGreen(0.3f, 1.0f, 0.5f);
-    inline const FLinearColor DTTYellow(1.0f, 0.85f, 0.3f);
-    inline const FLinearColor DTTOrange(1.0f, 0.55f, 0.1f);
-    inline const FLinearColor DTTRed(1.0f, 0.35f, 0.3f);
-    inline const FLinearColor DTTGrey(0.6f, 0.68f, 0.74f);
-    inline const FLinearColor DTTDim(0.45f, 0.5f, 0.55f);
-    inline const FLinearColor DTTSteel(0.6f, 0.7f, 0.85f);
-    /** A requester that is stocked and quiet. Steel grey read as an empty bar against the
-        progress bar's own light track, which is the one thing a stock bar must never do. */
-    inline const FLinearColor DTTStocked(0.35f, 0.66f, 0.92f);
+    /**
+     * The design document's colours, written as the sRGB hex it gives them. UMG colours are linear,
+     * so every one goes through FromSRGBColor: a hex typed in as a linear literal comes out a
+     * washed-out grey, which is what the window looked like before.
+     */
+    inline FLinearColor Hex(uint32 RGB, float Alpha = 1.0f)
+    {
+        FLinearColor Colour = FLinearColor::FromSRGBColor(FColor((RGB >> 16) & 0xFF, (RGB >> 8) & 0xFF, RGB & 0xFF));
+        Colour.A = Alpha;
+        return Colour;
+    }
+
+    // Surfaces, darkest first.
+    inline const FLinearColor DTTWindowBg = Hex(0x23313a);
+    inline const FLinearColor DTTWindowLine = Hex(0x4d6775);
+    inline const FLinearColor DTTTopBar = Hex(0x2b3c47);
+    inline const FLinearColor DTTSubBar = Hex(0x27363f);
+    inline const FLinearColor DTTPane = Hex(0x2a3a45);
+    inline const FLinearColor DTTPaneHead = Hex(0x2e404b);
+    inline const FLinearColor DTTTrack = Hex(0x3f545f);
+    inline const FLinearColor DTTTabOn = Hex(0x40616f);
+    // A row, and a row that says something: waiting for a decision, overdue, taken.
+    inline const FLinearColor DTTCardTint = Hex(0x2f414d);
+    inline const FLinearColor DTTCardTintWait = Hex(0x3a3830);
+    inline const FLinearColor DTTCardTintWarn = Hex(0x3d2f2f);
+    inline const FLinearColor DTTCardTintOpen = Hex(0x2c4540);
+
+    // What a colour means - the legend, one for one.
+    /** Now: the stop being driven to, the open card, the value being edited. */
+    inline const FLinearColor DTTCyan = Hex(0x4fc9e8);
+    /** In hand: a request somebody took, a dock above its line. */
+    inline const FLinearColor DTTGreen = Hex(0x5fd39b);
+    /** Waiting for a decision: open and unclaimed, autopilot off. */
+    inline const FLinearColor DTTYellow = Hex(0xffc857);
+    /** Broken or overdue. */
+    inline const FLinearColor DTTRed = Hex(0xff8a8a);
+    /** The pool: depots, parked trucks. */
+    inline const FLinearColor DTTSteel = Hex(0xa3b5e8);
+    /** Fuel. */
+    inline const FLinearColor DTTOrange = Hex(0xffa45c);
+    /** Quiet on purpose. Most of a healthy factory. */
+    inline const FLinearColor DTTDim = Hex(0x8296a3);
+    /** Secondary text. */
+    inline const FLinearColor DTTGrey = Hex(0xb8c8d2);
+    inline const FLinearColor DTTText = Hex(0xf0f6f9);
+    /**
+     * A dock above its line. Green, as the legend has it - and not grey, which on a stock bar reads
+     * as empty: that was a complaint once already.
+     */
+    inline const FLinearColor DTTStocked = DTTGreen;
+
+    /** What a thing is, as a small label: a badge says what, colour says how it is doing. */
+    enum class EDTTPill : uint8
+    {
+        Producer, Requester, Depot, Fuel, Mode, ModeWrong,
+        PoolAssigned, PoolParked, PoolToDepot, Manual, Docked, AutopilotOff, Dispatch,
+    };
+
+    /** The legend's badge pairs, background and text. */
+    inline void PillColours(EDTTPill Kind, FLinearColor& OutBack, FLinearColor& OutText)
+    {
+        uint32 Back = 0x3a4b57, Fore = 0xcfdde5;
+        switch (Kind)
+        {
+        case EDTTPill::Producer: Back = 0x22423a; Fore = 0xbdf0dd; break;
+        case EDTTPill::Requester: Back = 0x4a3a22; Fore = 0xffe0b0; break;
+        case EDTTPill::Depot: Back = 0x313d5c; Fore = 0xd3dcf7; break;
+        case EDTTPill::Fuel: Back = 0x4d3520; Fore = 0xffd9b0; break;
+        case EDTTPill::Mode: Back = 0x2f5364; Fore = 0xcfeaf5; break;
+        case EDTTPill::ModeWrong: Back = 0x5c2f2f; Fore = 0xffd0d0; break;
+        case EDTTPill::PoolAssigned: Back = 0x2b4c66; Fore = 0xcfeaf5; break;
+        case EDTTPill::PoolParked: Back = 0x3a4b57; Fore = 0xcfdde5; break;
+        case EDTTPill::PoolToDepot: Back = 0x313d5c; Fore = 0xd3dcf7; break;
+        case EDTTPill::Manual: Back = 0x5c4423; Fore = 0xffe9c6; break;
+        case EDTTPill::Docked: Back = 0x2f5364; Fore = 0xcfeaf5; break;
+        case EDTTPill::AutopilotOff: Back = 0x5c2f2f; Fore = 0xffd0d0; break;
+        case EDTTPill::Dispatch: Back = 0x33464f; Fore = 0xcfdde5; break;
+        }
+        OutBack = Hex(Back);
+        OutText = Hex(Fore);
+    }
 
     inline UTextBlock* MakeText(UWidgetTree* Tree, const FString& Value, int32 Size, const FLinearColor& Color)
     {
@@ -110,12 +181,101 @@ namespace DTTUI
         Bar->SetWidgetStyle(Style);
     }
 
-    inline UButton* MakeButton(UWidgetTree* Tree, const FString& Label)
+    /** A rounded box with its own outline, and per-corner radii for a bar that caps a panel. */
+    inline FSlateBrush OutlinedBrush(const FLinearColor& Fill, const FLinearColor& Line, float Radius, float Width = 1.0f)
+    {
+        FSlateBrush Brush = FlatBrush(Fill, Radius);
+        Brush.OutlineSettings.Color = FSlateColor(Line);
+        Brush.OutlineSettings.Width = Width;
+        return Brush;
+    }
+    inline FSlateBrush CornerBrush(const FLinearColor& Fill, const FVector4& Radii)
+    {
+        FSlateBrush Brush = FlatBrush(Fill, 0.0f);
+        Brush.OutlineSettings.CornerRadii = Radii;
+        return Brush;
+    }
+
+    /**
+     * The design's buttons. Ghost is every ordinary button: outlined, no fill until the pointer is
+     * on it. Go is the one action a panel exists for. Tab and TabOn are the tab row. The engine's
+     * default button is a light bevelled slab that belongs to no window of this game.
+     */
+    enum class EDTTButton : uint8 { Ghost, Go, Tab, TabOn };
+
+    inline void StyleButton(UButton* Button, EDTTButton Kind)
+    {
+        if (!Button) return;
+        const FLinearColor None(0.0f, 0.0f, 0.0f, 0.0f);
+        FButtonStyle Style = Button->GetStyle();
+        FLinearColor TextColour = Hex(0xcfdde5);
+        FMargin Padding(11, 4);
+        switch (Kind)
+        {
+        case EDTTButton::Go:
+            Style.SetNormal(OutlinedBrush(Hex(0x2f5b52), Hex(0x4a8878), 6.0f));
+            Style.SetHovered(OutlinedBrush(Hex(0x3a6d62), Hex(0x5a9a8a), 6.0f));
+            Style.SetPressed(OutlinedBrush(Hex(0x28504a), Hex(0x4a8878), 6.0f));
+            TextColour = Hex(0xe4fbf4);
+            break;
+        case EDTTButton::Tab:
+        case EDTTButton::TabOn:
+        {
+            const FLinearColor Fill = Kind == EDTTButton::TabOn ? DTTTabOn : None;
+            Style.SetNormal(FlatBrush(Fill, 7.0f));
+            Style.SetHovered(FlatBrush(Kind == EDTTButton::TabOn ? DTTTabOn : Hex(0x38505c), 7.0f));
+            Style.SetPressed(FlatBrush(DTTTabOn, 7.0f));
+            TextColour = Kind == EDTTButton::TabOn ? FLinearColor::White : DTTGrey;
+            Padding = FMargin(13, 6);
+            break;
+        }
+        default:
+            Style.SetNormal(OutlinedBrush(None, DTTWindowLine, 6.0f));
+            Style.SetHovered(OutlinedBrush(Hex(0x38505c), DTTWindowLine, 6.0f));
+            Style.SetPressed(OutlinedBrush(Hex(0x2f4550), DTTWindowLine, 6.0f));
+            break;
+        }
+        Style.SetDisabled(OutlinedBrush(None, Hex(0x3a4f5b), 6.0f));
+        Style.SetNormalPadding(Padding);
+        Style.SetPressedPadding(Padding);
+        Button->SetStyle(Style);
+        Button->SetBackgroundColor(FLinearColor::White);
+        if (UTextBlock* Label = Cast<UTextBlock>(Button->GetContent())) Label->SetColorAndOpacity(FSlateColor(TextColour));
+    }
+
+    inline UButton* MakeButton(UWidgetTree* Tree, const FString& Label, EDTTButton Kind = EDTTButton::Ghost)
     {
         UButton* Button = Tree->ConstructWidget<UButton>();
-        Button->SetContent(MakeText(Tree, Label, 15, FLinearColor::White));
+        const bool bTab = Kind == EDTTButton::Tab || Kind == EDTTButton::TabOn;
+        Button->SetContent(MakeText(Tree, Label, bTab ? 15 : 13, FLinearColor::White));
+        StyleButton(Button, Kind);
         return Button;
     }
+
+    /**
+     * The status line under the tab row: counts in white or in their meaning's colour, words in
+     * grey. Built once per refresh and handed to the window, which has a fixed set of text blocks
+     * for it - the line is never rebuilt, only rewritten.
+     */
+    struct FDTTStatusLine
+    {
+        /** A middle dot, spelled as a code point: the sources stay ASCII. */
+        static FString Separator() { return FString(TEXT("   ")) + FString::Chr(0x00B7) + TEXT("   "); }
+        TArray<TPair<FString, FLinearColor>> Parts;
+        FDTTStatusLine& Count(int32 Value, const FString& Label, const FLinearColor& Colour = DTTText)
+        {
+            if (Parts.Num() > 0) Parts.Emplace(Separator(), DTTDim);
+            Parts.Emplace(FString::FromInt(Value), Colour);
+            Parts.Emplace(TEXT(" ") + Label, DTTGrey);
+            return *this;
+        }
+        FDTTStatusLine& Words(const FString& Value, const FLinearColor& Colour = DTTGrey)
+        {
+            if (Parts.Num() > 0) Parts.Emplace(Separator(), DTTDim);
+            Parts.Emplace(Value, Colour);
+            return *this;
+        }
+    };
 
     inline UHorizontalBoxSlot* AddRowItem(UHorizontalBox* Row, UWidget* Widget, float Padding = 5.0f, bool bFill = false)
     {
@@ -129,7 +289,7 @@ namespace DTTUI
     // Column widths of the two tables, in slate units, shared by the rows and the header above
     // them: a caption that does not sit over its column is worse than no caption. One column of
     // each row is left to fill, so every other one is fixed.
-    inline constexpr float DTTRowHeight = 46.0f;
+    inline constexpr float DTTRowHeight = 40.0f;
     inline constexpr float DTTColIcon = 20.0f;
     inline constexpr float DTTColResource = 226.0f;
     inline constexpr float DTTColProducers = 190.0f;
@@ -144,18 +304,133 @@ namespace DTTUI
     inline constexpr float DTTColItem = 132.0f;
     inline constexpr float DTTColGroup = 104.0f;
     inline constexpr float DTTColRole = 78.0f;
-    inline constexpr float DTTColMode = 64.0f;
+    /** Wide enough for the UNLOAD pill; narrower and it lies over the stock bar. */
+    inline constexpr float DTTColMode = 74.0f;
     inline constexpr float DTTColStock = 62.0f;
     inline constexpr float DTTColLimit = 48.0f;
+    inline constexpr float DTTColStationTile = 22.0f;
+    /** The cargo tile of a Dispatch or Trucks row. */
+    inline constexpr float DTTColRowTile = 24.0f;
     /** One station's own bar, wider than the eight that share a resource row. */
     inline constexpr float DTTStockBarWide = 96.0f;
     // Timetable.
     inline constexpr float DTTColLeft = 86.0f;
+    inline constexpr float DTTColTile = 28.0f;
+    /** Resource over destination: wider than the Trucks column, which puts the two on one line. */
+    inline constexpr float DTTColLapWho = 260.0f;
+    inline constexpr float DTTColSpeed = 64.0f;
+    inline constexpr float DTTColNext = 56.0f;
+    inline constexpr float DTTColLapLeft = 76.0f;
+    inline constexpr float DTTColLapCargo = 92.0f;
+    /** The laps pane against the requests pane. */
+    inline constexpr float DTTLapsPaneShare = 2.2f;
     /** One stop of a lap. Fixed, or a three-stop lap would draw a bar across the window. */
     inline constexpr float DTTStripMark = 26.0f;
     /** One requester's bar inside a resource row; eight of them fit before the row gives up. */
     inline constexpr float DTTStockBarWidth = 54.0f;
     inline constexpr int32 DTTMaxStockBars = 8;
+
+    /**
+     * The design's text box: dark, outlined, cyan when it has the focus. The engine's is a white
+     * slab, and its hint text is light grey on it - there to be read by nobody.
+     */
+    inline void StyleInput(UEditableTextBox* Box, int32 FontSize = 13)
+    {
+        if (!Box) return;
+        FEditableTextBoxStyle& Style = Box->WidgetStyle;
+        FSlateFontInfo Font = Style.TextStyle.Font;
+        Font.Size = FontSize;
+        const FLinearColor Fill = Hex(0x1f2b33);
+        Style.SetFont(Font).SetPadding(FMargin(9, 4))
+            .SetBackgroundImageNormal(OutlinedBrush(Fill, Hex(0x44606e), 7.0f))
+            .SetBackgroundImageHovered(OutlinedBrush(Fill, Hex(0x5d8494), 7.0f))
+            .SetBackgroundImageFocused(OutlinedBrush(Fill, DTTCyan, 7.0f))
+            .SetBackgroundImageReadOnly(OutlinedBrush(Fill, Hex(0x3a4f5b), 7.0f))
+            .SetForegroundColor(FSlateColor(DTTText))
+            .SetFocusedForegroundColor(FSlateColor(DTTText))
+            .SetBackgroundColor(FSlateColor(FLinearColor::White));
+    }
+
+    /** A filter chip: rounded, outlined, filled when it is the one in force. */
+    inline void StyleChip(UButton* Button, bool bOn)
+    {
+        if (!Button) return;
+        FButtonStyle Style = Button->GetStyle();
+        const FLinearColor Fill = bOn ? DTTTabOn : Hex(0x2c3d48);
+        const FLinearColor Line = bOn ? Hex(0x5d8494) : Hex(0x44606e);
+        Style.SetNormal(OutlinedBrush(Fill, Line, 14.0f));
+        Style.SetHovered(OutlinedBrush(Lighten(Fill, 0.04f), Hex(0x5d8494), 14.0f));
+        Style.SetPressed(OutlinedBrush(Lighten(Fill, 0.08f), Hex(0x5d8494), 14.0f));
+        Style.SetDisabled(OutlinedBrush(Fill, Line, 14.0f));
+        Style.SetNormalPadding(FMargin(11, 3));
+        Style.SetPressedPadding(FMargin(11, 3));
+        Button->SetStyle(Style);
+    }
+
+    /** A 14-point box: outlined when clear, cyan when ticked. The stock one is dark on dark. */
+    inline void StyleCheck(UCheckBox* Check)
+    {
+        if (!Check) return;
+        auto Box = [](const FLinearColor& Fill, const FLinearColor& Line)
+        {
+            FSlateBrush Brush = OutlinedBrush(Fill, Line, 3.0f);
+            Brush.ImageSize = FVector2D(14.0f, 14.0f);
+            return Brush;
+        };
+        FCheckBoxStyle Style = Check->GetWidgetStyle();
+        Style.SetCheckBoxType(ESlateCheckBoxType::CheckBox);
+        Style.SetUncheckedImage(Box(Hex(0x1f2b33), Hex(0x6a8795)));
+        Style.SetUncheckedHoveredImage(Box(Hex(0x2c3d48), DTTCyan));
+        Style.SetUncheckedPressedImage(Box(Hex(0x2c3d48), DTTCyan));
+        Style.SetCheckedImage(Box(DTTCyan, DTTCyan));
+        Style.SetCheckedHoveredImage(Box(Lighten(DTTCyan, 0.08f), DTTCyan));
+        Style.SetCheckedPressedImage(Box(DTTCyan, DTTCyan));
+        Style.SetUndeterminedImage(Box(Hex(0x2f5364), DTTCyan));
+        Style.SetUndeterminedHoveredImage(Box(Hex(0x2f5364), DTTCyan));
+        Style.SetUndeterminedPressedImage(Box(Hex(0x2f5364), DTTCyan));
+        Style.SetPadding(FMargin(0));
+        Check->SetWidgetStyle(Style);
+    }
+
+    /** The resource box: a ghost button that opens a list. Font and colour only take at construction. */
+    inline void StyleCombo(UComboBoxString* Combo, int32 FontSize = 13)
+    {
+        if (!Combo) return;
+        FComboBoxStyle Style = Combo->GetWidgetStyle();
+        FButtonStyle& Button = Style.ComboButtonStyle.ButtonStyle;
+        const FLinearColor Fill = Hex(0x2c3d48);
+        Button.SetNormal(OutlinedBrush(Fill, Hex(0x44606e), 7.0f));
+        Button.SetHovered(OutlinedBrush(Lighten(Fill, 0.04f), Hex(0x5d8494), 7.0f));
+        Button.SetPressed(OutlinedBrush(Lighten(Fill, 0.08f), Hex(0x5d8494), 7.0f));
+        Button.SetNormalPadding(FMargin(10, 3));
+        Button.SetPressedPadding(FMargin(10, 3));
+        Style.ComboButtonStyle.MenuBorderBrush = FlatBrush(DTTTopBar, 6.0f);
+        Combo->SetWidgetStyle(Style);
+        PRAGMA_DISABLE_DEPRECATION_WARNINGS
+        Combo->Font.Size = FontSize;
+        Combo->ForegroundColor = FSlateColor(DTTText);
+        PRAGMA_ENABLE_DEPRECATION_WARNINGS
+    }
+
+    /** A number box in the design's colours; the engine's is a light slab like its text box. */
+    inline void StyleSpin(USpinBox* Spin, int32 FontSize = 13)
+    {
+        if (!Spin) return;
+        FSpinBoxStyle Style = Spin->GetWidgetStyle();
+        const FLinearColor Fill = Hex(0x1f2b33);
+        Style.SetBackgroundBrush(OutlinedBrush(Fill, Hex(0x44606e), 6.0f))
+            .SetHoveredBackgroundBrush(OutlinedBrush(Fill, Hex(0x5d8494), 6.0f))
+            .SetActiveBackgroundBrush(OutlinedBrush(Fill, DTTCyan, 6.0f))
+            .SetInactiveFillBrush(FlatBrush(Hex(0x26353f), 6.0f))
+            .SetHoveredFillBrush(FlatBrush(Hex(0x2f4653), 6.0f))
+            .SetActiveFillBrush(FlatBrush(Hex(0x2f5364), 6.0f))
+            .SetForegroundColor(FSlateColor(DTTText));
+        Spin->SetWidgetStyle(Style);
+        Spin->SetForegroundColor(FSlateColor(DTTText));
+        FSlateFontInfo Font = Spin->GetFont();
+        Font.Size = FontSize;
+        Spin->SetFont(Font);
+    }
 
     /** A caption over a column, the same width as the Cell that will stand under it. */
     inline void HeadCell(UWidgetTree* Tree, UHorizontalBox* Row, const FString& Caption, float Width,
@@ -172,6 +447,32 @@ namespace DTTUI
             S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center);
             if (Width <= 0.0f) S->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
         }
+    }
+
+    /**
+     * HeadCell as a button: the same box, width and margin, so the caption stands exactly where
+     * the plain one did, and a click on it carries Target. Returns the caption to relabel.
+     */
+    inline UTextBlock* HeadButton(UWidgetTree* Tree, UHorizontalBox* Row, const FString& Caption, float Width,
+        EHorizontalAlignment Align, const FMargin& Margin, const FDTTRowActionDelegate& Action, const FDTTRowTarget& Target)
+    {
+        UDTTRowButton* Button = Tree->ConstructWidget<UDTTRowButton>();
+        Button->Bind(Action);
+        Button->Attach(Target);
+        Flatten(Button, FMargin(0), true);
+        UTextBlock* Text = MakeText(Tree, Caption, 11, FLinearColor(0.72f, 0.78f, 0.82f));
+        Button->SetContent(Text);
+        if (UButtonSlot* S = Cast<UButtonSlot>(Text->Slot)) { S->SetPadding(FMargin(0)); S->SetHorizontalAlignment(Align); S->SetVerticalAlignment(VAlign_Center); }
+        USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+        if (Width > 0.0f) Box->SetWidthOverride(Width);
+        Box->SetContent(Button);
+        Row->AddChild(Box);
+        if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot))
+        {
+            S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center);
+            if (Width <= 0.0f) S->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        }
+        return Text;
     }
 
 }
@@ -285,6 +586,7 @@ struct FDTTCardSink
         if (bBuild)
         {
             UBorder* Border = Tree->ConstructWidget<UBorder>();
+            Border->SetBrush(DTTUI::FlatBrush(FLinearColor::White, 6.0f));
             Border->SetBrushColor(Tint); Border->SetPadding(Padding);
             Body = Tree->ConstructWidget<UVerticalBox>(); Border->SetContent(Body);
             Card.Root = Border;
@@ -305,6 +607,7 @@ struct FDTTCardSink
         if (bBuild)
         {
             Border = Tree->ConstructWidget<UBorder>();
+            Border->SetBrush(DTTUI::FlatBrush(FLinearColor::White, 4.0f));
             Border->SetBrushColor(Background); Border->SetPadding(FMargin(7, 1));
             if (Parent)
             {
@@ -322,6 +625,89 @@ struct FDTTCardSink
         UTextBlock* T = Text(nullptr, Label, 12, Foreground);
         if (bBuild && Border && T) Border->SetContent(T);
         if (Border) Border->SetVisibility(bVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+    }
+
+    /**
+     * A badge standing in a column of a table: the column keeps its width whatever the label, and a
+     * hidden pill still holds its place, so the columns after it stay under their captions.
+     */
+    void Pill(UPanelWidget* Parent, const FString& Label, DTTUI::EDTTPill Kind, float Width,
+        bool bVisible = true, const FMargin& Margin = FMargin(0, 0, 6, 0))
+    {
+        FLinearColor Back, Fore;
+        DTTUI::PillColours(Kind, Back, Fore);
+        UBorder* Border = nullptr;
+        if (bBuild)
+        {
+            Border = Tree->ConstructWidget<UBorder>();
+            Border->SetBrush(DTTUI::FlatBrush(FLinearColor::White, 4.0f));
+            Border->SetPadding(FMargin(7, 1));
+            USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+            if (Width > 0.0f) Box->SetWidthOverride(Width);
+            Box->SetContent(Border);
+            if (USizeBoxSlot* S = Cast<USizeBoxSlot>(Border->Slot)) { S->SetHorizontalAlignment(HAlign_Left); S->SetVerticalAlignment(VAlign_Center); }
+            if (Parent)
+            {
+                Parent->AddChild(Box);
+                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot)) { S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center); }
+                Pad<UVerticalBoxSlot>(Box, Margin);
+            }
+            Card.Borders.Add(Border);
+        }
+        else if (Card.Borders.IsValidIndex(BorderIndex))
+        {
+            Border = Card.Borders[BorderIndex].Get();
+        }
+        ++BorderIndex;
+        UTextBlock* T = Text(nullptr, Label, 11, Fore);
+        if (bBuild && Border && T) Border->SetContent(T);
+        if (!Border) return;
+        Border->SetBrushColor(Back);
+        Border->SetVisibility(bVisible && !Label.IsEmpty() ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Hidden);
+    }
+
+    /**
+     * The cargo tile of the design: a rounded square in the colour the truck is painted for this
+     * cargo in the world, with the item's icon on it. The colour is what ties a row in the window to
+     * a truck on the road. It always keeps its place; with nothing to show it is just the colour.
+     */
+    void Tile(UPanelWidget* Parent, UTexture2D* Texture, const FLinearColor& Colour, float Size,
+        const FMargin& Margin = FMargin(0, 0, 8, 0))
+    {
+        UBorder* Border = nullptr;
+        UImage* Image = nullptr;
+        if (bBuild)
+        {
+            Border = Tree->ConstructWidget<UBorder>();
+            Border->SetBrush(DTTUI::FlatBrush(FLinearColor::White, 5.0f));
+            Border->SetPadding(FMargin(3));
+            Image = Tree->ConstructWidget<UImage>();
+            Border->SetContent(Image);
+            if (UBorderSlot* S = Cast<UBorderSlot>(Image->Slot)) { S->SetHorizontalAlignment(HAlign_Fill); S->SetVerticalAlignment(VAlign_Fill); }
+            USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+            Box->SetWidthOverride(Size); Box->SetHeightOverride(Size); Box->SetContent(Border);
+            if (Parent)
+            {
+                Parent->AddChild(Box);
+                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot)) { S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center); }
+                Pad<UVerticalBoxSlot>(Box, Margin);
+            }
+            Card.Borders.Add(Border);
+            Card.Images.Add(Image);
+        }
+        else
+        {
+            if (Card.Borders.IsValidIndex(BorderIndex)) Border = Card.Borders[BorderIndex].Get();
+            if (Card.Images.IsValidIndex(ImageIndex)) Image = Card.Images[ImageIndex].Get();
+        }
+        ++BorderIndex;
+        ++ImageIndex;
+        if (Border) Border->SetBrushColor(Colour);
+        if (Image)
+        {
+            if (Texture) Image->SetBrushFromTexture(Texture, false);
+            Image->SetVisibility(Texture ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Hidden);
+        }
     }
 
     /** An item icon of Size points; collapsed when there is no texture, keeping its place. */
@@ -469,6 +855,205 @@ struct FDTTCardSink
     }
 
     /**
+     * A column of two lines: what a thing is, and under it one line about it. Fixed width, both
+     * lines ellipsised - the column is the width, never the text.
+     */
+    void Cell2(UPanelWidget* Line, const FString& Top, int32 TopSize, const FLinearColor& TopColour,
+        const FString& Bottom, int32 BottomSize, const FLinearColor& BottomColour, float Width,
+        const FMargin& Margin = FMargin(0, 0, 8, 0), EHorizontalAlignment Align = HAlign_Left)
+    {
+        UVerticalBox* Stack = nullptr;
+        if (bBuild)
+        {
+            USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+            if (Width > 0.0f) Box->SetWidthOverride(Width);
+            Box->SetClipping(EWidgetClipping::ClipToBounds);
+            Stack = Tree->ConstructWidget<UVerticalBox>();
+            Box->SetContent(Stack);
+            if (USizeBoxSlot* S = Cast<USizeBoxSlot>(Stack->Slot)) { S->SetHorizontalAlignment(HAlign_Fill); S->SetVerticalAlignment(VAlign_Center); }
+            if (Line)
+            {
+                Line->AddChild(Box);
+                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot))
+                {
+                    S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center);
+                    if (Width <= 0.0f) S->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+                }
+            }
+        }
+        UTextBlock* A = Text(Stack, Top, TopSize, TopColour);
+        UTextBlock* B = Text(Stack, Bottom, BottomSize, BottomColour);
+        if (bBuild)
+        {
+            for (UTextBlock* T : { A, B })
+            {
+                if (!T) continue;
+                T->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+                T->SetJustification(Align == HAlign_Right ? ETextJustify::Right : ETextJustify::Left);
+            }
+        }
+        // An empty pair still owns its column; see KeepColumn.
+        KeepColumn(A, Width);
+    }
+
+    /** A number with a thin bar under it, right-aligned in a fixed column: "26 / 64 st". */
+    void CellBar(UPanelWidget* Line, const FString& Value, const FLinearColor& Colour, float Percent,
+        const FLinearColor& BarColour, float Width, const FMargin& Margin = FMargin(0, 0, 6, 0))
+    {
+        UVerticalBox* Stack = nullptr;
+        if (bBuild)
+        {
+            USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+            Box->SetWidthOverride(Width);
+            Stack = Tree->ConstructWidget<UVerticalBox>();
+            Box->SetContent(Stack);
+            if (USizeBoxSlot* S = Cast<USizeBoxSlot>(Stack->Slot)) { S->SetHorizontalAlignment(HAlign_Fill); S->SetVerticalAlignment(VAlign_Center); }
+            if (Line)
+            {
+                Line->AddChild(Box);
+                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot)) { S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center); }
+            }
+        }
+        UTextBlock* T = Text(Stack, Value, 12, Colour);
+        if (bBuild && T) T->SetJustification(ETextJustify::Right);
+        KeepColumn(T, Width);
+        Bar(Stack, Percent, BarColour, FMargin(0, 3, 0, 0));
+    }
+
+    /** A 1-point line across whatever width the row leaves it, for a group heading. */
+    void Rule(UPanelWidget* Line, const FLinearColor& Colour, const FMargin& Margin = FMargin(8, 0))
+    {
+        UBorder* Border = nullptr;
+        if (bBuild)
+        {
+            Border = Tree->ConstructWidget<UBorder>();
+            // A plain image brush: a rounded box one point high comes out as nothing at all.
+            FSlateBrush Plain;
+            Plain.TintColor = FSlateColor(FLinearColor::White);
+            Border->SetBrush(Plain);
+            USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+            Box->SetHeightOverride(1.0f); Box->SetContent(Border);
+            if (Line)
+            {
+                Line->AddChild(Box);
+                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot))
+                {
+                    S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center);
+                    S->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+                }
+            }
+            Card.Borders.Add(Border);
+        }
+        else if (Card.Borders.IsValidIndex(BorderIndex))
+        {
+            Border = Card.Borders[BorderIndex].Get();
+        }
+        ++BorderIndex;
+        if (Border) Border->SetBrushColor(Colour);
+    }
+
+    /**
+     * One stop of a lap drawn across the lap column: its name, at most MaxWidth wide, and - when
+     * bLeg - the leg that follows it, a 3-point rule that takes whatever width is left, with
+     * LegLabel over it. Always emits the same widgets so the shape does not depend on where the
+     * truck is; an empty Name collapses the stop. MaxWidth is applied on every pass, because it
+     * follows the width the window gives the column.
+     */
+    void Stop(UPanelWidget* Line, const FString& Name, const FLinearColor& NameColour, float MaxWidth,
+        bool bLeg, const FLinearColor& LegColour, const FString& LegLabel = FString())
+    {
+        UTextBlock* T = nullptr;
+        if (bBuild)
+        {
+            USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+            Box->SetClipping(EWidgetClipping::ClipToBounds);
+            T = Text(nullptr, Name, 12, NameColour);
+            T->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+            Box->SetContent(T);
+            if (Line)
+            {
+                Line->AddChild(Box);
+                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot)) { S->SetVerticalAlignment(VAlign_Center); }
+            }
+        }
+        else
+        {
+            T = Text(nullptr, Name, 12, NameColour);
+        }
+        if (T) if (USizeBox* Box = Cast<USizeBox>(T->GetParent())) Box->SetMaxDesiredWidth(MaxWidth);
+
+        // The leg: its label over the rule, and as much room under the rule as the label takes
+        // over it, so the rule stays on the row's middle line whether the label shows or not.
+        USizeBox* Leg = nullptr;
+        UVerticalBox* Stack = nullptr;
+        if (bBuild)
+        {
+            Leg = Tree->ConstructWidget<USizeBox>();
+            Leg->SetMinDesiredWidth(24.0f);
+            Stack = Tree->ConstructWidget<UVerticalBox>();
+            Leg->SetContent(Stack);
+            if (Line)
+            {
+                Line->AddChild(Leg);
+                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Leg->Slot))
+                {
+                    S->SetPadding(FMargin(8, 0)); S->SetVerticalAlignment(VAlign_Center);
+                    S->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+                }
+            }
+        }
+        UTextBlock* Label = Text(Stack, LegLabel, 10, DTTUI::DTTGrey);
+        if (bBuild && Label)
+        {
+            Label->SetJustification(ETextJustify::Center);
+            Pad<UVerticalBoxSlot>(Label, FMargin(0, 0, 0, 1));
+        }
+        if (Label && LegLabel.IsEmpty()) Label->SetVisibility(ESlateVisibility::Hidden);
+        UBorder* Rule = nullptr;
+        if (bBuild)
+        {
+            Rule = Tree->ConstructWidget<UBorder>();
+            Rule->SetBrush(DTTUI::FlatBrush(FLinearColor::White, 1.5f));
+            USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+            Box->SetHeightOverride(3.0f); Box->SetContent(Rule);
+            Stack->AddChild(Box);
+            Pad<UVerticalBoxSlot>(Box, FMargin(0, 0, 0, 14));
+            Card.Borders.Add(Rule);
+        }
+        else if (Card.Borders.IsValidIndex(BorderIndex))
+        {
+            Rule = Card.Borders[BorderIndex].Get();
+        }
+        ++BorderIndex;
+        if (!Rule) return;
+        Rule->SetBrushColor(LegColour);
+        // Rule -> its size box -> the stack -> the leg's own size box, which is what takes the room.
+        UWidget* Holder = Rule;
+        for (int32 Up = 0; Up < 3 && Holder->GetParent(); ++Up) Holder = Holder->GetParent();
+        Holder->SetVisibility(bLeg ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+    }
+
+    /** A rounded chip with a label and a count in amber: "no free truck  6". */
+    void Chip(UPanelWidget* Parent, const FString& Label, const FString& Count)
+    {
+        UBorder* Border = nullptr;
+        UHorizontalBox* Line = nullptr;
+        if (bBuild)
+        {
+            Border = Tree->ConstructWidget<UBorder>();
+            Border->SetBrush(DTTUI::OutlinedBrush(DTTUI::Hex(0x354a55), DTTUI::Hex(0x445c69), 12.0f));
+            Border->SetPadding(FMargin(10, 3));
+            Line = Tree->ConstructWidget<UHorizontalBox>();
+            Border->SetContent(Line);
+            if (Parent) Parent->AddChild(Border);
+            Card.Borders.Add(Border);
+        }
+        ++BorderIndex;
+        Text(Line, Label, 12, DTTUI::Hex(0xdce8ee), false, FMargin(0, 0, 6, 0));
+        Text(Line, Count, 12, DTTUI::DTTYellow);
+    }
+
+    /**
      * A control in a row. Never leave the call out on a condition: pass bVisible and let it
      * collapse, or the card changes shape with its state and a recycled button ends up pointed at
      * a row that is no longer there.
@@ -523,6 +1108,7 @@ struct FDTTCardSink
         {
             C = Tree->ConstructWidget<UDTTRowCheck>();
             C->Bind(RowAction);
+            DTTUI::StyleCheck(C);
             // A box of the column's width, so that the caption above it and every row below
             // stand in the same place: a check is whatever size the style makes it otherwise.
             USizeBox* Box = Tree->ConstructWidget<USizeBox>();

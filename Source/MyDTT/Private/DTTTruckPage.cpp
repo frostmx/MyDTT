@@ -12,7 +12,7 @@ using namespace DTTUI;
 void UDynamicTimeTableWidget::BuildTruckHeader(UHorizontalBox* Row)
 {
     if (!Row) return;
-    HeadCell(WidgetTree, Row, FString(), DTTColIcon);
+    HeadCell(WidgetTree, Row, FString(), DTTColRowTile, HAlign_Left, FMargin(0, 0, 8, 0));
     HeadCell(WidgetTree, Row, TEXT("TRUCK"), DTTColTruck);
     HeadCell(WidgetTree, Row, TEXT("PHASE"), DTTColPhase);
     HeadCell(WidgetTree, Row, TEXT("NEXT STOP"), 0.0f);
@@ -22,21 +22,24 @@ void UDynamicTimeTableWidget::BuildTruckHeader(UHorizontalBox* Row)
 
 void UDynamicTimeTableWidget::PopulateTruckCard(const FDTTTruckRow& Row, const FString& CardId, bool bExpanded, FDTTCardSink& Sink)
 {
-    FLinearColor PhaseColor = DTTGrey;
+    // The phase as the legend's pill: what the autopilot is off, docked, or which part of the pool.
+    const FString Dot = FString(TEXT(" ")) + FString::Chr(0x00B7) + TEXT(" ");
+    EDTTPill PhasePill = EDTTPill::Dispatch;
     FString PhaseLabel = TEXT("Dispatch");
     if (Row.bPool)
     {
-        PhaseLabel = TEXT("Pool - ") + UDynamicTimeTableSubsystem::PhaseLabel(Row.Phase);
+        PhaseLabel = TEXT("Pool") + Dot + UDynamicTimeTableSubsystem::PhaseLabel(Row.Phase).ToLower();
         switch (Row.Phase)
         {
-        case EDTTTruckPhase::Parked: PhaseColor = DTTSteel; break;
-        case EDTTTruckPhase::Assigned: PhaseColor = DTTCyan; break;
-        case EDTTTruckPhase::ToDepot: PhaseColor = DTTSteel; break;
-        case EDTTTruckPhase::Manual: PhaseColor = DTTOrange; break;
+        case EDTTTruckPhase::Parked: PhasePill = EDTTPill::PoolParked; break;
+        case EDTTTruckPhase::Assigned: PhasePill = EDTTPill::PoolAssigned; break;
+        case EDTTTruckPhase::ToDepot: PhasePill = EDTTPill::PoolToDepot; break;
+        case EDTTTruckPhase::Manual: PhasePill = EDTTPill::Manual; PhaseLabel = TEXT("Manual"); break;
         default: break;
         }
     }
-    if (!Row.bAutopilot) { PhaseLabel = TEXT("Manual"); PhaseColor = DTTOrange; }
+    if (Row.bDocking) { PhasePill = EDTTPill::Docked; PhaseLabel = TEXT("Docked"); }
+    if (!Row.bAutopilot) { PhasePill = EDTTPill::AutopilotOff; PhaseLabel = TEXT("Autopilot off"); }
     const bool bWarn = !Row.bAutopilot || (Row.bPool && Row.Phase == EDTTTruckPhase::Manual);
     const FLinearColor Tint = bWarn ? DTTCardTintWarn : DTTCardTint;
     UVerticalBox* Body = Sink.Root(bExpanded ? Lighten(Tint) : Tint, FMargin(0));
@@ -50,7 +53,7 @@ void UDynamicTimeTableWidget::PopulateTruckCard(const FDTTTruckRow& Row, const F
     UTexture2D* CargoIcon = IconFor(Row.CargoItemClass);
     if (!CargoIcon && Row.CargoStacks > 0) CargoIcon = IconFor(Row.ItemClass);
     if (!CargoIcon) CargoIcon = IconFor(Row.ItemClass);
-    Sink.Icon(Line, CargoIcon, DTTColIcon, FMargin(0, 0, 6, 0), true);
+    Sink.Tile(Line, CargoIcon, TileColorFor(Row.CargoItemClass.IsNull() ? Row.ItemClass : Row.CargoItemClass), DTTColRowTile);
 
     // The mod names a dispatch truck "<resource> -> <dock>", so the resource leads and the name is
     // only worth showing when the player chose one.
@@ -59,20 +62,20 @@ void UDynamicTimeTableWidget::PopulateTruckCard(const FDTTTruckRow& Row, const F
     const FString Tail = bResource ? DTTTruckTail(TruckTitle, Row.ResourceId) : FString();
     FString Title = bResource ? Row.ResourceId : TruckTitle;
     if (!Tail.IsEmpty()) Title += TEXT("  ") + Tail;
-    Sink.Cell(Line, Title, 14, bResource ? DTTCyan : FLinearColor::White, DTTColTruck);
-    Sink.Cell(Line, PhaseLabel, 12, PhaseColor, DTTColPhase);
+    Sink.Cell(Line, Title, 14, DTTText, DTTColTruck);
+    Sink.Pill(Line, PhaseLabel, PhasePill, DTTColPhase);
 
     FString NextStop;
     if (Row.bDocking) NextStop = Row.RouteStops.IsValidIndex(Row.TargetIndex) ? FString::Printf(TEXT("docked at %s"), *Row.RouteStops[Row.TargetIndex]) : FString(TEXT("docked"));
     else if (Row.RouteStops.IsValidIndex(Row.TargetIndex)) NextStop = FString(TEXT("> ")) + Row.RouteStops[Row.TargetIndex];
     else if (Row.RouteStops.Num() == 0) NextStop = TEXT("no route");
     else NextStop = TEXT("no target");
-    Sink.Cell(Line, NextStop, 13, Row.bDocking ? DTTSteel : FLinearColor(0.82f, 0.87f, 0.9f), 0.0f);
+    Sink.Cell(Line, NextStop, 13, Row.bDocking ? DTTSteel : DTTGrey, 0.0f);
 
     const FString Cargo = Row.CargoCapacityStacks > 0
         ? FString::Printf(TEXT("%d / %d st"), FMath::Max(0, Row.CargoStacks), Row.CargoCapacityStacks)
         : FString(TEXT("-"));
-    Sink.Cell(Line, Cargo, 12, Row.CargoStacks > 0 ? FLinearColor::White : DTTDim, DTTColCargo, HAlign_Right);
+    Sink.Cell(Line, Cargo, 12, Row.CargoStacks > 0 ? DTTText : DTTDim, DTTColCargo, HAlign_Right);
     Sink.Cell(Line, bExpanded ? TEXT("v") : TEXT(">"), 13, DTTDim, DTTColChevron, HAlign_Center);
 
     // The flag is part of the card's key, so a build pass and an update pass for one key always
@@ -94,7 +97,7 @@ void UDynamicTimeTableWidget::PopulateTruckCard(const FDTTTruckRow& Row, const F
         while (End + 1 < Row.RouteStops.Num() && Row.RouteStops[End + 1] == Row.RouteStops[Index]) ++End;
         if (Chips++ > 0) Sink.Text(Stops, TEXT(">"), 13, DTTDim);
         const bool bTarget = Row.TargetIndex >= Index && Row.TargetIndex <= End;
-        Sink.Text(Stops, Row.RouteStops[Index], 13, bTarget ? DTTCyan : FLinearColor(0.75f, 0.8f, 0.85f));
+        Sink.Text(Stops, Row.RouteStops[Index], 13, bTarget ? DTTCyan : DTTGrey);
     }
 
     Sink.Text(Detail, Row.bPool ? FString::Printf(TEXT("depot %s"), Row.DepotName.IsEmpty() ? TEXT("-") : *Row.DepotName) : FString(), 12, DTTGrey, true, FMargin(0, 2, 0, 0));
@@ -103,10 +106,10 @@ void UDynamicTimeTableWidget::PopulateTruckCard(const FDTTTruckRow& Row, const F
         ? FString::Printf(TEXT("Cargo %d / %d stacks"), Row.CargoStacks, Row.CargoCapacityStacks)
         : FString(TEXT("Cargo unknown"));
     const float Percent = Row.CargoCapacityStacks > 0 ? float(FMath::Max(Row.CargoStacks, 0)) / float(Row.CargoCapacityStacks) : 0.0f;
-    Sink.Text(Detail, CargoLine, 13, FLinearColor::White, false, FMargin(0, 6, 0, 0));
+    Sink.Text(Detail, CargoLine, 13, DTTText, false, FMargin(0, 6, 0, 0));
     Sink.Bar(Detail, Percent, Row.CargoStacks > 0 ? DTTCyan : DTTDim);
     Sink.Text(Detail, Row.CargoNote, 12, DTTGrey, true);
-    Sink.Text(Detail, Row.PlannedSummary.IsEmpty() ? FString() : TEXT("Planned: ") + Row.PlannedSummary, 12, FLinearColor(0.7f, 0.8f, 0.85f), true, FMargin(0, 2, 0, 0));
+    Sink.Text(Detail, Row.PlannedSummary.IsEmpty() ? FString() : TEXT("Planned: ") + Row.PlannedSummary, 12, DTTGrey, true, FMargin(0, 2, 0, 0));
 
     // The four operations, the same ones /dtt park and /dtt release run. A control is always here
     // and only its enabled state changes, so the shape of the card does not depend on what a truck
@@ -173,10 +176,18 @@ void UDynamicTimeTableWidget::RefreshTruckDisplay()
             bOpen ? TEXT("E") : TEXT("c"), bOpen ? DTTRouteChips(Row.RouteStops) : 0));
     }
     if (Shown.Num() == 0) Keys.Add(Rows.Num() == 0 ? TEXT("empty") : TEXT("nomatch"));
-    if (SummaryText)
     {
-        SummaryText->SetText(FText::FromString(FString::Printf(TEXT("%d truck(s), %d in the pool, %d parked - %s"),
-            Rows.Num(), Pool, Parked, IsRemoteClient() ? TEXT("server snapshot") : TEXT("live"))));
+        int32 Off = 0, Docking = 0;
+        for (const FDTTTruckRow& Row : Rows)
+        {
+            if (!Row.bAutopilot) ++Off;
+            if (Row.bDocking) ++Docking;
+        }
+        FDTTStatusLine Line;
+        Line.Count(Rows.Num(), TEXT("trucks")).Count(Pool, TEXT("in the pool"), DTTSteel).Count(Parked, TEXT("parked"), DTTSteel)
+            .Count(Docking, TEXT("docking"));
+        if (Off > 0) Line.Count(Off, TEXT("autopilot off"), DTTYellow);
+        SetStatusLine(Line, FString());
     }
 
     SyncCards(TruckScrollBox, TruckCards, Keys, [&](int32 Index, FDTTCardSink& Sink)

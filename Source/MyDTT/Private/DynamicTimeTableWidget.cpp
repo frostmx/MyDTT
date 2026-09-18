@@ -3,6 +3,7 @@
 #include "DynamicTimeTableSubsystem.h"
 #include "DynamicTimeTableRemoteCallObject.h"
 #include "DTTItemNames.h"
+#include "DTTCargoPaint.h"
 #include "FGPlayerController.h"
 #include "WheeledVehicles/FGWheeledVehicleIdentifier.h"
 #include "WheeledVehicles/FGDockingStationIdentifier.h"
@@ -59,6 +60,9 @@ UDynamicTimeTableWidget::UDynamicTimeTableWidget(const FObjectInitializer& Objec
 void UDynamicTimeTableWidget::NativeOnInitialized()
 {
     Super::NativeOnInitialized();
+    // Before the tree: the controls built with a page - the Stations chips and sortable captions -
+    // copy the delegate when they are bound, and a copy taken unbound stays unbound.
+    if (!RowActionDelegate.IsBound()) RowActionDelegate.BindUObject(this, &UDynamicTimeTableWidget::HandleRowAction);
     if (WidgetTree && !WidgetTree->RootWidget) BuildWidgetTree();
 }
 
@@ -257,7 +261,11 @@ void UDynamicTimeTableWidget::RefreshRuntimeDisplay()
     if (ActiveTab == EDTTTab::Trucks) { RefreshTruckDisplay(); return; }
     if (ActiveTab == EDTTTab::Stations) { RefreshStationDisplay(); return; }
     if (ActiveTab == EDTTTab::Timetable) { RefreshTimetableDisplay(); return; }
-    if (ActiveTab == EDTTTab::Settings) return;
+    if (ActiveTab == EDTTTab::Settings)
+    {
+        SetStatusLine(DTTUI::FDTTStatusLine().Words(TEXT("Settings are the server's: an edit here is a proposal, and the answer comes back in the line at the bottom.")), FString());
+        return;
+    }
     if (!GroupScrollBox) return;
 
     if (!RuntimeLayoutMatches())
@@ -311,6 +319,33 @@ void UDynamicTimeTableWidget::HandleRowAction(const FDTTRowTarget& Target)
     if (Target.Action == EDTTRowAction::ToggleExpandStation)
     {
         ExpandedStationKey = ExpandedStationKey == Target.CardKey ? FString() : Target.CardKey;
+        RefreshStationDisplay();
+        return;
+    }
+    // The chips and captions of the Stations table: what it shows, and in what order.
+    if (Target.Action == EDTTRowAction::StationFilter)
+    {
+        StationRoleFilter = EDTTStationRoleFilter(FMath::Clamp(Target.Value, 0, int32(EDTTStationRoleFilter::Count) - 1));
+        RefreshStationDisplay();
+        return;
+    }
+    if (Target.Action == EDTTRowAction::StationSort)
+    {
+        const EDTTStationSort Column = EDTTStationSort(FMath::Clamp(Target.Value, 0, int32(EDTTStationSort::Count) - 1));
+        if (StationSort == Column) bStationSortDescending = !bStationSortDescending;
+        else { StationSort = Column; bStationSortDescending = false; }
+        RefreshStationDisplay();
+        return;
+    }
+    if (Target.Action == EDTTRowAction::StationSelectAll)
+    {
+        bool bAll = ShownStationRequesters.Num() > 0;
+        for (const FGuid& Guid : ShownStationRequesters) if (!SelectedStations.Contains(Guid)) { bAll = false; break; }
+        for (const FGuid& Guid : ShownStationRequesters)
+        {
+            if (bAll) SelectedStations.Remove(Guid);
+            else SelectedStations.Add(Guid);
+        }
         RefreshStationDisplay();
         return;
     }
@@ -432,16 +467,18 @@ void UDynamicTimeTableWidget::HandleRowAction(const FDTTRowTarget& Target)
 
 void UDynamicTimeTableWidget::SetActiveTab(EDTTTab Tab)
 {
-    ActiveTab = (Tab >= EDTTTab::Groups && Tab < EDTTTab::Count) ? Tab : EDTTTab::Groups;
+    ActiveTab = (Tab >= EDTTTab::Dispatch && Tab < EDTTTab::Count) ? Tab : EDTTTab::Dispatch;
     if (Pages) Pages->SetActiveWidgetIndex(static_cast<int32>(ActiveTab));
-    const FLinearColor Active(0.2f, 0.8f, 1.0f, 1.0f);
-    const FLinearColor Inactive(0.55f, 0.6f, 0.65f, 1.0f);
-    if (GroupsTabButton) GroupsTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Groups ? Active : Inactive);
-    if (DispatchTabButton) DispatchTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Dispatch ? Active : Inactive);
-    if (TrucksTabButton) TrucksTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Trucks ? Active : Inactive);
-    if (StationsTabButton) StationsTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Stations ? Active : Inactive);
-    if (TimetableTabButton) TimetableTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Timetable ? Active : Inactive);
-    if (SettingsTabButton) SettingsTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Settings ? Active : Inactive);
+    auto Style = [this](UButton* Button, EDTTTab Which)
+    {
+        DTTUI::StyleButton(Button, ActiveTab == Which ? DTTUI::EDTTButton::TabOn : DTTUI::EDTTButton::Tab);
+    };
+    Style(DispatchTabButton, EDTTTab::Dispatch);
+    Style(TrucksTabButton, EDTTTab::Trucks);
+    Style(StationsTabButton, EDTTTab::Stations);
+    Style(TimetableTabButton, EDTTTab::Timetable);
+    Style(GroupsTabButton, EDTTTab::Groups);
+    Style(SettingsTabButton, EDTTTab::Settings);
     // Recalculate rebuilds the group bookings of the balancer, which only the Groups tab shows.
     if (RecalculateButton) RecalculateButton->SetVisibility(ActiveTab == EDTTTab::Groups ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
     // A remote client shows the last snapshot of this section until the next one arrives; ask now
@@ -455,6 +492,43 @@ void UDynamicTimeTableWidget::HandleDispatchTabClicked() { SetActiveTab(EDTTTab:
 void UDynamicTimeTableWidget::HandleTrucksTabClicked() { SetActiveTab(EDTTTab::Trucks); }
 void UDynamicTimeTableWidget::HandleStationsTabClicked() { SetActiveTab(EDTTTab::Stations); }
 void UDynamicTimeTableWidget::HandleTimetableTabClicked() { SetActiveTab(EDTTTab::Timetable); }
+
+void UDynamicTimeTableWidget::SetStatusLine(const DTTUI::FDTTStatusLine& Line, const FString& Source)
+{
+    for (int32 Index = 0; Index < StatusParts.Num(); ++Index)
+    {
+        UTextBlock* Part = StatusParts[Index].Get();
+        if (!Part) continue;
+        if (Line.Parts.IsValidIndex(Index))
+        {
+            Part->SetText(FText::FromString(Line.Parts[Index].Key));
+            Part->SetColorAndOpacity(FSlateColor(Line.Parts[Index].Value));
+            Part->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+        }
+        else
+        {
+            Part->SetVisibility(ESlateVisibility::Collapsed);
+        }
+    }
+    if (SummaryText)
+    {
+        SummaryText->SetText(FText::FromString(Source.IsEmpty()
+            ? (IsRemoteClient() ? FString::Printf(TEXT("server snapshot  %s  protocol %d"), *FString::Chr(0x00B7), UDynamicTimeTableRemoteCallObject::ProtocolVersion) : FString(TEXT("live")))
+            : Source));
+    }
+}
+
+FLinearColor UDynamicTimeTableWidget::TileColorFor(const TSoftClassPtr<UFGItemDescriptor>& ItemClass)
+{
+    if (ItemClass.IsNull()) return DTTUI::DTTTrack;
+    const FSoftObjectPath Path = ItemClass.ToSoftObjectPath();
+    if (const FLinearColor* Cached = TileColorCache.Find(Path)) return *Cached;
+    // The same table the trucks are painted from, so a row's tile and the truck on the road match.
+    UClass* Loaded = ItemClass.LoadSynchronous();
+    const FLinearColor Colour = Loaded ? FDTTCargoPaint::ColorsFor(Loaded).Primary : DTTUI::DTTTrack;
+    TileColorCache.Add(Path, Colour);
+    return Colour;
+}
 
 UTexture2D* UDynamicTimeTableWidget::IconFor(const TSoftClassPtr<UFGItemDescriptor>& ItemClass)
 {

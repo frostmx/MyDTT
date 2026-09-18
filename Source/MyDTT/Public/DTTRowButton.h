@@ -30,7 +30,19 @@ enum class EDTTRowAction : uint8
     StationStayOff,
     StationClearClaim,
     StationSendNow,
+    /** One of the role chips over the Stations table; Value is an EDTTStationRoleFilter. */
+    StationFilter,
+    /** A caption of the Stations table; Value is an EDTTStationSort. Again reverses it. */
+    StationSort,
+    /** The tick over the Stations table: every shown requester, or none of them. */
+    StationSelectAll,
 };
+
+/** The role chips of the Stations page, in the order they stand. */
+enum class EDTTStationRoleFilter : uint8 { All, Producers, Requesters, Depots, Fuel, NeedsFix, Count };
+
+/** The columns the Stations table sorts by. None is the server's order, by name. */
+enum class EDTTStationSort : uint8 { None, Station, Resource, Group, Role, Mode, Stock, Limit, State, Wait, Count };
 
 /**
  * What a click is about. Client-side only and never replicated: what crosses to the server is the
@@ -49,6 +61,8 @@ struct FDTTRowTarget
     FString CardKey;
     /** The dock's path node, which is what a claim is filed under and what a selection holds. */
     FGuid Guid;
+    /** A number for the controls that are not about a row: which chip, which column. */
+    int32 Value = 0;
 };
 
 DECLARE_DELEGATE_OneParam(FDTTRowActionDelegate, const FDTTRowTarget&);

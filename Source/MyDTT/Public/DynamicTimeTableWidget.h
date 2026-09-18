@@ -20,6 +20,7 @@ class UTextBlock;
 class UBorder;
 class UWidget;
 struct FDTTCardSink;
+namespace DTTUI { struct FDTTStatusLine; }
 
 /** One card of the Dispatch or Trucks page: its root in the scroll box and its widgets in creation order. */
 USTRUCT()
@@ -49,11 +50,11 @@ class UDynamicTimeTableRemoteCallObject;
  */
 enum class EDTTTab : int32
 {
-    Groups = 0,
-    Dispatch,
+    Dispatch = 0,
     Trucks,
     Stations,
     Timetable,
+    Groups,
     Settings,
     Count
 };
@@ -127,6 +128,21 @@ private:
     UPROPERTY() TObjectPtr<UScrollBox> TruckScrollBox;
     UPROPERTY() TObjectPtr<UScrollBox> StationScrollBox;
     UPROPERTY() TObjectPtr<UScrollBox> TimetableScrollBox;
+    /** The right-hand pane of the Timetable: open requests and the reasons nothing moves. */
+    UPROPERTY() TObjectPtr<UScrollBox> QueueScrollBox;
+    UPROPERTY() TArray<FDTTCardWidgets> QueueCards;
+    UPROPERTY() TObjectPtr<UTextBlock> LapsPaneSummary;
+    UPROPERTY() TObjectPtr<UTextBlock> QueuePaneSummary;
+    /**
+     * The four figures over the Timetable, built with the page and rewritten in place: a caption,
+     * a big value, a line under it and a bar of up to four segments.
+     */
+    UPROPERTY() TArray<TObjectPtr<UTextBlock>> KpiValues;
+    UPROPERTY() TArray<TObjectPtr<UTextBlock>> KpiLines;
+    UPROPERTY() TArray<TObjectPtr<UBorder>> KpiSegments;
+    /** The status line under the tab row: a fixed row of text blocks, see DTTUI::FDTTStatusLine. */
+    static constexpr int32 MaxStatusParts = 24;
+    UPROPERTY() TArray<TObjectPtr<UTextBlock>> StatusParts;
     UPROPERTY() TObjectPtr<UEditableTextBox> DispatchFilter;
     UPROPERTY() TObjectPtr<UEditableTextBox> TruckFilter;
     UPROPERTY() TObjectPtr<UEditableTextBox> StationFilter;
@@ -140,6 +156,26 @@ private:
     UPROPERTY() TObjectPtr<UButton> StationClearButton;
     /** Ticked rows, by dock guid. Survives a refresh; a row that disappears drops out silently. */
     TSet<FGuid> SelectedStations;
+    // What the Stations table shows and in what order. The chips, the resource box and the
+    // sortable captions are built once with the page and only relabelled afterwards.
+    EDTTStationRoleFilter StationRoleFilter = EDTTStationRoleFilter::All;
+    EDTTStationSort StationSort = EDTTStationSort::None;
+    bool bStationSortDescending = false;
+    /** The resource the box is set to; empty for all of them. */
+    FString StationResourceFilter;
+    UPROPERTY() TObjectPtr<UComboBoxString> StationResourceCombo;
+    /** The resources the box offers now; the options are rebuilt only when this set changes. */
+    TArray<FString> StationResourceOptions;
+    /** Set while the options are being rebuilt, so the box's own selection event is not a choice. */
+    bool bRebuildingStationResources = false;
+    UPROPERTY() TArray<TObjectPtr<UButton>> StationChipButtons;
+    UPROPERTY() TArray<TObjectPtr<UTextBlock>> StationChipCounts;
+    /** The sortable captions, by EDTTStationSort, and the words they carry without an arrow. */
+    UPROPERTY() TArray<TObjectPtr<UTextBlock>> StationSortLabels;
+    TArray<FString> StationSortCaptions;
+    UPROPERTY() TObjectPtr<class UDTTRowCheck> StationSelectAllCheck;
+    /** The requesters the table shows right now: what the tick over it selects. */
+    TArray<FGuid> ShownStationRequesters;
     // The Dispatch and Trucks pages are cards; a card is rebuilt only when its own key changes
     // and updated in place otherwise, so the page never repaints as a whole.
     UPROPERTY() TArray<FDTTCardWidgets> DispatchCards;
@@ -149,7 +185,10 @@ private:
     /** Item icons by descriptor path; a miss is cached too so an unresolvable class is not loaded again every refresh. */
     UPROPERTY() TMap<FSoftObjectPath, TObjectPtr<UTexture2D>> IconCache;
     UTexture2D* IconFor(const TSoftClassPtr<class UFGItemDescriptor>& ItemClass);
-    EDTTTab ActiveTab = EDTTTab::Groups;
+    /** The colour a truck carrying this item is painted in the world, for a row's tile. */
+    FLinearColor TileColorFor(const TSoftClassPtr<class UFGItemDescriptor>& ItemClass);
+    TMap<FSoftObjectPath, FLinearColor> TileColorCache;
+    EDTTTab ActiveTab = EDTTTab::Dispatch;
     /**
      * The one open card of each page, by key, or empty for all closed. Part of the card's key,
      * so opening a row rebuilds that row and nothing else. The window is built afresh every
@@ -228,6 +267,14 @@ private:
     void RefreshTruckDisplay();
     void RefreshStationDisplay();
     void RefreshTimetableDisplay();
+    /** Writes the status line; the rest of its blocks collapse. Source is the right-hand note. */
+    void SetStatusLine(const DTTUI::FDTTStatusLine& Line, const FString& Source);
+    /** The Timetable's own layout: figures over two panes, not the filter-and-table of the others. */
+    class UVerticalBox* BuildTimetablePage();
+    /** One figure of the four: returns nothing, stores its widgets in the Kpi arrays. */
+    void BuildKpiTile(class UHorizontalBox* Row, const FString& Caption);
+    void SetKpi(int32 Index, const FString& Value, const FLinearColor& ValueColour, const FString& Line,
+        const TArray<TPair<float, FLinearColor>>& Segments);
     void SyncCards(UScrollBox* Page, TArray<FDTTCardWidgets>& Cards, const TArray<FString>& Keys,
         TFunctionRef<void(int32, FDTTCardSink&)> Fill);
     /** Bound to HandleRowAction once and handed to every sink, which binds it to every control. */
@@ -238,11 +285,13 @@ private:
     void PopulateFuelCard(const TArray<const FDTTDispatchRow*>& FuelStops, FDTTCardSink& Sink);
     void PopulateTruckCard(const FDTTTruckRow& Row, const FString& CardId, bool bExpanded, FDTTCardSink& Sink);
     void PopulateStationCard(const FDTTStationRow& Row, const FString& CardId, bool bExpanded, FDTTCardSink& Sink);
-    void PopulateLapCard(const FDTTLapRow& Row, FDTTCardSink& Sink);
+    /** LapWidth is the room the lap line has, which decides how many stops it draws. */
+    void PopulateLapCard(const FDTTLapRow& Row, float LapWidth, FDTTCardSink& Sink);
     void PopulateQueueCard(const FDTTQueueRow& Row, FDTTCardSink& Sink);
-    void PopulateReasonCard(const FDTTReasonRow& Row, FDTTCardSink& Sink);
-    /** A line of its own between the three blocks of the Timetable page. */
-    void PopulateSectionCard(const FString& Title, const FString& Summary, FDTTCardSink& Sink);
+    /** "Why nothing moves": one chip per reason, with the skips of the last pass summed over resources. */
+    void PopulateReasonCard(const TArray<FDTTReasonRow>& Totals, FDTTCardSink& Sink);
+    /** A group heading of the Timetable: its title, a rule and a count. */
+    void PopulateSectionCard(const FString& Title, const FLinearColor& Colour, const FString& Count, FDTTCardSink& Sink);
     /** The station rows the window is looking at: the snapshot's on a client, the subsystem's on a host. */
     void GatherStationRows(TArray<FDTTStationRow>& OutRows) const;
     /** The ticked docks, as handles, for an operation that acts on the selection. */
@@ -275,7 +324,10 @@ private:
     UFUNCTION() void HandleTruckFilterChanged(const FText& Text);
     /** A page of cards: the filter line above a scroll box that fills the rest. */
     class UVerticalBox* BuildCardPage(TObjectPtr<UScrollBox>& OutScroll, TObjectPtr<UEditableTextBox>& OutFilter,
-        class UHorizontalBox*& OutHeader, class UHorizontalBox** OutTools = nullptr);
+        class UHorizontalBox*& OutHeader, class UHorizontalBox** OutTools = nullptr, class UHorizontalBox** OutFilterRow = nullptr);
+    /** The role chips and the resource box of the Stations page, after its text filter. */
+    void BuildStationFilters(class UHorizontalBox* Row);
+    UFUNCTION() void HandleStationResourceChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
     UFUNCTION() void HandleTrucksTabClicked();
     UFUNCTION() void HandleStationsTabClicked();
     UFUNCTION() void HandleTimetableTabClicked();

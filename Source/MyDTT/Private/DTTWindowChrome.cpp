@@ -51,39 +51,58 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     WindowSlot->SetAnchors(FAnchors(0.5f)); WindowSlot->SetAlignment(FVector2D(0.5f));
     ApplyWindowSize();
 
+    // The window as the design draws it: a rounded panel with its own outline, a bar across the top
+    // with the brand and the tabs, a status line under it, the page, and a footer.
     UBorder* WindowBorder = WidgetTree->ConstructWidget<UBorder>();
-    WindowBorder->SetBrushColor(FLinearColor(0.035f,0.055f,0.07f,0.98f));
-    WindowBorder->SetPadding(FMargin(22)); WindowSizeBox->SetContent(WindowBorder);
+    WindowBorder->SetBrush(OutlinedBrush(DTTWindowBg, DTTWindowLine, 14.0f));
+    WindowBorder->SetPadding(FMargin(1)); WindowSizeBox->SetContent(WindowBorder);
     UVerticalBox* Main = WidgetTree->ConstructWidget<UVerticalBox>(); WindowBorder->SetContent(Main);
 
-    UHorizontalBox* Header = WidgetTree->ConstructWidget<UHorizontalBox>();
-    Main->AddChildToVerticalBox(Header)->SetPadding(FMargin(0,0,0,8));
-    AddRowItem(Header, MakeText(WidgetTree,TEXT("DynamicTimeTable"),30,FLinearColor(0.2f,0.8f,1)),5,true);
-    CloseButton = MakeButton(WidgetTree,TEXT("Close")); AddRowItem(Header,CloseButton);
-
-    SummaryText = MakeText(WidgetTree,TEXT("Loading..."),16,FLinearColor(0.78f,0.85f,0.9f));
-    Main->AddChildToVerticalBox(SummaryText)->SetPadding(FMargin(5));
-
-    // The pages of the window; the tab row switches them, the active one is tinted.
+    UBorder* TopBar = WidgetTree->ConstructWidget<UBorder>();
+    TopBar->SetBrush(CornerBrush(DTTTopBar, FVector4(13, 13, 0, 0)));
+    TopBar->SetPadding(FMargin(16, 0));
+    USizeBox* TopBox = WidgetTree->ConstructWidget<USizeBox>(); TopBox->SetHeightOverride(56); TopBox->SetContent(TopBar);
+    Main->AddChildToVerticalBox(TopBox);
+    UHorizontalBox* Top = WidgetTree->ConstructWidget<UHorizontalBox>(); TopBar->SetContent(Top);
+    if (UBorderSlot* S = Cast<UBorderSlot>(Top->Slot)) S->SetVerticalAlignment(VAlign_Center);
+    AddRowItem(Top, MakeText(WidgetTree, TEXT("MyDTT"), 18, DTTCyan), 0)->SetPadding(FMargin(0, 0, 18, 0));
     UHorizontalBox* Tabs = WidgetTree->ConstructWidget<UHorizontalBox>();
-    Main->AddChildToVerticalBox(Tabs)->SetPadding(FMargin(5,0,5,4));
-    GroupsTabButton = MakeButton(WidgetTree,TEXT("Groups")); AddRowItem(Tabs,GroupsTabButton,3);
-    DispatchTabButton = MakeButton(WidgetTree,TEXT("Dispatch")); AddRowItem(Tabs,DispatchTabButton,3);
-    TrucksTabButton = MakeButton(WidgetTree,TEXT("Trucks")); AddRowItem(Tabs,TrucksTabButton,3);
-    StationsTabButton = MakeButton(WidgetTree,TEXT("Stations")); AddRowItem(Tabs,StationsTabButton,3);
-    TimetableTabButton = MakeButton(WidgetTree,TEXT("Timetable")); AddRowItem(Tabs,TimetableTabButton,3);
-    SettingsTabButton = MakeButton(WidgetTree,TEXT("Settings")); AddRowItem(Tabs,SettingsTabButton,3);
+    AddRowItem(Top, Tabs, 0, true);
+    // The order of the pages, and the order of EDTTTab: the two must agree.
+    DispatchTabButton = MakeButton(WidgetTree, TEXT("Dispatch"), EDTTButton::Tab); AddRowItem(Tabs, DispatchTabButton, 1);
+    TrucksTabButton = MakeButton(WidgetTree, TEXT("Trucks"), EDTTButton::Tab); AddRowItem(Tabs, TrucksTabButton, 1);
+    StationsTabButton = MakeButton(WidgetTree, TEXT("Stations"), EDTTButton::Tab); AddRowItem(Tabs, StationsTabButton, 1);
+    TimetableTabButton = MakeButton(WidgetTree, TEXT("Timetable"), EDTTButton::Tab); AddRowItem(Tabs, TimetableTabButton, 1);
+    GroupsTabButton = MakeButton(WidgetTree, TEXT("Groups"), EDTTButton::Tab); AddRowItem(Tabs, GroupsTabButton, 1);
+    SettingsTabButton = MakeButton(WidgetTree, TEXT("Settings"), EDTTButton::Tab); AddRowItem(Tabs, SettingsTabButton, 1);
+    CloseButton = MakeButton(WidgetTree, TEXT("Close")); AddRowItem(Top, CloseButton, 0);
+
+    // The status line: counts in their meaning's colour, words in grey. A fixed set of text blocks
+    // rewritten on every refresh, never rebuilt.
+    UBorder* SubBar = WidgetTree->ConstructWidget<UBorder>();
+    SubBar->SetBrush(FlatBrush(DTTSubBar, 0.0f));
+    SubBar->SetPadding(FMargin(18, 0));
+    USizeBox* SubBox = WidgetTree->ConstructWidget<USizeBox>(); SubBox->SetHeightOverride(34); SubBox->SetContent(SubBar);
+    Main->AddChildToVerticalBox(SubBox);
+    UHorizontalBox* Sub = WidgetTree->ConstructWidget<UHorizontalBox>(); SubBar->SetContent(Sub);
+    if (UBorderSlot* S = Cast<UBorderSlot>(Sub->Slot)) S->SetVerticalAlignment(VAlign_Center);
+    StatusParts.Reset();
+    for (int32 Index = 0; Index < MaxStatusParts; ++Index)
+    {
+        UTextBlock* Part = MakeText(WidgetTree, FString(), 13, DTTGrey);
+        Part->SetVisibility(ESlateVisibility::Collapsed);
+        AddRowItem(Sub, Part, 0);
+        StatusParts.Add(Part);
+    }
+    UTextBlock* Spacer = MakeText(WidgetTree, FString(), 13, DTTGrey);
+    AddRowItem(Sub, Spacer, 0, true);
+    SummaryText = MakeText(WidgetTree, TEXT("Loading..."), 12, DTTDim);
+    AddRowItem(Sub, SummaryText, 0);
 
     Pages = WidgetTree->ConstructWidget<UWidgetSwitcher>();
     UVerticalBoxSlot* PagesSlot = Main->AddChildToVerticalBox(Pages);
     PagesSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
-
-    UVerticalBox* GroupsPage = WidgetTree->ConstructWidget<UVerticalBox>();
-    Pages->AddChild(GroupsPage);
-    BuildEditorPanel(GroupsPage);
-    GroupScrollBox = WidgetTree->ConstructWidget<UScrollBox>();
-    UVerticalBoxSlot* ScrollSlot = GroupsPage->AddChildToVerticalBox(GroupScrollBox);
-    ScrollSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill)); ScrollSlot->SetPadding(FMargin(5,8));
+    PagesSlot->SetPadding(FMargin(16, 12, 16, 8));
 
     UHorizontalBox* DispatchHeader = nullptr;
     Pages->AddChild(BuildCardPage(DispatchScrollBox, DispatchFilter, DispatchHeader));
@@ -95,43 +114,54 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     TruckFilter->OnTextChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleTruckFilterChanged);
     UHorizontalBox* StationHeader = nullptr;
     UHorizontalBox* StationTools = nullptr;
-    Pages->AddChild(BuildCardPage(StationScrollBox, StationFilter, StationHeader, &StationTools));
+    UHorizontalBox* StationFilters = nullptr;
+    Pages->AddChild(BuildCardPage(StationScrollBox, StationFilter, StationHeader, &StationTools, &StationFilters));
+    BuildStationFilters(StationFilters);
     BuildStationTools(StationTools);
     BuildStationHeader(StationHeader);
     StationFilter->OnTextChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleStationFilterChanged);
-    UHorizontalBox* TimetableHeader = nullptr;
-    Pages->AddChild(BuildCardPage(TimetableScrollBox, TimetableFilter, TimetableHeader));
-    BuildTimetableHeader(TimetableHeader);
-    TimetableFilter->OnTextChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleTimetableFilterChanged);
+    Pages->AddChild(BuildTimetablePage());
+    UVerticalBox* GroupsPage = WidgetTree->ConstructWidget<UVerticalBox>();
+    Pages->AddChild(GroupsPage);
+    BuildEditorPanel(GroupsPage);
+    GroupScrollBox = WidgetTree->ConstructWidget<UScrollBox>();
+    UVerticalBoxSlot* ScrollSlot = GroupsPage->AddChildToVerticalBox(GroupScrollBox);
+    ScrollSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill)); ScrollSlot->SetPadding(FMargin(5,8));
     UVerticalBox* SettingsPage = WidgetTree->ConstructWidget<UVerticalBox>();
     Pages->AddChild(SettingsPage);
     BuildSettingsPanel(SettingsPage);
-    Pages->SetActiveWidgetIndex(static_cast<int32>(EDTTTab::Groups));
+    Pages->SetActiveWidgetIndex(static_cast<int32>(EDTTTab::Dispatch));
 
-    UHorizontalBox* Footer = WidgetTree->ConstructWidget<UHorizontalBox>();
-    Main->AddChildToVerticalBox(Footer);
+    UBorder* FootBar = WidgetTree->ConstructWidget<UBorder>();
+    FootBar->SetBrush(CornerBrush(DTTSubBar, FVector4(0, 0, 13, 13)));
+    FootBar->SetPadding(FMargin(18, 0));
+    USizeBox* FootBox = WidgetTree->ConstructWidget<USizeBox>(); FootBox->SetHeightOverride(38); FootBox->SetContent(FootBar);
+    Main->AddChildToVerticalBox(FootBox);
+    UHorizontalBox* Footer = WidgetTree->ConstructWidget<UHorizontalBox>(); FootBar->SetContent(Footer);
+    if (UBorderSlot* S = Cast<UBorderSlot>(Footer->Slot)) S->SetVerticalAlignment(VAlign_Center);
     // The status of the last thing asked for, where it can be read from any tab: the group
     // editor's own line is on the Groups page, and a row button on another page said nothing.
-    StatusText = MakeText(WidgetTree,TEXT("Ready."),14,FLinearColor(0.7f,0.8f,0.85f));
-    AddRowItem(Footer,StatusText,5,true);
-    RecalculateButton = MakeButton(WidgetTree,TEXT("Recalculate bookings")); AddRowItem(Footer,RecalculateButton);
-    UButton* FooterClose = MakeButton(WidgetTree,TEXT("Close"));
-    FooterClose->OnClicked.AddDynamic(this,&UDynamicTimeTableWidget::HandleCloseClicked); AddRowItem(Footer,FooterClose);
+    StatusText = MakeText(WidgetTree, TEXT("Ready."), 13, DTTGrey);
+    AddRowItem(Footer, StatusText, 0, true);
+    RecalculateButton = MakeButton(WidgetTree, TEXT("Rebuild bookings")); AddRowItem(Footer, RecalculateButton, 0);
 }
 
 UVerticalBox* UDynamicTimeTableWidget::BuildCardPage(TObjectPtr<UScrollBox>& OutScroll, TObjectPtr<UEditableTextBox>& OutFilter,
-    UHorizontalBox*& OutHeader, UHorizontalBox** OutTools)
+    UHorizontalBox*& OutHeader, UHorizontalBox** OutTools, UHorizontalBox** OutFilterRow)
 {
     UVerticalBox* Page = WidgetTree->ConstructWidget<UVerticalBox>();
     UHorizontalBox* FilterRow = WidgetTree->ConstructWidget<UHorizontalBox>();
-    Page->AddChildToVerticalBox(FilterRow)->SetPadding(FMargin(4, 2, 4, 4));
-    AddRowItem(FilterRow, MakeText(WidgetTree, TEXT("Filter"), 13, FLinearColor(0.6f, 0.68f, 0.74f)), 4);
+    Page->AddChildToVerticalBox(FilterRow)->SetPadding(FMargin(0, 0, 0, 8));
+    // A search box of its own width, as the design has it: a filter across the whole window
+    // leaves no room for what a page filters by besides the words.
     OutFilter = WidgetTree->ConstructWidget<UEditableTextBox>();
-    OutFilter->SetHintText(FText::FromString(TEXT("name or resource, any case")));
-    FSlateFontInfo FilterFont = OutFilter->WidgetStyle.TextStyle.Font;
-    FilterFont.Size = 13;
-    OutFilter->WidgetStyle.SetFont(FilterFont).SetPadding(FMargin(8, 4));
-    AddRowItem(FilterRow, OutFilter, 4, true);
+    OutFilter->SetHintText(FText::FromString(TEXT("filter: name or resource")));
+    StyleInput(OutFilter, 13);
+    USizeBox* FilterBox = WidgetTree->ConstructWidget<USizeBox>();
+    FilterBox->SetWidthOverride(280.0f);
+    FilterBox->SetContent(OutFilter);
+    AddRowItem(FilterRow, FilterBox, 0)->SetPadding(FMargin(0, 0, 10, 0));
+    if (OutFilterRow) *OutFilterRow = FilterRow;
     // A page that acts on more than one row at a time puts those controls here, between the
     // filter and the captions, where they are read before the table rather than hunted for in it.
     if (OutTools)
@@ -158,10 +188,10 @@ void UDynamicTimeTableWidget::HandleTimetableFilterChanged(const FText&) { Refre
 void UDynamicTimeTableWidget::BuildEditorPanel(UVerticalBox* Main)
 {
     UBorder* EditorBorder = WidgetTree->ConstructWidget<UBorder>();
-    EditorBorder->SetBrushColor(FLinearColor(0.08f,0.12f,0.15f,1)); EditorBorder->SetPadding(FMargin(10));
-    Main->AddChildToVerticalBox(EditorBorder)->SetPadding(FMargin(5,5,5,8));
+    EditorBorder->SetBrush(OutlinedBrush(DTTPane, Hex(0x3a4f5b), 10.0f)); EditorBorder->SetPadding(FMargin(14, 10));
+    Main->AddChildToVerticalBox(EditorBorder)->SetPadding(FMargin(0,0,0,10));
     UVerticalBox* Editor = WidgetTree->ConstructWidget<UVerticalBox>(); EditorBorder->SetContent(Editor);
-    Editor->AddChildToVerticalBox(MakeText(WidgetTree,TEXT("Group configuration"),19,FLinearColor(0.2f,0.8f,1)));
+    Editor->AddChildToVerticalBox(MakeText(WidgetTree,TEXT("Group configuration"),16,DTTCyan))->SetPadding(FMargin(0,0,0,4));
 
     UHorizontalBox* CreateRow = WidgetTree->ConstructWidget<UHorizontalBox>(); Editor->AddChildToVerticalBox(CreateRow);
     NewGroupNameInput = WidgetTree->ConstructWidget<UEditableTextBox>(); NewGroupNameInput->SetHintText(FText::FromString(TEXT("New group name")));
@@ -183,11 +213,13 @@ void UDynamicTimeTableWidget::BuildEditorPanel(UVerticalBox* Main)
 
     UHorizontalBox* StationRow=WidgetTree->ConstructWidget<UHorizontalBox>(); Editor->AddChildToVerticalBox(StationRow);
     GroupStationSelector=WidgetTree->ConstructWidget<UComboBoxString>(); AddRowItem(StationRow,GroupStationSelector,5,true);
-    TargetSlotsInput=WidgetTree->ConstructWidget<USpinBox>(); TargetSlotsInput->SetMinValue(1); TargetSlotsInput->SetMaxValue(999); TargetSlotsInput->SetMinSliderValue(1); TargetSlotsInput->SetMaxSliderValue(999); TargetSlotsInput->SetDelta(1); TargetSlotsInput->SetAlwaysUsesDeltaSnap(true); TargetSlotsInput->SetValue(1);
+    TargetSlotsInput=WidgetTree->ConstructWidget<USpinBox>(); TargetSlotsInput->SetMinValue(1); TargetSlotsInput->SetMaxValue(999); TargetSlotsInput->SetMinSliderValue(1); TargetSlotsInput->SetMaxSliderValue(999); TargetSlotsInput->SetDelta(1); TargetSlotsInput->SetAlwaysUsesDeltaSnap(true); TargetSlotsInput->SetMinFractionalDigits(0); TargetSlotsInput->SetMaxFractionalDigits(0); TargetSlotsInput->SetValue(1);
     AddRowItem(StationRow,TargetSlotsInput); ApplySlotsButton=MakeButton(WidgetTree,TEXT("Apply target slots")); AddRowItem(StationRow,ApplySlotsButton);
     RemoveStationButton=MakeButton(WidgetTree,TEXT("Remove station")); AddRowItem(StationRow,RemoveStationButton);
 
-    EditorStatusText=MakeText(WidgetTree,TEXT("Ready."),14,FLinearColor(0.7f,0.8f,0.85f)); Editor->AddChildToVerticalBox(EditorStatusText)->SetPadding(FMargin(5));
+    EditorStatusText=MakeText(WidgetTree,TEXT("Ready."),13,DTTGrey); Editor->AddChildToVerticalBox(EditorStatusText)->SetPadding(FMargin(5));
+    StyleInput(NewGroupNameInput); StyleInput(GroupNameInput); StyleSpin(TargetSlotsInput);
+    for (UComboBoxString* Combo : { NewGroupKindSelector.Get(), GroupSelector.Get(), AvailableStationSelector.Get(), GroupStationSelector.Get() }) StyleCombo(Combo);
 }
 
 void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
@@ -195,20 +227,20 @@ void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
     // Header and the Save/Defaults row stay put; the rows scroll between them. The border fills
     // the page and clips, so a long list can never paint over the window's footer again.
     UBorder* Border = WidgetTree->ConstructWidget<UBorder>();
-    Border->SetBrushColor(FLinearColor(0.08f,0.12f,0.15f,1)); Border->SetPadding(FMargin(10));
+    Border->SetBrush(OutlinedBrush(DTTPane, Hex(0x3a4f5b), 10.0f)); Border->SetPadding(FMargin(14, 10));
     Border->SetClipping(EWidgetClipping::ClipToBounds);
     UVerticalBoxSlot* BorderSlot = Page->AddChildToVerticalBox(Border);
-    BorderSlot->SetPadding(FMargin(5,5,5,8)); BorderSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+    BorderSlot->SetPadding(FMargin(0)); BorderSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
     UVerticalBox* Box = WidgetTree->ConstructWidget<UVerticalBox>(); Border->SetContent(Box);
-    Box->AddChildToVerticalBox(MakeText(WidgetTree,TEXT("Settings"),19,FLinearColor(0.2f,0.8f,1)));
-    Box->AddChildToVerticalBox(MakeText(WidgetTree,TEXT("Saved with the world; the server's values apply. Save writes them, Defaults restores the shipped values."),13,FLinearColor(0.6f,0.7f,0.75f)))->SetPadding(FMargin(0,0,0,4));
+    Box->AddChildToVerticalBox(MakeText(WidgetTree,TEXT("Settings"),16,DTTCyan));
+    Box->AddChildToVerticalBox(MakeText(WidgetTree,TEXT("Saved with the world; the server's values apply. Save writes them, Defaults restores the shipped values."),12,DTTGrey))->SetPadding(FMargin(0,0,0,4));
     UScrollBox* Rows = WidgetTree->ConstructWidget<UScrollBox>();
     UVerticalBoxSlot* RowsSlot = Box->AddChildToVerticalBox(Rows);
     RowsSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill)); RowsSlot->SetPadding(FMargin(0,2));
 
     auto Section = [&](const TCHAR* Title)
     {
-        UTextBlock* T = MakeText(WidgetTree,Title,16,FLinearColor(0.2f,0.8f,1));
+        UTextBlock* T = MakeText(WidgetTree,FString(Title).ToUpper(),12,DTTCyan);
         Rows->AddChild(T);
         if (UScrollBoxSlot* S = Cast<UScrollBoxSlot>(T->Slot)) S->SetPadding(FMargin(0,8,0,2));
     };
@@ -218,8 +250,8 @@ void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
         Rows->AddChild(R);
         if (UScrollBoxSlot* S = Cast<UScrollBoxSlot>(R->Slot)) S->SetPadding(FMargin(0,1,8,1));
         UVerticalBox* Text = WidgetTree->ConstructWidget<UVerticalBox>();
-        Text->AddChildToVerticalBox(MakeText(WidgetTree,Label,14,FLinearColor::White));
-        UTextBlock* H = MakeText(WidgetTree,Hint,11,FLinearColor(0.6f,0.7f,0.75f)); H->SetAutoWrapText(true);
+        Text->AddChildToVerticalBox(MakeText(WidgetTree,Label,14,DTTText));
+        UTextBlock* H = MakeText(WidgetTree,Hint,11,DTTDim); H->SetAutoWrapText(true);
         Text->AddChildToVerticalBox(H);
         AddRowItem(R,Text,3,true);
         AddRowItem(R,Control,3);
@@ -229,6 +261,7 @@ void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
         USpinBox* S = WidgetTree->ConstructWidget<USpinBox>();
         S->SetMinValue(Min); S->SetMaxValue(Max); S->SetMinSliderValue(Min); S->SetMaxSliderValue(Max);
         S->SetDelta(Delta); S->SetAlwaysUsesDeltaSnap(true); S->SetMinFractionalDigits(Delta < 1.0f ? 1 : 0); S->SetMaxFractionalDigits(Delta < 1.0f ? 2 : 0);
+        StyleSpin(S);
         USizeBox* Size = WidgetTree->ConstructWidget<USizeBox>(); Size->SetWidthOverride(120); Size->SetContent(S);
         Row(Label, Hint, Size);
         return S;
@@ -236,6 +269,7 @@ void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
     auto Check = [&](const TCHAR* Label, const TCHAR* Hint) -> UCheckBox*
     {
         UCheckBox* C = WidgetTree->ConstructWidget<UCheckBox>();
+        StyleCheck(C);
         Row(Label, Hint, C);
         return C;
     };
@@ -272,6 +306,7 @@ void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
     SettingAutoNameMaxProducts = Spin(TEXT("Products in the name"), TEXT("How many final products the name lists before it ends in an ellipsis."), 1, 8, 1);
     // Built from this client's own language list: exactly what its options menu offers.
     SettingNamingLanguage = WidgetTree->ConstructWidget<UComboBoxString>();
+    StyleCombo(SettingNamingLanguage);
     NamingLanguageCodes.Reset();
     for (const FDTTLanguageOption& Language : FDTTItemNames::ListLanguages())
     {
@@ -286,7 +321,7 @@ void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
     UHorizontalBox* Buttons = WidgetTree->ConstructWidget<UHorizontalBox>(); Box->AddChildToVerticalBox(Buttons)->SetPadding(FMargin(0,6,0,0));
     SettingsSaveButton = MakeButton(WidgetTree,TEXT("Save")); AddRowItem(Buttons,SettingsSaveButton);
     SettingsDefaultsButton = MakeButton(WidgetTree,TEXT("Defaults")); AddRowItem(Buttons,SettingsDefaultsButton);
-    SettingsStatusText = MakeText(WidgetTree,TEXT("Ready."),14,FLinearColor(0.7f,0.8f,0.85f)); Box->AddChildToVerticalBox(SettingsStatusText)->SetPadding(FMargin(5));
+    SettingsStatusText = MakeText(WidgetTree,TEXT("Ready."),13,DTTGrey); Box->AddChildToVerticalBox(SettingsStatusText)->SetPadding(FMargin(5));
 }
 
 FDTTSettings UDynamicTimeTableWidget::ViewSettings() const
@@ -468,10 +503,13 @@ void UDynamicTimeTableWidget::RebuildRuntimeDisplay()
     RuntimeStationNames.Reset();
 
     const TArray<FDTTStationGroup>& Groups = ViewGroups();
-    SummaryText->SetText(FText::FromString(FString::Printf(
-        TEXT("%d group(s) - %s"),
-        Groups.Num(),
-        IsRemoteClient() ? TEXT("server snapshot") : TEXT("live booking status"))));
+    // Only the Groups page speaks on the status line: this runs on every refresh, whatever tab is open.
+    if (ActiveTab == EDTTTab::Groups)
+    {
+        int32 Stations = 0;
+        for (const FDTTStationGroup& G : Groups) Stations += G.Stations.Num();
+        SetStatusLine(FDTTStatusLine().Count(Groups.Num(), TEXT("groups")).Count(Stations, TEXT("stations")), FString());
+    }
 
     for (const FDTTStationGroup& Group : Groups)
     {
@@ -479,21 +517,24 @@ void UDynamicTimeTableWidget::RebuildRuntimeDisplay()
         RuntimeStationCounts.Add(Group.Stations.Num());
 
         UBorder* Border = WidgetTree->ConstructWidget<UBorder>();
-        Border->SetPadding(FMargin(14));
+        Border->SetBrush(FlatBrush(FLinearColor::White, 8.0f));
+        Border->SetBrushColor(DTTCardTint);
+        Border->SetPadding(FMargin(14, 10));
         GroupScrollBox->AddChild(Border);
+        if (UScrollBoxSlot* S = Cast<UScrollBoxSlot>(Border->Slot)) S->SetPadding(FMargin(0, 0, 0, 8));
         RuntimeGroupBorders.Add(Border);
 
         UVerticalBox* Panel = WidgetTree->ConstructWidget<UVerticalBox>();
         Border->SetContent(Panel);
 
-        UTextBlock* GroupText = MakeText(WidgetTree, Group.GroupName, 21, FLinearColor(0.2f,0.8f,1));
+        UTextBlock* GroupText = MakeText(WidgetTree, Group.GroupName, 16, DTTCyan);
         Panel->AddChildToVerticalBox(GroupText);
         RuntimeGroupTexts.Add(GroupText);
 
         for (const FDTTStationEntry& Entry : Group.Stations)
         {
             UTextBlock* StationText = MakeText(WidgetTree,
-                UDynamicTimeTableSubsystem::StripStationTag(Entry.DisplayName), 16, FLinearColor::White);
+                UDynamicTimeTableSubsystem::StripStationTag(Entry.DisplayName), 13, DTTText);
             Panel->AddChildToVerticalBox(StationText);
             RuntimeStationTexts.Add(StationText);
             RuntimeStationNames.Add(Entry.DisplayName);
@@ -505,10 +546,13 @@ void UDynamicTimeTableWidget::RebuildRuntimeDisplay()
 void UDynamicTimeTableWidget::UpdateRuntimeDisplayInPlace()
 {
     const TArray<FDTTStationGroup>& Groups = ViewGroups();
-    SummaryText->SetText(FText::FromString(FString::Printf(
-        TEXT("%d group(s) - %s"),
-        Groups.Num(),
-        IsRemoteClient() ? TEXT("server snapshot") : TEXT("live booking status"))));
+    // Only the Groups page speaks on the status line: this runs on every refresh, whatever tab is open.
+    if (ActiveTab == EDTTTab::Groups)
+    {
+        int32 Stations = 0;
+        for (const FDTTStationGroup& G : Groups) Stations += G.Stations.Num();
+        SetStatusLine(FDTTStatusLine().Count(Groups.Num(), TEXT("groups")).Count(Stations, TEXT("stations")), FString());
+    }
 
     int32 FlatStationIndex = 0;
     for (int32 GroupIndex = 0; GroupIndex < Groups.Num(); ++GroupIndex)
@@ -540,9 +584,7 @@ void UDynamicTimeTableWidget::UpdateRuntimeDisplayInPlace()
 
         const bool bOverloaded = Assigned > Target;
         RuntimeGroupBorders[GroupIndex]->SetBrushColor(
-            bOverloaded
-                ? FLinearColor(0.25f,0.035f,0.025f,0.95f)
-                : FLinearColor(0.06f,0.10f,0.13f,0.95f));
+            bOverloaded ? DTTCardTintWarn : DTTCardTint);
         RuntimeGroupTexts[GroupIndex]->SetText(FText::FromString(FString::Printf(
             TEXT("%s  [%s]    %d/%d%s"),
             *Group.GroupName,
@@ -551,7 +593,7 @@ void UDynamicTimeTableWidget::UpdateRuntimeDisplayInPlace()
             Target,
             bOverloaded ? TEXT("  OVERLOAD") : TEXT(""))));
         RuntimeGroupTexts[GroupIndex]->SetColorAndOpacity(FSlateColor(
-            bOverloaded ? FLinearColor::Red : FLinearColor(0.2f,0.8f,1)));
+            bOverloaded ? DTTRed : DTTCyan));
 
         for (const FDTTStationEntry& Entry : Group.Stations)
         {
@@ -575,15 +617,15 @@ void UDynamicTimeTableWidget::UpdateRuntimeDisplayInPlace()
                 bStationOverloaded ? TEXT("  OVERLOAD") : TEXT(""),
                 bStationUnreachable ? TEXT("  NOT ON THIS ROAD NETWORK") : TEXT(""))));
             StationText->SetColorAndOpacity(FSlateColor(
-                bStationOverloaded ? FLinearColor::Red
-                    : bStationUnreachable ? FLinearColor(1.0f,0.55f,0.1f)
-                    : FLinearColor::White));
+                bStationOverloaded ? DTTRed
+                    : bStationUnreachable ? DTTOrange
+                    : DTTText));
         }
     }
 }
 void UDynamicTimeTableWidget::RefreshEditorControls(){if(bRefreshingControls)return;bRefreshingControls=true;const auto&Groups=ViewGroups();if(!SelectedGroupId.IsValid()||!Groups.ContainsByPredicate([&](const FDTTStationGroup&G){return G.GroupId==SelectedGroupId;}))SelectedGroupId=Groups.Num()?Groups[0].GroupId:FGuid();GroupSelector->ClearOptions();GroupOptionIds.Reset();const FDTTStationGroup*Selected=nullptr;for(const auto&G:Groups){GroupSelector->AddOption(G.GroupName);GroupOptionIds.Add(G.GroupId);if(G.GroupId==SelectedGroupId)Selected=&G;}if(Selected){GroupSelector->SetSelectedOption(Selected->GroupName);GroupNameInput->SetText(FText::FromString(Selected->GroupName));}else GroupNameInput->SetText(FText::GetEmpty());GroupStationSelector->ClearOptions();if(Selected)for(const auto&E:Selected->Stations)GroupStationSelector->AddOption(E.DisplayName);if(GroupStationSelector->GetOptionCount()>0)GroupStationSelector->SetSelectedIndex(0);const EDTTGroupKind Kind=Selected?Selected->Kind:EDTTGroupKind::Train;const bool bTruck=Kind==EDTTGroupKind::Truck;TArray<FString>All;if(IsRemoteClient()&&RemoteCallObject)All=bTruck?RemoteCallObject->GetSnapshot().AvailableTruckStations:RemoteCallObject->GetSnapshot().AvailableStations;else if(auto*S=GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>()){if(bTruck)S->GetAllDockingStationNames(All);else S->GetAllVanillaStationNames(All);}AvailableStationSelector->ClearOptions();// A rail station and a docking station may share a name, so only groups of the same kind claim it.
 for(const FString&N:All)if(!Groups.ContainsByPredicate([&](const FDTTStationGroup&G){return G.Kind==Kind&&G.Stations.ContainsByPredicate([&](const FDTTStationEntry&E){return E.DisplayName==N;});}))AvailableStationSelector->AddOption(N);if(AvailableStationSelector->GetOptionCount()>0)AvailableStationSelector->SetSelectedIndex(0);bRefreshingControls=false;HandleGroupStationSelectionChanged(GroupStationSelector->GetSelectedOption(),ESelectInfo::Direct);}
-void UDynamicTimeTableWidget::SetEditorStatus(const FString&M,bool E){const FSlateColor C(E?FLinearColor::Red:FLinearColor(0.3f,1,0.5f));EditorStatusText->SetText(FText::FromString(M));EditorStatusText->SetColorAndOpacity(C);if(SettingsStatusText){SettingsStatusText->SetText(FText::FromString(M));SettingsStatusText->SetColorAndOpacity(C);}if(StatusText){StatusText->SetText(FText::FromString(M));StatusText->SetColorAndOpacity(C);}}FString UDynamicTimeTableWidget::GetSelectedGroupStationName()const{return GroupStationSelector?GroupStationSelector->GetSelectedOption():FString();}
+void UDynamicTimeTableWidget::SetEditorStatus(const FString&M,bool E){const FSlateColor C(E?DTTRed:DTTGreen);EditorStatusText->SetText(FText::FromString(M));EditorStatusText->SetColorAndOpacity(C);if(SettingsStatusText){SettingsStatusText->SetText(FText::FromString(M));SettingsStatusText->SetColorAndOpacity(C);}if(StatusText){StatusText->SetText(FText::FromString(M));StatusText->SetColorAndOpacity(C);}}FString UDynamicTimeTableWidget::GetSelectedGroupStationName()const{return GroupStationSelector?GroupStationSelector->GetSelectedOption():FString();}
 void UDynamicTimeTableWidget::HandleGroupSelectionChanged(FString Item,ESelectInfo::Type){if(bRefreshingControls)return;int32 I=GroupSelector->FindOptionIndex(Item);if(GroupOptionIds.IsValidIndex(I)){SelectedGroupId=GroupOptionIds[I];RefreshEditorControls();}}
 void UDynamicTimeTableWidget::HandleGroupStationSelectionChanged(FString Item,ESelectInfo::Type){if(Item.IsEmpty())return;if(const auto*G=ViewGroups().FindByPredicate([&](const FDTTStationGroup&X){return X.GroupId==SelectedGroupId;}))if(const auto*E=G->Stations.FindByPredicate([&](const FDTTStationEntry&X){return X.DisplayName==Item;}))TargetSlotsInput->SetValue(E->TargetSlots);}
 void UDynamicTimeTableWidget::HandleCreateGroupClicked(){FString N=NewGroupNameInput->GetText().ToString().TrimStartAndEnd();if(N.IsEmpty()){SetEditorStatus(TEXT("Enter a group name."),true);return;}const EDTTGroupKind Kind=(NewGroupKindSelector&&NewGroupKindSelector->GetSelectedIndex()==1)?EDTTGroupKind::Truck:EDTTGroupKind::Train;if(IsRemoteClient()){if(RemoteCallObject)RemoteCallObject->RequestCreateGroup(N,Kind);else SetEditorStatus(TEXT("Server connection unavailable."),true);}else if(auto*S=GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>()){SelectedGroupId=S->CreateGroup(N,Kind);RefreshData();}NewGroupNameInput->SetText(FText::GetEmpty());}

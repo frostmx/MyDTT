@@ -26,7 +26,7 @@ namespace
 void UDynamicTimeTableWidget::BuildDispatchHeader(UHorizontalBox* Row)
 {
     if (!Row) return;
-    HeadCell(WidgetTree, Row, FString(), DTTColIcon);
+    HeadCell(WidgetTree, Row, FString(), DTTColRowTile, HAlign_Left, FMargin(0, 0, 8, 0));
     HeadCell(WidgetTree, Row, TEXT("RESOURCE"), DTTColResource);
     HeadCell(WidgetTree, Row, TEXT("PRODUCERS"), DTTColProducers);
     HeadCell(WidgetTree, Row, TEXT("REQUESTERS - STOCK AGAINST THE CALL LINE"), 0.0f);
@@ -86,10 +86,23 @@ void UDynamicTimeTableWidget::RefreshDispatchDisplay()
         for (const FDTTDispatchRow* Row : Spec.Rows) Key += FString::Printf(TEXT("|%s:%d"), *Row->DockingPathNodeGuid.ToString(EGuidFormats::Short), int32(Row->Role));
         Keys.Add(MoveTemp(Key));
     }
-    if (SummaryText)
     {
-        SummaryText->SetText(FText::FromString(FString::Printf(TEXT("%d dispatch row(s), %d open, %d depot(s) - %s"),
-            Rows.Num(), Open, DepotCount, IsRemoteClient() ? TEXT("server snapshot") : TEXT("live"))));
+        const int32 OverdueMinutes = ViewSettings().OverdueRequestMinutes;
+        int32 Overdue = 0, Claimed = 0, Wrong = 0;
+        for (const FDTTDispatchRow& Row : Rows)
+        {
+            if (Row.bModeKnown && !Row.bModeMatches && !Row.bDepot && !Row.bFuelStop) ++Wrong;
+            if (!Row.bOpen || Row.Role == EDTTDispatchRole::Producer || Row.bDepot || Row.bFuelStop) continue;
+            if (!Row.ClaimOwner.IsEmpty()) { ++Claimed; continue; }
+            if (OverdueMinutes > 0 && Row.WaitingSeconds >= OverdueMinutes * 60) ++Overdue;
+        }
+        FDTTStatusLine Line;
+        Line.Count(Rows.Num(), TEXT("dispatch rows")).Count(Open - Claimed, TEXT("waiting"), DTTYellow)
+            .Count(Claimed, TEXT("claimed"), DTTGreen);
+        if (Overdue > 0) Line.Count(Overdue, TEXT("overdue"), DTTRed);
+        if (Wrong > 0) Line.Count(Wrong, TEXT("in the wrong mode"), DTTRed);
+        Line.Count(DepotCount, TEXT("depots"));
+        SetStatusLine(Line, FString());
     }
 
     SyncCards(DispatchScrollBox, DispatchCards, Keys, [&](int32 Index, FDTTCardSink& Sink)
@@ -156,8 +169,11 @@ void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, cons
     Toggle.CardKey = CardId;
     UHorizontalBox* Line = Sink.Row(Body, DTTRowHeight, Toggle, FLinearColor::White);
 
-    Sink.Icon(Line, List.Num() > 0 ? IconFor(List[0]->ItemClass) : nullptr, DTTColIcon, FMargin(0, 0, 6, 0), true);
-    Sink.Cell(Line, Resource, 15, Accent, DTTColResource);
+    const TSoftClassPtr<UFGItemDescriptor> ResourceItem = List.Num() > 0 ? List[0]->ItemClass : TSoftClassPtr<UFGItemDescriptor>();
+    Sink.Tile(Line, IconFor(ResourceItem), TileColorFor(ResourceItem), DTTColRowTile);
+    // The name in the text colour and the state in its meaning's: an amber resource name read as
+    // a warning about the item, which it never was.
+    Sink.Cell(Line, Resource, 14, Overdue > 0 ? DTTRed : DTTText, DTTColResource);
 
     FString ProducerText;
     if (Producers == 0) ProducerText = TEXT("no producer");
@@ -224,7 +240,7 @@ void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, cons
         if (Row->Role == EDTTDispatchRole::Producer)
         {
             UVerticalBox* Item = Sink.VBox(Left, FMargin(0, 2, 0, 4));
-            Sink.Text(Item, DTTStationName(Row->StationName), 14, Row->bModeMatches ? FLinearColor::White : DTTRed, true);
+            Sink.Text(Item, DTTStationName(Row->StationName), 14, Row->bModeMatches ? DTTText : DTTRed, true);
             FString Detail = FString::Printf(TEXT("stock %s  -  %s"), *DTTStacks(Row->StockStacks), Mode);
             if (!Row->bModeMatches) Detail += TEXT("  -  inactive: a producer must be in LOAD mode");
             Sink.Text(Item, Detail, 12, Row->bModeMatches ? DTTGrey : DTTRed, true);
@@ -249,7 +265,7 @@ void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, cons
         else if (!Row->ClaimOwner.IsEmpty()) StatusLine = FString::Printf(TEXT("claimed by %s"), *Row->ClaimOwner);
 
         UVerticalBox* Item = Sink.VBox(Right, FMargin(0, 2, 0, 4));
-        Sink.Text(Item, DTTStationName(Row->StationName), 14, Row->bModeMatches ? FLinearColor::White : DTTRed, true);
+        Sink.Text(Item, DTTStationName(Row->StationName), 14, Row->bModeMatches ? DTTText : DTTRed, true);
         FString Detail = Row->StockStacks >= 0
             ? (Row->CapacityStacks > 0 ? FString::Printf(TEXT("stock %d / %d stacks"), Row->StockStacks, Row->CapacityStacks) : FString::Printf(TEXT("stock %d stacks"), Row->StockStacks))
             : FString(TEXT("stock unknown"));
@@ -278,7 +294,7 @@ void UDynamicTimeTableWidget::PopulateDepotCard(const TArray<const FDTTDispatchR
     for (const FDTTDispatchRow* Row : Depots)
     {
         UVerticalBox* Item = Sink.VBox(Body, FMargin(0, 2, 0, 4));
-        Sink.Text(Item, DTTStationName(Row->StationName), 14, FLinearColor::White, true);
+        Sink.Text(Item, DTTStationName(Row->StationName), 14, DTTText, true);
         FString Detail = Row->ClaimOwner.IsEmpty() ? TEXT("free") : FString::Printf(TEXT("claimed by %s"), *Row->ClaimOwner);
         // The note is "docked=<truck|-> held=<yes|no>" for the chat; say it in words here.
         const int32 DockedAt = Row->Note.Find(TEXT("docked=")), HeldAt = Row->Note.Find(TEXT(" held="));
@@ -296,6 +312,6 @@ void UDynamicTimeTableWidget::PopulateFuelCard(const TArray<const FDTTDispatchRo
     for (const FDTTDispatchRow* Row : FuelStops)
     {
         UVerticalBox* Item = Sink.VBox(Body, FMargin(0, 2, 0, 4));
-        Sink.Text(Item, DTTStationName(Row->StationName), 14, FLinearColor::White, true);
+        Sink.Text(Item, DTTStationName(Row->StationName), 14, DTTText, true);
     }
 }
