@@ -377,6 +377,65 @@ struct FDTTTruckRow
 };
 
 /**
+ * One docking station on the Stations tab: everything a table of the whole map needs, and
+ * nothing that costs a string. A world with four hundred docks would put sixty-odd KB of
+ * names on the wire against a 64 KB call, so the two names ride as places in the snapshot's
+ * dock-name table and the flags ride in one byte.
+ */
+USTRUCT(BlueprintType)
+struct FDTTStationRow
+{
+    GENERATED_BODY()
+
+    /** Places in FDTTClientSnapshot::DockNames; -1 for a name there is none of. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 NameId = INDEX_NONE;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 ResourceNameId = INDEX_NONE;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 GroupNameId = INDEX_NONE;
+    /** Place in FDTTClientSnapshot::TruckNames: who holds the request, or -1 for nobody. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 ClaimTruckId = INDEX_NONE;
+    /** The names themselves on a listen host, where nothing is sent and nothing is interned. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString Name;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString ResourceId;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString GroupName;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString ClaimOwner;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TSoftClassPtr<class UFGItemDescriptor> ItemClass;
+    /** The dock itself, for the row's controls; see FDTTDispatchRow::Dock. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TObjectPtr<AFGDockingStationIdentifier> Dock = nullptr;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FGuid DockingPathNodeGuid;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") EDTTDispatchRole Role = EDTTDispatchRole::None;
+    /**
+     * The limit as the name spells it, not as the dispatcher works it out: this is the number
+     * the row edits, and writing back an effective value would bake a default into the name.
+     * 0 when the tag carries none.
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 TagThreshold = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 StockStacks = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 TriggerStacks = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 ThresholdStacks = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 CapacityStacks = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 WaitingSeconds = 0;
+    /** EDTTStationFlags; one byte instead of eight bools, which is 7 bytes a row. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") uint8 Flags = 0;
+};
+
+/** The bits of FDTTStationRow::Flags. */
+namespace EDTTStationFlags
+{
+    enum Type : uint8
+    {
+        None        = 0,
+        ModeKnown   = 1 << 0,
+        LoadMode    = 1 << 1,
+        ModeMatches = 1 << 2,
+        Fluid       = 1 << 3,
+        Depot       = 1 << 4,
+        FuelStop    = 1 << 5,
+        Stay        = 1 << 6,
+        Open        = 1 << 7,
+    };
+}
+
+/**
  * The tunables. Saved with the world and edited from the Settings tab of the window (or
  * "/dtt set"); the server's copy is the one that counts, a remote client only proposes.
  */

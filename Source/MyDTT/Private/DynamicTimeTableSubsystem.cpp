@@ -6239,6 +6239,93 @@ void UDynamicTimeTableSubsystem::UpdateRequesterWaitTimes()
         if (!Waiting.Contains(It.Key())) { OverdueRequestsLogged.Remove(It.Key()); It.RemoveCurrent(); }
 }
 
+void UDynamicTimeTableSubsystem::BuildStationRows(TArray<FDTTStationRow>& OutRows) const
+{
+    OutRows.Reset();
+    const UWorld* World = GetWorld();
+    const double Now = IsValid(World) ? World->GetTimeSeconds() : 0.0;
+
+    // A depot or a fuel stop carries no resource tag, so it is in no FDTTDispatchStation; the
+    // table is of docks, not of dispatch entries, and those two have to be in it as well.
+    TSet<FGuid> Seen;
+    auto FillCommon = [&](FDTTStationRow& Row, AFGDockingStationIdentifier* Identifier, const FGuid& Guid, const FString& FullName)
+    {
+        const AFGBuildableDockingStation* Dock = IsValid(Identifier) ? Identifier->GetStation() : nullptr;
+        Row.Dock = Identifier;
+        Row.DockingPathNodeGuid = Guid;
+        Row.Name = StripAllTags(FullName).TrimStartAndEnd();
+        if (Row.Name.IsEmpty()) Row.Name = FullName.TrimStartAndEnd();
+        FString Base, GroupName;
+        int32 Slots = 1;
+        if (ParseStationTag(FullName, Base, GroupName, Slots)) Row.GroupName = GroupName;
+        if (IsValid(Dock))
+        {
+            Row.Flags |= EDTTStationFlags::ModeKnown;
+            if (Dock->GetIsInLoadMode()) Row.Flags |= EDTTStationFlags::LoadMode;
+        }
+        if (DispatchDepotGuids.Contains(Guid)) Row.Flags |= EDTTStationFlags::Depot;
+        if (DispatchFuelStopGuids.Contains(Guid)) Row.Flags |= EDTTStationFlags::FuelStop;
+    };
+
+    for (const FDTTDispatchStation& Station : DispatchStations)
+    {
+        AFGDockingStationIdentifier* Identifier = Station.DockingStationIdentifier.Get();
+        const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(Station.ResourceId);
+        FDTTStationRow& Row = OutRows.AddDefaulted_GetRef();
+        Seen.Add(Station.DockingPathNodeGuid);
+        FillCommon(Row, Identifier, Station.DockingPathNodeGuid, Station.DisplayName);
+        Row.ResourceId = Station.ResourceId;
+        Row.ItemClass = TSoftClassPtr<UFGItemDescriptor>(ItemClass.Get());
+        Row.Role = GetEffectiveDispatchRole(Station);
+        Row.TagThreshold = FMath::Max(0, Station.Threshold);
+        if (Station.bStayUntilEmpty) Row.Flags |= EDTTStationFlags::Stay;
+        if (DoesDispatchStationMatchMode(Station)) Row.Flags |= EDTTStationFlags::ModeMatches;
+        Row.StockStacks = ItemClass ? ReadDockStockInStacks(Identifier, ItemClass) : INDEX_NONE;
+        FDTTRequestLevels Levels;
+        if (GetRequestLevels(Station, ItemClass, Levels))
+        {
+            Row.TriggerStacks = Levels.Trigger;
+            Row.ThresholdStacks = Levels.Target;
+            Row.CapacityStacks = Levels.Capacity;
+            if (Levels.bFluid) Row.Flags |= EDTTStationFlags::Fluid;
+        }
+        if (Row.Role == EDTTDispatchRole::Producer) continue;
+
+        if ((Row.Flags & EDTTStationFlags::ModeMatches) && Row.StockStacks >= 0 && Row.TriggerStacks > 0 && Row.StockStacks < Row.TriggerStacks)
+            Row.Flags |= EDTTStationFlags::Open;
+        if (const double* Since = RequesterOpenSinceWorldSeconds.Find(Station.DockingPathNodeGuid))
+            Row.WaitingSeconds = FMath::Max(0, FMath::RoundToInt(Now - *Since));
+        if (const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Owner = RequesterClaims.Find(Station.DockingPathNodeGuid))
+        {
+            AFGWheeledVehicleIdentifier* Vehicle = Owner->Get();
+            Row.ClaimOwner = IsValid(Vehicle) ? DTSVehicleName(Vehicle) : TEXT("<invalid vehicle>");
+        }
+    }
+
+    TArray<FGuid> Others = DispatchDepotGuids.Array();
+    Others.Append(DispatchFuelStopGuids.Array());
+    for (const FGuid& Guid : Others)
+    {
+        if (Seen.Contains(Guid)) continue;
+        Seen.Add(Guid);
+        AFGDockingStationIdentifier* Identifier = FindDockByPathNode(Guid);
+        FDTTStationRow& Row = OutRows.AddDefaulted_GetRef();
+        FillCommon(Row, Identifier, Guid, IsValid(Identifier) ? Identifier->GetStationName().ToString() : FString());
+        Row.Flags |= EDTTStationFlags::ModeMatches;
+        if (const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Claim = DepotClaims.Find(Guid))
+            Row.ClaimOwner = Claim->IsValid() ? DTSVehicleName(Claim->Get()) : TEXT("<invalid vehicle>");
+    }
+
+    // A table sorts by what the eye looks along: the name. Ties by guid so the order is stable
+    // between two builds of the same world, which is what keeps the rows from swapping places.
+    OutRows.Sort([](const FDTTStationRow& A, const FDTTStationRow& B)
+    {
+        const int32 Compare = A.Name.Compare(B.Name, ESearchCase::IgnoreCase);
+        if (Compare != 0) return Compare < 0;
+        return A.DockingPathNodeGuid.ToString() < B.DockingPathNodeGuid.ToString();
+    });
+}
+
 void UDynamicTimeTableSubsystem::BuildDispatchRows(TArray<FDTTDispatchRow>& OutRows, const FString& ResourceFilter) const
 {
     OutRows.Reset();

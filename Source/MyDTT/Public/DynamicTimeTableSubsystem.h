@@ -79,6 +79,13 @@ public:
     void GetTruckWhyLines(const FString& TruckQuery, TArray<FString>& OutLines) const;
     /** Rows behind the Dispatch tab, the chat listing and the snapshot; depots and fuel stops only with no filter. */
     void BuildDispatchRows(TArray<FDTTDispatchRow>& OutRows, const FString& ResourceFilter = FString()) const;
+    /**
+     * Every docking station the mod knows of, one row each, for the Stations tab: the dispatch
+     * stations plus the depots and the fuel stops, which carry no resource tag and so appear in
+     * no dispatch row of their own. Same helpers as BuildDispatchRows - stock, levels, mode -
+     * so the two tables can never tell different stories about one dock.
+     */
+    void BuildStationRows(TArray<FDTTStationRow>& OutRows) const;
     /** Rows behind the Trucks tab, the chat listing and the snapshot. */
     void BuildTruckRows(TArray<FDTTTruckRow>& OutRows, const FString& ResourceFilter = FString()) const;
     static FString FormatDispatchRow(const FDTTDispatchRow& Row);

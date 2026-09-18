@@ -44,6 +44,15 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
                 X.TruckRows.SetNum(MaxSnapshotRows);
             }
         }
+        if (X.Sections & EDTTSnapshotSection::Stations)
+        {
+            S->BuildStationRows(X.StationRows);
+            if (X.StationRows.Num() > MaxSnapshotRows)
+            {
+                UE_LOG(LogDynamicTimeTableRCO, Warning, TEXT("SNAPSHOT_TRUNCATED Section=Stations Rows=%d Max=%d"), X.StationRows.Num(), MaxSnapshotRows);
+                X.StationRows.SetNum(MaxSnapshotRows);
+            }
+        }
     }
     // Names go into the snapshot's two tables and the rows keep a place in them. This is what
     // holds the route stops to a few KB; see FDTTClientSnapshot for the arithmetic. It happens
@@ -71,6 +80,16 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
             R.ClaimTruckId = Intern(SeenTrucks, X.TruckNames, R.ClaimOwner);
             R.ClaimOwner.Empty();
         }
+        // The station table is the widest of the three: four names a row, of which the resource
+        // and the group repeat across the whole world.
+        for (FDTTStationRow& R : X.StationRows)
+        {
+            R.NameId = Intern(SeenDocks, X.DockNames, R.Name);
+            R.ResourceNameId = Intern(SeenDocks, X.DockNames, R.ResourceId);
+            R.GroupNameId = Intern(SeenDocks, X.DockNames, R.GroupName);
+            R.ClaimTruckId = Intern(SeenTrucks, X.TruckNames, R.ClaimOwner);
+            R.Name.Empty(); R.ResourceId.Empty(); R.GroupName.Empty(); R.ClaimOwner.Empty();
+        }
     }
 
     // Rough size, for the log: strings dominate, everything else is a few bytes per row. The row
@@ -84,8 +103,11 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
     for (const auto& L : X.RuntimeLoads) Bytes += 20 + L.StationName.Len();
     for (const auto& R : X.DispatchRows) Bytes += 56 + R.ResourceId.Len() + R.StationName.Len() + R.Note.Len();
     for (const auto& R : X.TruckRows) Bytes += 48 + R.Name.Len() + R.ResourceId.Len() + R.DepotName.Len() + R.PlannedSummary.Len() + R.CargoNote.Len() + 4 * R.RouteStopIds.Num();
-    UE_LOG(LogDynamicTimeTableRCO, Verbose, TEXT("SNAPSHOT_SIZE Sections=%d Groups=%d DispatchRows=%d TruckRows=%d DockNames=%d TruckNames=%d ApproxBytes=%lld"),
-        X.Sections, X.Groups.Num(), X.DispatchRows.Num(), X.TruckRows.Num(), X.DockNames.Num(), X.TruckNames.Num(), Bytes);
+    // A station row is all numbers once its four names are interned, which is the whole reason
+    // the table exists: 52 bytes apiece instead of the 160-odd the names alone would cost.
+    Bytes += 52 * X.StationRows.Num();
+    UE_LOG(LogDynamicTimeTableRCO, Verbose, TEXT("SNAPSHOT_SIZE Sections=%d Groups=%d DispatchRows=%d TruckRows=%d StationRows=%d DockNames=%d TruckNames=%d ApproxBytes=%lld"),
+        X.Sections, X.Groups.Num(), X.DispatchRows.Num(), X.TruckRows.Num(), X.StationRows.Num(), X.DockNames.Num(), X.TruckNames.Num(), Bytes);
     Client_ReceiveSnapshot(X);
 }
 void UDynamicTimeTableRemoteCallObject::RequestSnapshot(int32 Sections){Server_RequestSnapshot(ProtocolVersion,Sections);}void UDynamicTimeTableRemoteCallObject::RequestCreateGroup(const FString&N,EDTTGroupKind K){Server_CreateGroup(N,K,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestRenameGroup(FGuid G,const FString&N){Server_RenameGroup(G,N,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestDeleteGroup(FGuid G){Server_DeleteGroup(G,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestAddStation(FGuid G,const FString&N){Server_AddStation(G,N,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestRemoveStation(FGuid G,const FString&N){Server_RemoveStation(G,N,ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestSetTargetSlots(FGuid G,const FString&N,int32 V){Server_SetTargetSlots(G,N,FMath::Clamp(V,1,999),ProtocolVersion);}void UDynamicTimeTableRemoteCallObject::RequestRecalculate(){Server_Recalculate(ProtocolVersion);}
@@ -140,6 +162,17 @@ void UDynamicTimeTableRemoteCallObject::Client_ReceiveSnapshot_Implementation(co
         {
             R.RouteStops.Reset(R.RouteStopIds.Num());
             for (const int32 Id : R.RouteStopIds) R.RouteStops.Add(Expand(X.DockNames, Id));
+        }
+    }
+    if (X.Sections & EDTTSnapshotSection::Stations)
+    {
+        CachedSnapshot.StationRows = X.StationRows;
+        for (FDTTStationRow& R : CachedSnapshot.StationRows)
+        {
+            R.Name = Expand(X.DockNames, R.NameId);
+            R.ResourceId = Expand(X.DockNames, R.ResourceNameId);
+            R.GroupName = Expand(X.DockNames, R.GroupNameId);
+            R.ClaimOwner = Expand(X.TruckNames, R.ClaimTruckId);
         }
     }
     OnSnapshotChanged.Broadcast();
