@@ -391,8 +391,18 @@ struct FDTTCardSink
             USizeBox* Box = Tree->ConstructWidget<USizeBox>();
             if (Width > 0.0f) Box->SetWidthOverride(Width);
             T = Text(nullptr, Value, Size, Color);
+            // A size box holds a column's width but does not stop the text inside it from drawing
+            // past that: a long station name printed straight over the next column. The ellipsis
+            // says the name goes on, which a clean cut would not.
+            T->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+            Box->SetClipping(EWidgetClipping::ClipToBounds);
             Box->SetContent(T);
-            if (USizeBoxSlot* S = Cast<USizeBoxSlot>(T->Slot)) { S->SetHorizontalAlignment(Align); S->SetVerticalAlignment(VAlign_Center); }
+            // The text fills its column and justifies itself inside it. Aligning the slot
+            // instead would hand the text its own desired width, which is exactly the width
+            // the column is there to limit, and the ellipsis would never appear.
+            T->SetJustification(Align == HAlign_Right ? ETextJustify::Right
+                : (Align == HAlign_Center ? ETextJustify::Center : ETextJustify::Left));
+            if (USizeBoxSlot* S = Cast<USizeBoxSlot>(T->Slot)) { S->SetHorizontalAlignment(HAlign_Fill); S->SetVerticalAlignment(VAlign_Center); }
             if (Line)
             {
                 Line->AddChild(Box);
