@@ -139,6 +139,15 @@ namespace DTTUI
     inline constexpr float DTTColTruck = 232.0f;
     inline constexpr float DTTColPhase = 124.0f;
     inline constexpr float DTTColCargo = 108.0f;
+    // Stations table.
+    inline constexpr float DTTColCheck = 26.0f;
+    inline constexpr float DTTColGroup = 104.0f;
+    inline constexpr float DTTColRole = 78.0f;
+    inline constexpr float DTTColMode = 64.0f;
+    inline constexpr float DTTColStock = 62.0f;
+    inline constexpr float DTTColLimit = 48.0f;
+    /** One station's own bar, wider than the eight that share a resource row. */
+    inline constexpr float DTTStockBarWide = 96.0f;
     /** One requester's bar inside a resource row; eight of them fit before the row gives up. */
     inline constexpr float DTTStockBarWidth = 54.0f;
     inline constexpr int32 DTTMaxStockBars = 8;

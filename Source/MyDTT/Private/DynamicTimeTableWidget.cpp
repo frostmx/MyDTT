@@ -5,6 +5,7 @@
 #include "DTTItemNames.h"
 #include "FGPlayerController.h"
 #include "WheeledVehicles/FGWheeledVehicleIdentifier.h"
+#include "WheeledVehicles/FGDockingStationIdentifier.h"
 #include "Engine/Texture2D.h"
 #include "Resources/FGItemDescriptor.h"
 #include "Blueprint/WidgetTree.h"
@@ -80,6 +81,7 @@ void UDynamicTimeTableWidget::NativeConstruct()
     GroupsTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleGroupsTabClicked);
     DispatchTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleDispatchTabClicked);
     TrucksTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleTrucksTabClicked);
+    StationsTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleStationsTabClicked);
     SettingsTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsTabClicked);
     SettingsSaveButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsSaveClicked);
     SettingsDefaultsButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsDefaultsClicked);
@@ -252,6 +254,7 @@ void UDynamicTimeTableWidget::RefreshRuntimeDisplay()
 {
     if (ActiveTab == EDTTTab::Dispatch) { RefreshDispatchDisplay(); return; }
     if (ActiveTab == EDTTTab::Trucks) { RefreshTruckDisplay(); return; }
+    if (ActiveTab == EDTTTab::Stations) { RefreshStationDisplay(); return; }
     if (ActiveTab == EDTTTab::Settings) return;
     if (!GroupScrollBox) return;
 
@@ -276,6 +279,7 @@ int32 UDynamicTimeTableWidget::GetRequestedSections() const
     {
     case EDTTTab::Dispatch: return EDTTSnapshotSection::Dispatch;
     case EDTTTab::Trucks: return EDTTSnapshotSection::Trucks;
+    case EDTTTab::Stations: return EDTTSnapshotSection::Stations;
     default: return EDTTSnapshotSection::Groups;
     }
 }
@@ -299,6 +303,63 @@ void UDynamicTimeTableWidget::HandleRowAction(const FDTTRowTarget& Target)
     {
         ExpandedTruckKey = ExpandedTruckKey == Target.CardKey ? FString() : Target.CardKey;
         RefreshTruckDisplay();
+        return;
+    }
+    if (Target.Action == EDTTRowAction::ToggleExpandStation)
+    {
+        ExpandedStationKey = ExpandedStationKey == Target.CardKey ? FString() : Target.CardKey;
+        RefreshStationDisplay();
+        return;
+    }
+    // A tick is the window's own business as well: the selection lives here, and the box is only
+    // ever told what it is.
+    if (Target.Action == EDTTRowAction::StationSelect)
+    {
+        if (SelectedStations.Contains(Target.Guid)) SelectedStations.Remove(Target.Guid);
+        else SelectedStations.Add(Target.Guid);
+        RefreshStationDisplay();
+        return;
+    }
+
+    // The station operations: the same shape as the truck ones below, against the dock handle.
+    if (Target.Action == EDTTRowAction::StationStayOn || Target.Action == EDTTRowAction::StationStayOff
+        || Target.Action == EDTTRowAction::StationClearClaim || Target.Action == EDTTRowAction::StationSendNow)
+    {
+        AFGDockingStationIdentifier* Dock = Target.Dock.Get();
+        if (!IsValid(Dock))
+        {
+            SetEditorStatus(TEXT("dTT: that station is gone."), true);
+            if (PreviousArmed != EDTTRowAction::None) RefreshRuntimeDisplay();
+            return;
+        }
+        if (IsRemoteClient())
+        {
+            if (!RemoteCallObject) { SetEditorStatus(TEXT("dTT: no connection to the server."), true); return; }
+            switch (Target.Action)
+            {
+            case EDTTRowAction::StationStayOn: RemoteCallObject->RequestSetDockStay(Dock, true); break;
+            case EDTTRowAction::StationStayOff: RemoteCallObject->RequestSetDockStay(Dock, false); break;
+            case EDTTRowAction::StationClearClaim: RemoteCallObject->RequestClearDockClaim(Target.Guid); break;
+            case EDTTRowAction::StationSendNow: RemoteCallObject->RequestSendTruckNow(Dock); break;
+            default: return;
+            }
+            SetEditorStatus(TEXT("dTT: asked the server..."));
+            return;
+        }
+        UDynamicTimeTableSubsystem* StationSubsystem = GetWorld() ? GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>() : nullptr;
+        if (!StationSubsystem) { SetEditorStatus(TEXT("dTT: subsystem unavailable."), true); return; }
+        FString StationMessage(TEXT("dTT: nothing to do."));
+        bool bStationOk = false;
+        switch (Target.Action)
+        {
+        case EDTTRowAction::StationStayOn: bStationOk = StationSubsystem->SetDockStay(Dock, true, StationMessage); break;
+        case EDTTRowAction::StationStayOff: bStationOk = StationSubsystem->SetDockStay(Dock, false, StationMessage); break;
+        case EDTTRowAction::StationClearClaim: bStationOk = StationSubsystem->ClearRequesterClaim(Target.Guid, StationMessage); break;
+        case EDTTRowAction::StationSendNow: bStationOk = StationSubsystem->SendTruckToRequester(Dock, StationMessage); break;
+        default: return;
+        }
+        SetEditorStatus(StationMessage, !bStationOk);
+        RefreshRuntimeDisplay();
         return;
     }
 
@@ -375,6 +436,7 @@ void UDynamicTimeTableWidget::SetActiveTab(EDTTTab Tab)
     if (GroupsTabButton) GroupsTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Groups ? Active : Inactive);
     if (DispatchTabButton) DispatchTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Dispatch ? Active : Inactive);
     if (TrucksTabButton) TrucksTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Trucks ? Active : Inactive);
+    if (StationsTabButton) StationsTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Stations ? Active : Inactive);
     if (SettingsTabButton) SettingsTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Settings ? Active : Inactive);
     // Recalculate rebuilds the group bookings of the balancer, which only the Groups tab shows.
     if (RecalculateButton) RecalculateButton->SetVisibility(ActiveTab == EDTTTab::Groups ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
@@ -387,6 +449,7 @@ void UDynamicTimeTableWidget::SetActiveTab(EDTTTab Tab)
 void UDynamicTimeTableWidget::HandleGroupsTabClicked() { SetActiveTab(EDTTTab::Groups); }
 void UDynamicTimeTableWidget::HandleDispatchTabClicked() { SetActiveTab(EDTTTab::Dispatch); }
 void UDynamicTimeTableWidget::HandleTrucksTabClicked() { SetActiveTab(EDTTTab::Trucks); }
+void UDynamicTimeTableWidget::HandleStationsTabClicked() { SetActiveTab(EDTTTab::Stations); }
 
 UTexture2D* UDynamicTimeTableWidget::IconFor(const TSoftClassPtr<UFGItemDescriptor>& ItemClass)
 {

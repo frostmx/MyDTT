@@ -26,9 +26,6 @@ enum class EDTTRowAction : uint8
     ToggleExpandStation,
     /** Tick a station's row into the selection the limit box writes to. */
     StationSelect,
-    /** Put the limit standing in the page's box on every selected station. */
-    StationApplyLimit,
-    StationClearSelection,
     StationStayOn,
     StationStayOff,
     StationClearClaim,
@@ -48,8 +45,10 @@ struct FDTTRowTarget
     EDTTRowAction Action = EDTTRowAction::None;
     TWeakObjectPtr<class AFGWheeledVehicleIdentifier> Truck;
     TWeakObjectPtr<class AFGDockingStationIdentifier> Dock;
-    /** Which card an expand toggles, and which station a tick selects. Empty for everything else. */
+    /** Which card an expand toggles. Empty for everything else. */
     FString CardKey;
+    /** The dock's path node, which is what a claim is filed under and what a selection holds. */
+    FGuid Guid;
 };
 
 DECLARE_DELEGATE_OneParam(FDTTRowActionDelegate, const FDTTRowTarget&);

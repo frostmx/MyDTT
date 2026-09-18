@@ -52,6 +52,7 @@ enum class EDTTTab : int32
     Groups = 0,
     Dispatch,
     Trucks,
+    Stations,
     Settings,
     Count
 };
@@ -84,6 +85,7 @@ private:
     UPROPERTY() TObjectPtr<UButton> GroupsTabButton;
     UPROPERTY() TObjectPtr<UButton> DispatchTabButton;
     UPROPERTY() TObjectPtr<UButton> TrucksTabButton;
+    UPROPERTY() TObjectPtr<UButton> StationsTabButton;
     UPROPERTY() TObjectPtr<UButton> SettingsTabButton;
     // Settings page: one control per FDTTSettings field, filled from the server's copy on tab
     // open and after a result, never while the user is editing (bSettingsEdited).
@@ -121,12 +123,24 @@ private:
     bool bSettingsEdited = false;
     UPROPERTY() TObjectPtr<UScrollBox> DispatchScrollBox;
     UPROPERTY() TObjectPtr<UScrollBox> TruckScrollBox;
+    UPROPERTY() TObjectPtr<UScrollBox> StationScrollBox;
     UPROPERTY() TObjectPtr<UEditableTextBox> DispatchFilter;
     UPROPERTY() TObjectPtr<UEditableTextBox> TruckFilter;
+    UPROPERTY() TObjectPtr<UEditableTextBox> StationFilter;
+    // The Stations page edits the limit in one box above the table and writes it to every ticked
+    // row. One box and not one per row: a spin box inside a card is recycled into another station
+    // every refresh, and a half-typed number would be carried over to it or thrown away.
+    UPROPERTY() TObjectPtr<USpinBox> StationLimitInput;
+    UPROPERTY() TObjectPtr<UTextBlock> StationSelectionText;
+    UPROPERTY() TObjectPtr<UButton> StationApplyButton;
+    UPROPERTY() TObjectPtr<UButton> StationClearButton;
+    /** Ticked rows, by dock guid. Survives a refresh; a row that disappears drops out silently. */
+    TSet<FGuid> SelectedStations;
     // The Dispatch and Trucks pages are cards; a card is rebuilt only when its own key changes
     // and updated in place otherwise, so the page never repaints as a whole.
     UPROPERTY() TArray<FDTTCardWidgets> DispatchCards;
     UPROPERTY() TArray<FDTTCardWidgets> TruckCards;
+    UPROPERTY() TArray<FDTTCardWidgets> StationCards;
     /** Item icons by descriptor path; a miss is cached too so an unresolvable class is not loaded again every refresh. */
     UPROPERTY() TMap<FSoftObjectPath, TObjectPtr<UTexture2D>> IconCache;
     UTexture2D* IconFor(const TSoftClassPtr<class UFGItemDescriptor>& ItemClass);
@@ -139,6 +153,7 @@ private:
      */
     FString ExpandedDispatchKey;
     FString ExpandedTruckKey;
+    FString ExpandedStationKey;
     /**
      * An action that asks twice before it happens, and the card it belongs to. Only switching
      * an autopilot off needs this: it takes the truck out of the mod's hands altogether, and
@@ -206,6 +221,7 @@ private:
     void SetActiveTab(EDTTTab Tab);
     void RefreshDispatchDisplay();
     void RefreshTruckDisplay();
+    void RefreshStationDisplay();
     void SyncCards(UScrollBox* Page, TArray<FDTTCardWidgets>& Cards, const TArray<FString>& Keys,
         TFunctionRef<void(int32, FDTTCardSink&)> Fill);
     /** Bound to HandleRowAction once and handed to every sink, which binds it to every control. */
@@ -215,9 +231,17 @@ private:
     void PopulateDepotCard(const TArray<const FDTTDispatchRow*>& Depots, FDTTCardSink& Sink);
     void PopulateFuelCard(const TArray<const FDTTDispatchRow*>& FuelStops, FDTTCardSink& Sink);
     void PopulateTruckCard(const FDTTTruckRow& Row, const FString& CardId, bool bExpanded, FDTTCardSink& Sink);
+    void PopulateStationCard(const FDTTStationRow& Row, const FString& CardId, bool bExpanded, FDTTCardSink& Sink);
+    /** The station rows the window is looking at: the snapshot's on a client, the subsystem's on a host. */
+    void GatherStationRows(TArray<FDTTStationRow>& OutRows) const;
+    /** The ticked docks, as handles, for an operation that acts on the selection. */
+    void GatherSelectedDocks(TArray<class AFGDockingStationIdentifier*>& OutDocks) const;
     /** The captions over a table's columns, built once with the page. */
     void BuildDispatchHeader(class UHorizontalBox* Row);
     void BuildTruckHeader(class UHorizontalBox* Row);
+    void BuildStationHeader(class UHorizontalBox* Row);
+    /** The limit box and the two buttons that act on the ticked rows. */
+    void BuildStationTools(class UHorizontalBox* Row);
     void RebuildRuntimeDisplay();
     void UpdateRuntimeDisplayInPlace();
     bool RuntimeLayoutMatches() const;
@@ -239,8 +263,13 @@ private:
     UFUNCTION() void HandleTruckFilterChanged(const FText& Text);
     /** A page of cards: the filter line above a scroll box that fills the rest. */
     class UVerticalBox* BuildCardPage(TObjectPtr<UScrollBox>& OutScroll, TObjectPtr<UEditableTextBox>& OutFilter,
-        class UHorizontalBox*& OutHeader);
+        class UHorizontalBox*& OutHeader, class UHorizontalBox** OutTools = nullptr);
     UFUNCTION() void HandleTrucksTabClicked();
+    UFUNCTION() void HandleStationsTabClicked();
+    UFUNCTION() void HandleStationFilterChanged(const FText& Text);
+    /** The two page-level buttons of the Stations tab; they act on the ticked rows, not on one. */
+    UFUNCTION() void HandleStationApplyClicked();
+    UFUNCTION() void HandleStationClearClicked();
     UFUNCTION() void HandleSettingsTabClicked();
     UFUNCTION() void HandleSettingsSaveClicked();
     UFUNCTION() void HandleSettingsDefaultsClicked();

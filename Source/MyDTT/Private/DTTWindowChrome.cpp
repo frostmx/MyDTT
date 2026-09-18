@@ -64,12 +64,13 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     SummaryText = MakeText(WidgetTree,TEXT("Loading..."),16,FLinearColor(0.78f,0.85f,0.9f));
     Main->AddChildToVerticalBox(SummaryText)->SetPadding(FMargin(5));
 
-    // Four pages in one window; the tab row switches them, the active one is tinted.
+    // The pages of the window; the tab row switches them, the active one is tinted.
     UHorizontalBox* Tabs = WidgetTree->ConstructWidget<UHorizontalBox>();
     Main->AddChildToVerticalBox(Tabs)->SetPadding(FMargin(5,0,5,4));
     GroupsTabButton = MakeButton(WidgetTree,TEXT("Groups")); AddRowItem(Tabs,GroupsTabButton,3);
     DispatchTabButton = MakeButton(WidgetTree,TEXT("Dispatch")); AddRowItem(Tabs,DispatchTabButton,3);
     TrucksTabButton = MakeButton(WidgetTree,TEXT("Trucks")); AddRowItem(Tabs,TrucksTabButton,3);
+    StationsTabButton = MakeButton(WidgetTree,TEXT("Stations")); AddRowItem(Tabs,StationsTabButton,3);
     SettingsTabButton = MakeButton(WidgetTree,TEXT("Settings")); AddRowItem(Tabs,SettingsTabButton,3);
 
     Pages = WidgetTree->ConstructWidget<UWidgetSwitcher>();
@@ -91,6 +92,12 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     Pages->AddChild(BuildCardPage(TruckScrollBox, TruckFilter, TruckHeader));
     BuildTruckHeader(TruckHeader);
     TruckFilter->OnTextChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleTruckFilterChanged);
+    UHorizontalBox* StationHeader = nullptr;
+    UHorizontalBox* StationTools = nullptr;
+    Pages->AddChild(BuildCardPage(StationScrollBox, StationFilter, StationHeader, &StationTools));
+    BuildStationTools(StationTools);
+    BuildStationHeader(StationHeader);
+    StationFilter->OnTextChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleStationFilterChanged);
     UVerticalBox* SettingsPage = WidgetTree->ConstructWidget<UVerticalBox>();
     Pages->AddChild(SettingsPage);
     BuildSettingsPanel(SettingsPage);
@@ -108,7 +115,7 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
 }
 
 UVerticalBox* UDynamicTimeTableWidget::BuildCardPage(TObjectPtr<UScrollBox>& OutScroll, TObjectPtr<UEditableTextBox>& OutFilter,
-    UHorizontalBox*& OutHeader)
+    UHorizontalBox*& OutHeader, UHorizontalBox** OutTools)
 {
     UVerticalBox* Page = WidgetTree->ConstructWidget<UVerticalBox>();
     UHorizontalBox* FilterRow = WidgetTree->ConstructWidget<UHorizontalBox>();
@@ -120,6 +127,13 @@ UVerticalBox* UDynamicTimeTableWidget::BuildCardPage(TObjectPtr<UScrollBox>& Out
     FilterFont.Size = 13;
     OutFilter->WidgetStyle.SetFont(FilterFont).SetPadding(FMargin(8, 4));
     AddRowItem(FilterRow, OutFilter, 4, true);
+    // A page that acts on more than one row at a time puts those controls here, between the
+    // filter and the captions, where they are read before the table rather than hunted for in it.
+    if (OutTools)
+    {
+        *OutTools = WidgetTree->ConstructWidget<UHorizontalBox>();
+        Page->AddChildToVerticalBox(*OutTools)->SetPadding(FMargin(8, 0, 8, 4));
+    }
     // The captions stay above the scroll box rather than scrolling away with the first screen
     // of forty resources.
     OutHeader = WidgetTree->ConstructWidget<UHorizontalBox>();
@@ -133,6 +147,7 @@ UVerticalBox* UDynamicTimeTableWidget::BuildCardPage(TObjectPtr<UScrollBox>& Out
 
 void UDynamicTimeTableWidget::HandleDispatchFilterChanged(const FText&) { RefreshDispatchDisplay(); }
 void UDynamicTimeTableWidget::HandleTruckFilterChanged(const FText&) { RefreshTruckDisplay(); }
+void UDynamicTimeTableWidget::HandleStationFilterChanged(const FText&) { RefreshStationDisplay(); }
 
 void UDynamicTimeTableWidget::BuildEditorPanel(UVerticalBox* Main)
 {
