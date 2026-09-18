@@ -479,10 +479,27 @@ struct FDTTLapRow
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 TargetIndex = INDEX_NONE;
     /**
      * Metres of road left to the end of this lap, along the path the truck will actually drive.
-     * -1 when no path can be costed. Never a time: the game does not tell anyone what speed a
-     * truck will hold, and a made-up ETA is worse than no ETA.
+     * -1 when no path can be costed.
      */
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 DistanceLeftMetres = -1;
+    /**
+     * Metres of road left to the stop the truck is heading for: the straight line to it, stretched
+     * by how much longer than its straight line the road of that leg is. -1 when unknown.
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 NextStopMetres = -1;
+    /**
+     * Average speed over the last minute, km/h, from a sample every five seconds; -1 before the
+     * first sample. An average and not the speedometer: a reading taken at refresh time jumps
+     * with every corner and every junction, and the window would blink with it.
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 SpeedKmh = -1;
+    /**
+     * Seconds to the stop the truck is heading for: NextStopMetres over the average of the last
+     * minute of driving, which leaves out the samples taken while docked. SpeedKmh would not do:
+     * a truck that has just left a dock carries a minute of standing in it and was promised
+     * arrivals up to three times too late. -1 when there is no road length or no driving yet.
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 NextStopSeconds = -1;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 CargoStacks = -1;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 CargoCapacityStacks = -1;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") EDTTTruckPhase Phase = EDTTTruckPhase::Unmanaged;

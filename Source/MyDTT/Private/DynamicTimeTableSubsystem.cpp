@@ -4023,6 +4023,11 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
     TickAutoName();
     PruneStaleRequesterClaims();
     UpdateRequesterWaitTimes();
+    if (++SpeedSampleTick >= SpeedSampleEverySeconds)
+    {
+        SpeedSampleTick = 0;
+        SampleTruckSpeeds();
+    }
 
     for (auto It = TruckPollStates.CreateIterator(); It; ++It)
         if (!It.Key().IsValid()) It.RemoveCurrent();
@@ -6284,6 +6289,80 @@ float UDynamicTimeTableSubsystem::EstimateDistanceLeftMetres(AFGWheeledVehicleId
     return Centimetres / 100.0f;
 }
 
+float UDynamicTimeTableSubsystem::EstimateNextStopMetres(AFGWheeledVehicleIdentifier* Vehicle, TMap<TPair<FGuid, FGuid>, float>* Cache) const
+{
+    if (!IsValid(Vehicle)) return -1.0f;
+    const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+    const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
+    if (!Route.IsValidIndex(Index)) return -1.0f;
+    AFGDockingStationIdentifier* Target = FindDockByPathNode(Route[Index]);
+    if (!IsValid(Target)) return -1.0f;
+    const FVector TargetAt = Target->GetRealActorLocation();
+    const float Straight = FVector::Dist(Vehicle->GetRealActorLocation(), TargetAt);
+
+    // The stop before the target, skipping the copies of it a pool lap starts with: they are the
+    // same dock and say nothing about the road.
+    float Winding = 1.0f;
+    for (int32 Back = 1; Back < Route.Num(); ++Back)
+    {
+        const FGuid& From = Route[(Index - Back + Route.Num()) % Route.Num()];
+        if (From == Route[Index]) continue;
+        AFGDockingStationIdentifier* FromDock = FindDockByPathNode(From);
+        AFGWheeledVehicle* Wheeled = Vehicle->GetOwnerVehicle();
+        AFGVehicleSubsystem* VehicleSubsystem = AFGVehicleSubsystem::Get(GetWorld());
+        const UFGVehiclePathPreset* Preset = IsValid(Wheeled) ? Wheeled->GetVehiclePathPreset() : nullptr;
+        if (!IsValid(FromDock) || !IsValid(VehicleSubsystem) || !Preset) break;
+        const float Road = EstimatePathLengthCm(VehicleSubsystem, Preset, From, Route[Index], Cache);
+        const float Line = FVector::Dist(FromDock->GetRealActorLocation(), TargetAt);
+        // Two docks side by side have no meaningful ratio; a ratio past four is a detour the
+        // straight line from here would not share.
+        if (Road > 0.0f && Line > 1000.0f) Winding = FMath::Clamp(Road / Line, 1.0f, 4.0f);
+        break;
+    }
+    return Straight * Winding / 100.0f;
+}
+
+void UDynamicTimeTableSubsystem::SampleTruckSpeeds()
+{
+    for (auto It = SpeedSamples.CreateIterator(); It; ++It)
+        if (!It.Key().IsValid()) It.RemoveCurrent();
+    AFGVehicleSubsystem* VehicleSubsystem = AFGVehicleSubsystem::Get(GetWorld());
+    if (!IsValid(VehicleSubsystem)) return;
+    for (AFGWheeledVehicleIdentifier* Vehicle : VehicleSubsystem->GetAllVehicles())
+    {
+        if (!IsValid(Vehicle)) continue;
+        AFGWheeledVehicle* Wheeled = Vehicle->GetOwnerVehicle();
+        if (!IsValid(Wheeled)) continue;
+        FDTTSpeedSamples& Samples = SpeedSamples.FindOrAdd(Vehicle);
+        // Reversing out of a dock is driving too.
+        const float Kmh = FMath::Abs(static_cast<float>(Wheeled->GetSpeedInKMH()));
+        Samples.All.Add(Kmh);
+        // A minute at a dock says nothing about the road. Left in, it had a truck that just pulled
+        // out promised its next stop at a third of the speed it was about to drive at. A wait at
+        // a junction is road time and stays.
+        if (Vehicle->IsAutopilotEnabled() && !Vehicle->IsCurrentlyDocking()) Samples.Driving.Add(Kmh);
+    }
+}
+
+float UDynamicTimeTableSubsystem::GetAverageSpeedKmh(const AFGWheeledVehicleIdentifier* Vehicle, int32* OutSamples, bool bDriving) const
+{
+    if (OutSamples) *OutSamples = 0;
+    const FDTTSpeedSamples* Samples = Vehicle ? SpeedSamples.Find(const_cast<AFGWheeledVehicleIdentifier*>(Vehicle)) : nullptr;
+    if (!Samples) return -1.0f;
+    const FDTTSpeedRing& Ring = bDriving ? Samples->Driving : Samples->All;
+    if (OutSamples) *OutSamples = Ring.Count;
+    return Ring.Average();
+}
+
+int32 UDynamicTimeTableSubsystem::EstimateNextStopSeconds(const AFGWheeledVehicleIdentifier* Vehicle, float NextStopMetres, float* OutDrivingKmh) const
+{
+    const float Kmh = GetAverageSpeedKmh(Vehicle, nullptr, /*bDriving*/ true);
+    if (OutDrivingKmh) *OutDrivingKmh = Kmh;
+    // Under 5 km/h the truck is standing, and a time from that would be hours of nothing.
+    if (NextStopMetres < 0.0f || Kmh < 5.0f) return -1;
+    return FMath::RoundToInt(NextStopMetres / (Kmh / 3.6f));
+}
+
 // ---------------------------------------------------------------------------
 // The Timetable rows.
 // ---------------------------------------------------------------------------
@@ -6343,6 +6422,11 @@ void UDynamicTimeTableSubsystem::BuildLapRows(TArray<FDTTLapRow>& OutRows) const
         Row.bDocking = Truck.bDocking;
         const float Metres = EstimateDistanceLeftMetres(Vehicle, &LegCache);
         Row.DistanceLeftMetres = Metres >= 0.0f ? FMath::RoundToInt(Metres) : -1;
+        const float Next = EstimateNextStopMetres(Vehicle, &LegCache);
+        Row.NextStopMetres = Next >= 0.0f ? FMath::RoundToInt(Next) : -1;
+        const float Speed = GetAverageSpeedKmh(Vehicle);
+        Row.SpeedKmh = Speed >= 0.0f ? FMath::RoundToInt(Speed) : -1;
+        Row.NextStopSeconds = EstimateNextStopSeconds(Vehicle, Next);
     }
     // Longest drive left first: the table is read to find who is far from done.
     OutRows.Sort([](const FDTTLapRow& A, const FDTTLapRow& B)
@@ -7049,6 +7133,19 @@ void UDynamicTimeTableSubsystem::GetTruckWhyLines(const FString& TruckQuery, TAr
         OutLines.Add(Metres >= 0.0f
             ? FString::Printf(TEXT("  distance left this lap: ~%d m (straight line to the next stop, road for the rest)"), FMath::RoundToInt(Metres))
             : FString(TEXT("  distance left this lap: unknown (no costable path from here)")));
+        // The Timetable's SPEED and NEXT columns, from the same calls.
+        int32 Samples = 0, DrivingSamples = 0;
+        const float Speed = GetAverageSpeedKmh(Vehicle, &Samples);
+        const float Driving = GetAverageSpeedKmh(Vehicle, &DrivingSamples, /*bDriving*/ true);
+        const float Next = EstimateNextStopMetres(Vehicle);
+        const int32 Seconds = EstimateNextStopSeconds(Vehicle, Next);
+        OutLines.Add(FString::Printf(TEXT("  speed over the last minute: %s (%d sample(s), one every %d s); driving only: %s (%d sample(s))"),
+            Speed >= 0.0f ? *FString::Printf(TEXT("%.0f km/h"), Speed) : TEXT("not sampled yet"), Samples, SpeedSampleEverySeconds,
+            Driving >= 0.0f ? *FString::Printf(TEXT("%.0f km/h"), Driving) : TEXT("none yet"), DrivingSamples));
+        OutLines.Add(FString::Printf(TEXT("  next stop: %s; %s"),
+            Next >= 0.0f ? *FString::Printf(TEXT("~%d m of road"), FMath::RoundToInt(Next)) : TEXT("unknown"),
+            Seconds >= 0 ? *FString::Printf(TEXT("~%d:%02d at the driving average"), Seconds / 60, Seconds % 60)
+                : TEXT("no time: the driving average is under 5 km/h")));
     }
 
     // What it carries: the reason a parked truck is skipped more often than any other.

@@ -142,7 +142,7 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
     // A station row is all numbers once its four names are interned, which is the whole reason
     // the table exists: 52 bytes apiece instead of the 160-odd the names alone would cost.
     Bytes += 52 * X.StationRows.Num();
-    for (const auto& R : X.LapRows) Bytes += 56 + 4 * R.StopIds.Num();
+    for (const auto& R : X.LapRows) Bytes += 68 + 4 * R.StopIds.Num();
     Bytes += 44 * X.QueueRows.Num() + 16 * X.ReasonRows.Num();
     UE_LOG(LogDynamicTimeTableRCO, Verbose, TEXT("SNAPSHOT_SIZE Sections=%d Groups=%d DispatchRows=%d TruckRows=%d StationRows=%d LapRows=%d QueueRows=%d DockNames=%d TruckNames=%d ApproxBytes=%lld"),
         X.Sections, X.Groups.Num(), X.DispatchRows.Num(), X.TruckRows.Num(), X.StationRows.Num(), X.LapRows.Num(), X.QueueRows.Num(),

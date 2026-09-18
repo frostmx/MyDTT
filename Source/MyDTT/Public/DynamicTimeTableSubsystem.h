@@ -364,6 +364,30 @@ private:
     };
     TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTTruckPollState> TruckPollStates;
     FTimerHandle TruckPollTimerHandle;
+    /**
+     * The last minute of a truck's speed: twelve samples, one every five seconds, in a ring. Not
+     * saved - a minute after a load the window has its average back.
+     */
+    struct FDTTSpeedRing
+    {
+        static constexpr int32 Capacity = 12;
+        float Kmh[Capacity] = {};
+        int32 Count = 0;
+        int32 Head = 0;
+        void Add(float Value) { Kmh[Head] = Value; Head = (Head + 1) % Capacity; Count = FMath::Min(Count + 1, Capacity); }
+        float Average() const { float Sum = 0.0f; for (int32 Index = 0; Index < Count; ++Index) Sum += Kmh[Index]; return Count > 0 ? Sum / Count : -1.0f; }
+    };
+    /** Every sample, for the speed shown; and only those off a dock, for the time to the next stop. */
+    struct FDTTSpeedSamples
+    {
+        FDTTSpeedRing All;
+        FDTTSpeedRing Driving;
+    };
+    TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FDTTSpeedSamples> SpeedSamples;
+    /** PollTruckStates runs every second; the speed is sampled on every fifth. */
+    int32 SpeedSampleTick = 0;
+    static constexpr int32 SpeedSampleEverySeconds = 5;
+    void SampleTruckSpeeds();
     // Client side only: watches for the game's own docking-station window and puts this mod's
     // button in it. Slower than a frame and faster than the eye - the window is opened by hand.
     FTimerHandle StationWindowTimerHandle;
@@ -599,6 +623,20 @@ private:
      * lap of kilometres the straight line is a small share of one leg and costs nothing.
      */
     float EstimateDistanceLeftMetres(AFGWheeledVehicleIdentifier* Vehicle, TMap<TPair<FGuid, FGuid>, float>* Cache = nullptr) const;
+    /**
+     * Metres of road to the stop the truck is heading for. The network cannot say where between
+     * two nodes a truck is, so the straight line to the target is stretched by the leg's own
+     * winding: its road length over the straight line between its two docks. A bare straight line
+     * would promise every truck on a mountain road an early arrival.
+     */
+    float EstimateNextStopMetres(AFGWheeledVehicleIdentifier* Vehicle, TMap<TPair<FGuid, FGuid>, float>* Cache = nullptr) const;
+    /**
+     * The last minute's average speed of a truck in km/h, or negative before its first sample.
+     * bDriving averages only the samples taken off a dock, which is what a time on the road wants.
+     */
+    float GetAverageSpeedKmh(const AFGWheeledVehicleIdentifier* Vehicle, int32* OutSamples = nullptr, bool bDriving = false) const;
+    /** Seconds to the next stop at the driving average, or negative when it cannot be said. */
+    int32 EstimateNextStopSeconds(const AFGWheeledVehicleIdentifier* Vehicle, float NextStopMetres, float* OutDrivingKmh = nullptr) const;
     /** Cost of the closed Producer/requester loop in the same units as the vanilla route-cost UI. */
     float EstimateLoopFuelConsumptionMW(class AFGWheeledVehicle* Vehicle, const TArray<FGuid>& Loop) const;
     /** Current fuel stock and this loop's per-lap need, in fuel items. False if either is not estimable. */
