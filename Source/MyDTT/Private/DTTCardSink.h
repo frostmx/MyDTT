@@ -1159,7 +1159,10 @@ struct FDTTCardSink
             {
                 Parent->AddChild(Box);
                 if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot)) { S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center); }
-                Pad<UVerticalBoxSlot>(Box, Margin);
+                // A vertical box stretches its children across the column, and the width override
+                // does not survive that: the bar came out the width of the card while the marks
+                // were still placed for Width, and the call line of a station at 88 % stood at 25 %.
+                if (UVerticalBoxSlot* S = Cast<UVerticalBoxSlot>(Box->Slot)) { S->SetPadding(Margin); S->SetHorizontalAlignment(HAlign_Left); }
             }
         }
         UProgressBar* B = nullptr;
