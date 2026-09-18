@@ -8,6 +8,33 @@
 
 using namespace DTTUI;
 
+namespace
+{
+    /** A wait in m:ss, or a dash when there is nothing waiting. */
+    FString WaitText(int32 Seconds)
+    {
+        return Seconds > 0 ? FString::Printf(TEXT("%d:%02d"), Seconds / 60, Seconds % 60) : FString(TEXT("-"));
+    }
+
+    /** What a level is as a fraction of capacity, or -1 for a level there is nothing to place. */
+    float LevelFraction(int32 Level, int32 Capacity)
+    {
+        return (Level >= 0 && Capacity > 0) ? FMath::Clamp(float(Level) / float(Capacity), 0.0f, 1.0f) : -1.0f;
+    }
+}
+
+void UDynamicTimeTableWidget::BuildDispatchHeader(UHorizontalBox* Row)
+{
+    if (!Row) return;
+    HeadCell(WidgetTree, Row, FString(), DTTColIcon);
+    HeadCell(WidgetTree, Row, TEXT("RESOURCE"), DTTColResource);
+    HeadCell(WidgetTree, Row, TEXT("PRODUCERS"), DTTColProducers);
+    HeadCell(WidgetTree, Row, TEXT("REQUESTERS - STOCK AGAINST THE CALL LINE"), 0.0f);
+    HeadCell(WidgetTree, Row, TEXT("STATE"), DTTColState);
+    HeadCell(WidgetTree, Row, TEXT("WAIT"), DTTColWait, HAlign_Right);
+    HeadCell(WidgetTree, Row, FString(), DTTColChevron);
+}
+
 void UDynamicTimeTableWidget::RefreshDispatchDisplay()
 {
     TArray<FDTTDispatchRow> Rows;
@@ -20,10 +47,10 @@ void UDynamicTimeTableWidget::RefreshDispatchDisplay()
         Subsystem->BuildDispatchRows(Rows);
     }
 
-    // Cards: one per resource in order of first appearance, then depots, then fuel stops.
-    // The filter keeps a row whose resource or station name contains the text, any case.
+    // One row per resource in order of first appearance, then depots, then fuel stops. The filter
+    // keeps a row whose resource or station name contains the text, any case.
     const FString Filter = DispatchFilter ? DispatchFilter->GetText().ToString().TrimStartAndEnd() : FString();
-    struct FCardSpec { int32 Kind = 0; FString Resource; TArray<const FDTTDispatchRow*> Rows; };
+    struct FCardSpec { int32 Kind = 0; FString Resource; FString Id; TArray<const FDTTDispatchRow*> Rows; };
     TArray<FCardSpec> Specs;
     TMap<FString, int32> ResourceCard;
     FCardSpec Depots; Depots.Kind = 1;
@@ -46,12 +73,18 @@ void UDynamicTimeTableWidget::RefreshDispatchDisplay()
     if (Rows.Num() == 0) { FCardSpec Empty; Empty.Kind = 3; Specs.Add(Empty); }
     else if (Shown == 0) { FCardSpec Empty; Empty.Kind = 4; Specs.Add(Empty); }
 
+    // The id names the card and is what the expansion remembers; the key adds everything that
+    // decides its shape - whether it is open, and which docks make up its bars and its body.
     TArray<FString> Keys;
-    for (const FCardSpec& Spec : Specs)
+    TArray<bool> Expanded;
+    for (FCardSpec& Spec : Specs)
     {
-        FString Key = FString::Printf(TEXT("%d|%s"), Spec.Kind, *Spec.Resource);
+        Spec.Id = FString::Printf(TEXT("%d|%s"), Spec.Kind, *Spec.Resource);
+        const bool bOpen = Spec.Kind == 0 && ExpandedDispatchKey == Spec.Id;
+        Expanded.Add(bOpen);
+        FString Key = Spec.Id + (bOpen ? TEXT("|E") : TEXT("|c"));
         for (const FDTTDispatchRow* Row : Spec.Rows) Key += FString::Printf(TEXT("|%s:%d"), *Row->DockingPathNodeGuid.ToString(EGuidFormats::Short), int32(Row->Role));
-        Keys.Add(Key);
+        Keys.Add(MoveTemp(Key));
     }
     if (SummaryText)
     {
@@ -64,7 +97,7 @@ void UDynamicTimeTableWidget::RefreshDispatchDisplay()
         const FCardSpec& Spec = Specs[Index];
         switch (Spec.Kind)
         {
-        case 0: PopulateResourceCard(Spec.Resource, Spec.Rows, Sink); break;
+        case 0: PopulateResourceCard(Spec.Resource, Spec.Rows, Spec.Id, Expanded[Index], Sink); break;
         case 1: PopulateDepotCard(Spec.Rows, Sink); break;
         case 2: PopulateFuelCard(Spec.Rows, Sink); break;
         case 4:
@@ -85,27 +118,98 @@ void UDynamicTimeTableWidget::RefreshDispatchDisplay()
     });
 }
 
-void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, const TArray<const FDTTDispatchRow*>& List, FDTTCardSink& Sink)
+void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, const TArray<const FDTTDispatchRow*>& List,
+    const FString& CardId, bool bExpanded, FDTTCardSink& Sink)
 {
     // Yellow: open and nobody has taken it; green: taken into work; red: waiting past the limit.
     const int32 OverdueMinutes = ViewSettings().OverdueRequestMinutes;
     auto IsOverdue = [&](const FDTTDispatchRow* Row) { return OverdueMinutes > 0 && Row->bOpen && Row->ClaimOwner.IsEmpty() && Row->WaitingSeconds >= OverdueMinutes * 60; };
     int32 Producers = 0, Requesters = 0, Open = 0, Claimed = 0, Overdue = 0, Inactive = 0;
+    int32 ProducerStock = 0, LongestWait = 0;
+    bool bProducerMode = true;
     for (const FDTTDispatchRow* Row : List)
     {
         if (!Row->bModeMatches) ++Inactive;
-        if (Row->Role == EDTTDispatchRole::Producer) ++Producers;
-        else { ++Requesters; if (Row->bOpen) { ++Open; if (!Row->ClaimOwner.IsEmpty()) ++Claimed; if (IsOverdue(Row)) ++Overdue; } }
+        if (Row->Role == EDTTDispatchRole::Producer)
+        {
+            ++Producers;
+            ProducerStock += FMath::Max(0, Row->StockStacks);
+            if (!Row->bModeMatches) bProducerMode = false;
+            continue;
+        }
+        ++Requesters;
+        if (!Row->bOpen) continue;
+        ++Open;
+        if (!Row->ClaimOwner.IsEmpty()) { ++Claimed; continue; }
+        if (IsOverdue(Row)) ++Overdue;
+        LongestWait = FMath::Max(LongestWait, Row->WaitingSeconds);
     }
-    FString Summary = FString::Printf(TEXT("%d producer%s, %d requester%s"), Producers, Producers == 1 ? TEXT("") : TEXT("s"), Requesters, Requesters == 1 ? TEXT("") : TEXT("s"));
-    if (Open > 0) Summary += FString::Printf(TEXT("  ·  %d open, %d claimed"), Open, Claimed);
-    if (Overdue > 0) Summary += FString::Printf(TEXT("  ·  %d overdue"), Overdue);
-    if (Inactive > 0) Summary += FString::Printf(TEXT("  ·  %d inactive"), Inactive);
     const bool bWaiting = Open > Claimed;
-    UVerticalBox* Body = Sink.Root(Overdue > 0 ? DTTCardTintWarn : (bWaiting ? DTTCardTintWait : (Open > 0 ? DTTCardTintOpen : DTTCardTint)));
-    DTTCardHeader(Sink, Body, Resource, Overdue > 0 ? DTTRed : (bWaiting ? DTTYellow : (Open > 0 ? DTTGreen : DTTCyan)), Summary, List.Num() > 0 ? IconFor(List[0]->ItemClass) : nullptr);
+    const FLinearColor Accent = Overdue > 0 ? DTTRed : (bWaiting ? DTTYellow : (Open > 0 ? DTTGreen : DTTCyan));
 
-    UHorizontalBox* Columns = Sink.HBox(Body, FMargin(0, 4, 0, 0));
+    // The card is the row; opening it adds a body underneath and nothing else moves on the page.
+    UVerticalBox* Body = Sink.Root(Overdue > 0 ? DTTCardTintWarn : (bWaiting ? DTTCardTintWait : (Open > 0 ? DTTCardTintOpen : DTTCardTint)), FMargin(0));
+
+    FDTTRowTarget Toggle;
+    Toggle.Action = EDTTRowAction::ToggleExpandDispatch;
+    Toggle.CardKey = CardId;
+    UHorizontalBox* Line = Sink.Row(Body, DTTRowHeight, Toggle, FLinearColor(1.0f, 1.0f, 1.0f, bExpanded ? 0.06f : 0.0f));
+
+    Sink.Icon(Line, List.Num() > 0 ? IconFor(List[0]->ItemClass) : nullptr, DTTColIcon, FMargin(0, 0, 6, 0));
+    Sink.Cell(Line, Resource, 15, Accent, DTTColResource);
+
+    FString ProducerText;
+    if (Producers == 0) ProducerText = TEXT("no producer");
+    else if (Producers == 1) ProducerText = FString::Printf(TEXT("%s - %d st"), bProducerMode ? TEXT("LOAD") : TEXT("wrong mode"), ProducerStock);
+    else ProducerText = FString::Printf(TEXT("%d producers - %d st"), Producers, ProducerStock);
+    Sink.Cell(Line, ProducerText, 12, bProducerMode && Producers > 0 ? DTTGrey : DTTRed, DTTColProducers);
+
+    // One bar per requester: stock filled, with the call line and the fill target marked on it.
+    // This is the whole point of the row - which stations are about to call is now a glance.
+    UHorizontalBox* Bars = Sink.HBox(Line);
+    if (Bars)
+    {
+        if (UHorizontalBoxSlot* BarsSlot = Cast<UHorizontalBoxSlot>(Bars->Slot))
+        {
+            BarsSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+            BarsSlot->SetVerticalAlignment(VAlign_Center);
+        }
+    }
+    int32 Drawn = 0, Hidden = 0;
+    for (const FDTTDispatchRow* Row : List)
+    {
+        if (Row->Role == EDTTDispatchRole::Producer) continue;
+        if (Drawn >= DTTMaxStockBars) { ++Hidden; continue; }
+        ++Drawn;
+        FLinearColor BarColor = DTTSteel;
+        if (!Row->bModeMatches) BarColor = DTTDim;
+        else if (IsOverdue(Row)) BarColor = DTTRed;
+        else if (Row->bOpen) BarColor = Row->ClaimOwner.IsEmpty() ? DTTYellow : DTTGreen;
+        Sink.MarkedBar(Bars, LevelFraction(Row->StockStacks, Row->CapacityStacks),
+            LevelFraction(Row->TriggerStacks, Row->CapacityStacks),
+            LevelFraction(Row->ThresholdStacks, Row->CapacityStacks),
+            BarColor, DTTStockBarWidth);
+    }
+    Sink.Cell(Bars, Hidden > 0 ? FString::Printf(TEXT("+%d"), Hidden) : FString(), 11, DTTDim, 34.0f);
+
+    FString State;
+    FLinearColor StateColor = DTTDim;
+    if (Open == 0 && Inactive > 0) { State = FString::Printf(TEXT("%d inactive"), Inactive); StateColor = DTTRed; }
+    else if (Overdue > 0) { State = FString::Printf(TEXT("%d overdue"), Overdue); StateColor = DTTRed; }
+    else if (bWaiting) { State = FString::Printf(TEXT("%d open, %s"), Open - Claimed, Claimed > 0 ? TEXT("some claimed") : TEXT("nobody took it")); StateColor = DTTYellow; }
+    else if (Open > 0) { State = FString::Printf(TEXT("%d open, claimed"), Open); StateColor = DTTGreen; }
+    else if (Requesters == 0) State = TEXT("no requesters");
+    else State = TEXT("nothing to do");
+    Sink.Cell(Line, State, 12, StateColor, DTTColState);
+    Sink.Cell(Line, WaitText(LongestWait), 12, LongestWait >= OverdueMinutes * 60 && OverdueMinutes > 0 ? DTTRed : DTTGrey, DTTColWait, HAlign_Right);
+    Sink.Cell(Line, bExpanded ? TEXT("v") : TEXT(">"), 13, DTTDim, DTTColChevron, HAlign_Center);
+
+    // Closed is the common case and the point of the table, so the detail stops here. The flag is
+    // part of the card's key, which is what makes this conditional safe: build and update passes
+    // for one key always walk the same shape.
+    if (!bExpanded) return;
+
+    UHorizontalBox* Columns = Sink.HBox(Body, FMargin(10, 4, 10, 8));
     UVerticalBox* Left = Sink.Column(Columns);
     UVerticalBox* Right = Sink.Column(Columns);
     Sink.Text(Left, TEXT("Producers"), 12, DTTDim, false, FMargin(0, 0, 0, 2));
@@ -120,8 +224,8 @@ void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, cons
         {
             UVerticalBox* Item = Sink.VBox(Left, FMargin(0, 2, 0, 4));
             Sink.Text(Item, DTTStationName(Row->StationName), 14, Row->bModeMatches ? FLinearColor::White : DTTRed, true);
-            FString Detail = FString::Printf(TEXT("stock %s  ·  %s"), *DTTStacks(Row->StockStacks), Mode);
-            if (!Row->bModeMatches) Detail += TEXT("  ·  inactive: a producer must be in LOAD mode");
+            FString Detail = FString::Printf(TEXT("stock %s  -  %s"), *DTTStacks(Row->StockStacks), Mode);
+            if (!Row->bModeMatches) Detail += TEXT("  -  inactive: a producer must be in LOAD mode");
             Sink.Text(Item, Detail, 12, Row->bModeMatches ? DTTGrey : DTTRed, true);
             continue;
         }
@@ -133,13 +237,13 @@ void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, cons
         {
             Status = IsOverdue(Row) ? DTTRed : DTTYellow;
             StatusLine = TEXT("open, waiting for a truck");
-            if (Row->WaitingSeconds >= 60) StatusLine += FString::Printf(TEXT("  ·  %d min"), Row->WaitingSeconds / 60);
+            if (Row->WaitingSeconds >= 60) StatusLine += FString::Printf(TEXT("  -  %d min"), Row->WaitingSeconds / 60);
         }
         else if (Row->bOpen)
         {
             Status = DTTGreen;
             StatusLine = FString::Printf(TEXT("open, claimed by %s"), *Row->ClaimOwner);
-            if (Row->PlannedStacks > 0) StatusLine += FString::Printf(TEXT("  ·  %d stacks planned"), Row->PlannedStacks);
+            if (Row->PlannedStacks > 0) StatusLine += FString::Printf(TEXT("  -  %d stacks planned"), Row->PlannedStacks);
         }
         else if (!Row->ClaimOwner.IsEmpty()) StatusLine = FString::Printf(TEXT("claimed by %s"), *Row->ClaimOwner);
 
@@ -151,13 +255,15 @@ void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, cons
         if (Row->TriggerStacks >= 0)
         {
             Detail += Row->bFluid && Row->CapacityStacks > 0
-                ? FString::Printf(TEXT("  ·  call below %d (%d%%)"), Row->TriggerStacks, FMath::RoundToInt(100.0f * Row->TriggerStacks / Row->CapacityStacks))
-                : FString::Printf(TEXT("  ·  call below %d"), Row->TriggerStacks);
+                ? FString::Printf(TEXT("  -  calls below %d (%d%%)"), Row->TriggerStacks, FMath::RoundToInt(100.0f * Row->TriggerStacks / Row->CapacityStacks))
+                : FString::Printf(TEXT("  -  calls below %d"), Row->TriggerStacks);
         }
-        if (Row->ThresholdStacks >= 0) Detail += FString::Printf(TEXT("  ·  fill to %d"), Row->ThresholdStacks);
+        if (Row->ThresholdStacks >= 0) Detail += FString::Printf(TEXT("  -  fills to %d"), Row->ThresholdStacks);
         Sink.Text(Item, Detail, 12, DTTGrey, true);
-        const float Percent = (Row->StockStacks >= 0 && Row->CapacityStacks > 0) ? float(Row->StockStacks) / float(Row->CapacityStacks) : 0.0f;
-        Sink.Bar(Item, Percent, Status);
+        Sink.MarkedBar(Item, LevelFraction(Row->StockStacks, Row->CapacityStacks),
+            LevelFraction(Row->TriggerStacks, Row->CapacityStacks),
+            LevelFraction(Row->ThresholdStacks, Row->CapacityStacks),
+            Status, 220.0f, 12.0f, FMargin(0, 3, 0, 2));
         Sink.Text(Item, StatusLine, 12, Status, true);
     }
 }
@@ -176,8 +282,8 @@ void UDynamicTimeTableWidget::PopulateDepotCard(const TArray<const FDTTDispatchR
         // The note is "docked=<truck|-> held=<yes|no>" for the chat; say it in words here.
         const int32 DockedAt = Row->Note.Find(TEXT("docked=")), HeldAt = Row->Note.Find(TEXT(" held="));
         const FString Docked = DockedAt >= 0 ? Row->Note.Mid(DockedAt + 7, HeldAt > DockedAt ? HeldAt - (DockedAt + 7) : MAX_int32) : FString();
-        if (!Docked.IsEmpty() && Docked != TEXT("-")) Detail += FString::Printf(TEXT("  ·  %s docked"), *Docked);
-        if (HeldAt >= 0 && Row->Note.Mid(HeldAt + 6) == TEXT("yes")) Detail += TEXT("  ·  held");
+        if (!Docked.IsEmpty() && Docked != TEXT("-")) Detail += FString::Printf(TEXT("  -  %s docked"), *Docked);
+        if (HeldAt >= 0 && Row->Note.Mid(HeldAt + 6) == TEXT("yes")) Detail += TEXT("  -  held");
         Sink.Text(Item, Detail, 12, Row->ClaimOwner.IsEmpty() ? DTTGreen : DTTGrey, true);
     }
 }

@@ -138,6 +138,16 @@ private:
      */
     FString ExpandedDispatchKey;
     FString ExpandedTruckKey;
+    /**
+     * An action that asks twice before it happens, and the card it belongs to. Only switching
+     * an autopilot off needs this: it takes the truck out of the mod's hands altogether, and
+     * everything else a row offers is undone by clicking something else. Cleared by any other
+     * row action, so an armed button cannot sit waiting behind a page the player left.
+     */
+    EDTTRowAction ArmedAction = EDTTRowAction::None;
+    FString ArmedKey;
+    /** True while this control is the one waiting for its second click. */
+    bool IsArmed(EDTTRowAction Action, const FString& CardId) const { return ArmedAction == Action && ArmedKey == CardId; }
 
     UPROPERTY() TObjectPtr<UScrollBox> GroupScrollBox;
     UPROPERTY() TObjectPtr<UTextBlock> SummaryText;
@@ -199,10 +209,14 @@ private:
         TFunctionRef<void(int32, FDTTCardSink&)> Fill);
     /** Bound to HandleRowAction once and handed to every sink, which binds it to every control. */
     FDTTRowActionDelegate RowActionDelegate;
-    void PopulateResourceCard(const FString& Resource, const TArray<const FDTTDispatchRow*>& Rows, FDTTCardSink& Sink);
+    void PopulateResourceCard(const FString& Resource, const TArray<const FDTTDispatchRow*>& Rows,
+        const FString& CardId, bool bExpanded, FDTTCardSink& Sink);
     void PopulateDepotCard(const TArray<const FDTTDispatchRow*>& Depots, FDTTCardSink& Sink);
     void PopulateFuelCard(const TArray<const FDTTDispatchRow*>& FuelStops, FDTTCardSink& Sink);
-    void PopulateTruckCard(const FDTTTruckRow& Row, FDTTCardSink& Sink);
+    void PopulateTruckCard(const FDTTTruckRow& Row, const FString& CardId, bool bExpanded, FDTTCardSink& Sink);
+    /** The captions over a table's columns, built once with the page. */
+    void BuildDispatchHeader(class UHorizontalBox* Row);
+    void BuildTruckHeader(class UHorizontalBox* Row);
     void RebuildRuntimeDisplay();
     void UpdateRuntimeDisplayInPlace();
     bool RuntimeLayoutMatches() const;
@@ -223,7 +237,8 @@ private:
     UFUNCTION() void HandleDispatchFilterChanged(const FText& Text);
     UFUNCTION() void HandleTruckFilterChanged(const FText& Text);
     /** A page of cards: the filter line above a scroll box that fills the rest. */
-    class UVerticalBox* BuildCardPage(TObjectPtr<UScrollBox>& OutScroll, TObjectPtr<UEditableTextBox>& OutFilter);
+    class UVerticalBox* BuildCardPage(TObjectPtr<UScrollBox>& OutScroll, TObjectPtr<UEditableTextBox>& OutFilter,
+        class UHorizontalBox*& OutHeader);
     UFUNCTION() void HandleTrucksTabClicked();
     UFUNCTION() void HandleSettingsTabClicked();
     UFUNCTION() void HandleSettingsSaveClicked();

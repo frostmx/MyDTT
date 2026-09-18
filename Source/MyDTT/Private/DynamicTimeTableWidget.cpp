@@ -282,6 +282,11 @@ int32 UDynamicTimeTableWidget::GetRequestedSections() const
 
 void UDynamicTimeTableWidget::HandleRowAction(const FDTTRowTarget& Target)
 {
+    const bool bWasArmed = IsArmed(Target.Action, Target.CardKey);
+    const EDTTRowAction PreviousArmed = ArmedAction;
+    ArmedAction = EDTTRowAction::None;
+    ArmedKey.Reset();
+
     // Opening a card is the window's own business: it goes into the card's key and the page
     // redraws that one row.
     if (Target.Action == EDTTRowAction::ToggleExpandDispatch)
@@ -297,12 +302,25 @@ void UDynamicTimeTableWidget::HandleRowAction(const FDTTRowTarget& Target)
         return;
     }
 
+    // Switching an autopilot off hands the truck back to the player and the mod stops planning
+    // for it, so that one asks twice. Everything else a row offers is undone by clicking the
+    // opposite, and a confirmation on all of them would only teach the player to click through.
+    if (Target.Action == EDTTRowAction::TruckAutopilotOff && !bWasArmed)
+    {
+        ArmedAction = Target.Action;
+        ArmedKey = Target.CardKey;
+        SetEditorStatus(TEXT("dTT: click again to switch the autopilot off - the mod stops planning for that truck."));
+        RefreshRuntimeDisplay();
+        return;
+    }
+
     // Everything below writes to the world. The handle is checked here rather than when the row was
     // drawn: the row is up to 1.5 s old, and a truck can be sold while it is on the screen.
     AFGWheeledVehicleIdentifier* Truck = Target.Truck.Get();
     if (!IsValid(Truck))
     {
         SetEditorStatus(TEXT("dTT: that truck is gone."), true);
+        if (PreviousArmed != EDTTRowAction::None) RefreshRuntimeDisplay();
         return;
     }
 
@@ -446,6 +464,6 @@ void UDynamicTimeTableWidget::SyncCards(UScrollBox* Page, TArray<FDTTCardWidgets
         if (!Root || Page->GetChildIndex(Root) == Index) continue;
         Page->RemoveChild(Root);
         Page->InsertChildAt(Index, Root);
-        FDTTCardSink::Pad<UScrollBoxSlot>(Root, FMargin(4, 3));
+        FDTTCardSink::Pad<UScrollBoxSlot>(Root, FMargin(2, 1));
     }
 }

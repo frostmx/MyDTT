@@ -99,6 +99,41 @@ namespace DTTUI
         if (bFill) Slot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
         return Slot;
     }
+
+    // Column widths of the two tables, in slate units, shared by the rows and the header above
+    // them: a caption that does not sit over its column is worse than no caption. One column of
+    // each row is left to fill, so every other one is fixed.
+    inline constexpr float DTTRowHeight = 46.0f;
+    inline constexpr float DTTColIcon = 20.0f;
+    inline constexpr float DTTColResource = 226.0f;
+    inline constexpr float DTTColProducers = 190.0f;
+    inline constexpr float DTTColState = 132.0f;
+    inline constexpr float DTTColWait = 62.0f;
+    inline constexpr float DTTColChevron = 20.0f;
+    inline constexpr float DTTColTruck = 232.0f;
+    inline constexpr float DTTColPhase = 124.0f;
+    inline constexpr float DTTColCargo = 108.0f;
+    /** One requester's bar inside a resource row; eight of them fit before the row gives up. */
+    inline constexpr float DTTStockBarWidth = 54.0f;
+    inline constexpr int32 DTTMaxStockBars = 8;
+
+    /** A caption over a column, the same width as the Cell that will stand under it. */
+    inline void HeadCell(UWidgetTree* Tree, UHorizontalBox* Row, const FString& Caption, float Width,
+        EHorizontalAlignment Align = HAlign_Left, const FMargin& Margin = FMargin(0, 0, 6, 0))
+    {
+        UTextBlock* Text = MakeText(Tree, Caption, 11, FLinearColor(0.72f, 0.78f, 0.82f));
+        USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+        if (Width > 0.0f) Box->SetWidthOverride(Width);
+        Box->SetContent(Text);
+        if (USizeBoxSlot* S = Cast<USizeBoxSlot>(Text->Slot)) { S->SetHorizontalAlignment(Align); S->SetVerticalAlignment(VAlign_Center); }
+        Row->AddChild(Box);
+        if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot))
+        {
+            S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center);
+            if (Width <= 0.0f) S->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        }
+    }
+
 }
 
 // A card is built once and then updated in place on every refresh: the sink hands out the card's
@@ -199,14 +234,18 @@ struct FDTTCardSink
         return T;
     }
 
-    /** The card itself: a tinted border with a vertical body, stored as the card's root. Returns the body (null on an update). */
-    UVerticalBox* Root(const FLinearColor& Tint)
+    /**
+     * The card itself: a tinted border with a vertical body, stored as the card's root. Returns the
+     * body (null on an update). A card that is one row of a table passes no padding: the row has
+     * its own fixed height, and a border around it would make the table twice as tall.
+     */
+    UVerticalBox* Root(const FLinearColor& Tint, const FMargin& Padding = FMargin(12, 8))
     {
         UVerticalBox* Body = nullptr;
         if (bBuild)
         {
             UBorder* Border = Tree->ConstructWidget<UBorder>();
-            Border->SetBrushColor(Tint); Border->SetPadding(FMargin(12, 8));
+            Border->SetBrushColor(Tint); Border->SetPadding(Padding);
             Body = Tree->ConstructWidget<UVerticalBox>(); Border->SetContent(Body);
             Card.Root = Border;
             Card.Borders.Add(Border);

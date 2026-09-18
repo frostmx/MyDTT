@@ -83,9 +83,13 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     UVerticalBoxSlot* ScrollSlot = GroupsPage->AddChildToVerticalBox(GroupScrollBox);
     ScrollSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill)); ScrollSlot->SetPadding(FMargin(5,8));
 
-    Pages->AddChild(BuildCardPage(DispatchScrollBox, DispatchFilter));
+    UHorizontalBox* DispatchHeader = nullptr;
+    Pages->AddChild(BuildCardPage(DispatchScrollBox, DispatchFilter, DispatchHeader));
+    BuildDispatchHeader(DispatchHeader);
     DispatchFilter->OnTextChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleDispatchFilterChanged);
-    Pages->AddChild(BuildCardPage(TruckScrollBox, TruckFilter));
+    UHorizontalBox* TruckHeader = nullptr;
+    Pages->AddChild(BuildCardPage(TruckScrollBox, TruckFilter, TruckHeader));
+    BuildTruckHeader(TruckHeader);
     TruckFilter->OnTextChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleTruckFilterChanged);
     UVerticalBox* SettingsPage = WidgetTree->ConstructWidget<UVerticalBox>();
     Pages->AddChild(SettingsPage);
@@ -103,7 +107,8 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     FooterClose->OnClicked.AddDynamic(this,&UDynamicTimeTableWidget::HandleCloseClicked); AddRowItem(Footer,FooterClose);
 }
 
-UVerticalBox* UDynamicTimeTableWidget::BuildCardPage(TObjectPtr<UScrollBox>& OutScroll, TObjectPtr<UEditableTextBox>& OutFilter)
+UVerticalBox* UDynamicTimeTableWidget::BuildCardPage(TObjectPtr<UScrollBox>& OutScroll, TObjectPtr<UEditableTextBox>& OutFilter,
+    UHorizontalBox*& OutHeader)
 {
     UVerticalBox* Page = WidgetTree->ConstructWidget<UVerticalBox>();
     UHorizontalBox* FilterRow = WidgetTree->ConstructWidget<UHorizontalBox>();
@@ -115,6 +120,10 @@ UVerticalBox* UDynamicTimeTableWidget::BuildCardPage(TObjectPtr<UScrollBox>& Out
     FilterFont.Size = 13;
     OutFilter->WidgetStyle.SetFont(FilterFont).SetPadding(FMargin(8, 4));
     AddRowItem(FilterRow, OutFilter, 4, true);
+    // The captions stay above the scroll box rather than scrolling away with the first screen
+    // of forty resources.
+    OutHeader = WidgetTree->ConstructWidget<UHorizontalBox>();
+    Page->AddChildToVerticalBox(OutHeader)->SetPadding(FMargin(10, 2, 10, 2));
     OutScroll = WidgetTree->ConstructWidget<UScrollBox>();
     Page->AddChildToVerticalBox(OutScroll)->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
     return Page;
