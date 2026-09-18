@@ -117,7 +117,7 @@ namespace DTTUI
     inline constexpr float DTTColIcon = 20.0f;
     inline constexpr float DTTColResource = 226.0f;
     inline constexpr float DTTColProducers = 190.0f;
-    inline constexpr float DTTColState = 132.0f;
+    inline constexpr float DTTColState = 172.0f;
     inline constexpr float DTTColWait = 62.0f;
     inline constexpr float DTTColChevron = 20.0f;
     inline constexpr float DTTColTruck = 232.0f;
