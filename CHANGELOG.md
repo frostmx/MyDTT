@@ -1,5 +1,26 @@
 ﻿# Changelog
 
+## 3.2.0
+
+- The Dispatch tab is a table. A resource is one row: its producers, a small bar for every
+  requester, what state it is in and the longest anybody has waited. On each bar the stock is
+  filled in and two marks show where that station starts calling and what a delivery fills it to,
+  so which stations are about to call is a glance instead of three numbers read one at a time.
+  Twenty rows fit on the screen where four did.
+- The Trucks tab is a table the same way: cargo, name, phase, where it is going, how full it is.
+- A row opens where it stands, one at a time, and the detail that used to fill the whole card is
+  inside it. The rest of the page does not move when a row opens.
+- An open truck row carries four buttons: rebuild the lap, send to a depot, release, and the
+  autopilot. They are the same operations `/dtt park` and `/dtt release` run, so nothing can drift
+  apart between the chat and the window. Switching an autopilot off asks twice, because without it
+  the mod stops planning for that truck.
+- The window takes a share of the screen rather than a fixed 1120x820, so a big monitor shows more
+  rows. Column captions stay above the table when it scrolls, and the result of the last thing
+  asked for is on a line at the bottom, readable from every tab.
+- The snapshot names every station and truck once and the rows point into those tables. A truck's
+  route used to travel as full station names on every truck, which would have overrun the 64 KB a
+  single call may carry on a large enough world - a call the server drops in silence.
+
 ## 3.1.0
 
 - A station can ask for the full load. "=" right behind the resource in its tag - `(Bauxite=)`,

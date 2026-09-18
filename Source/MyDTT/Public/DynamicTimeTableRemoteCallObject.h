@@ -18,7 +18,7 @@ USTRUCT(BlueprintType)
 struct FDTTClientSnapshot
 {
     GENERATED_BODY()
-    UPROPERTY(BlueprintReadOnly) int32 ProtocolVersion = 14;
+    UPROPERTY(BlueprintReadOnly) int32 ProtocolVersion = 0;
     UPROPERTY(BlueprintReadOnly) int32 Revision = 0;
     // EDTTSnapshotSection bits this snapshot carries; the client keeps the other sections it has.
     UPROPERTY(BlueprintReadOnly) int32 Sections = 0;
@@ -58,7 +58,9 @@ public:
     // 12: the auto-name switch and its four tunables in the settings.
     // 13: the naming language in the settings.
     // 14: a station's "=" marker can be set from the station's own window.
-    static constexpr int32 ProtocolVersion = 14;
+    // 15: rows carry their dock or truck and a place in the snapshot's name tables, and the
+    //     window can park, release, rebuild a lap and switch an autopilot.
+    static constexpr int32 ProtocolVersion = 15;
     // A section is cut here so that the whole snapshot stays well under the 64 KB reliable bunch.
     static constexpr int32 MaxSnapshotRows = 400;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;

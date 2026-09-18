@@ -1,7 +1,7 @@
 {
     "FileVersion": 3,
     "Version": 3,
-    "VersionName": "3.1.0",
+    "VersionName": "3.2.0",
     "FriendlyName": "MyDTT",
     "Description": "Personal DynamicTimeTable fork with demand-based train and truck routing.",
     "Category": "Modding",
@@ -29,8 +29,8 @@
             "LoadingPhase": "Default"
         }
     ],
-    "SemVersion": "3.1.0",
+    "SemVersion": "3.2.0",
     "RequiredOnRemote": false,
-    "RemoteVersionRange": ">=3.1.0 <3.2.0",
+    "RemoteVersionRange": ">=3.2.0 <3.3.0",
     "GameVersion": ">=491125"
 }
