@@ -3,23 +3,35 @@
 ## 3.4.0
 
 - A Timetable tab, which answers the question the other tabs only circle around: what is happening
-  right now. Three blocks on one page - the laps being driven, the requests waiting, and what the
-  dispatcher could not do on its last pass.
-- A lap is drawn as its stops, one mark each, with the one the truck is driving to lit. Where a
-  truck is in its round is a glance now; as a line of station names it was text nobody read.
-- Next to it, the metres of road left before the lap ends. It is road, walked leg by leg over the
-  vehicle path network, not a line drawn across the map - only the first piece, from wherever the
-  truck stands to the stop it is heading for, is straight, because a truck between two nodes is
-  not somewhere the network can be asked about. There is deliberately no arrival time: the game
-  never says what speed a truck will hold, and a made-up ETA is worse than none. "/dtt why" prints
-  the same number, so the window can be checked against something.
-- The queue is the open requests in the order the dispatcher itself will take them - an empty
-  station first, then whoever has waited longest - so the page cannot invent an order of its own.
-- "Why nothing moved" counts the reasons the last pool pass gave up, per resource: no producer
-  with stock, no free truck that fits, the truck is carrying something else, solid against fluid,
-  no road. They are recorded where the dispatcher already logs them, as it runs, rather than
-  worked out again afterwards - which would be a second opinion, and a path search per resource
-  on every refresh.
+  right now. Four figures across the top - the open requests and how many are taken, waiting or
+  overdue; the median wait and the worst one; the trucks by what they are doing; and what stopped
+  the dispatcher's last pass - and two panes under them.
+- Laps in flight, grouped into needs attention (autopilot off), on the road, and docked or parked.
+  A lap is drawn as its stops by name with the legs between them - done, the one being driven, and
+  ahead - and a lap too long for the row ends in "+N". Where a truck is in its round is a glance.
+- Speed: the average over the last minute, from a sample the server takes every five seconds. The
+  speedometer itself would be honest and useless - the figure would flicker with every corner.
+- Time to the next stop: the road left on the current leg over the average speed of the last
+  minute of driving. Samples taken on a dock are left out of that average, or a truck that has just
+  pulled out would be promised its stop at a third of the speed it is about to drive at. The road
+  is the straight line to the stop, stretched by how much longer than its own straight line that
+  leg's road is. It is an estimate, and says so with a "~".
+- Left: the metres of road to the end of the lap, walked leg by leg over the vehicle path network,
+  not a line drawn across the map. "/dtt why" prints the same metres, both averages and the time,
+  so the window can be checked against something.
+- Open requests in the order the dispatcher itself will take them - an empty station first, then
+  whoever has waited longest - and under them "Why nothing moves": the reasons the last pool pass
+  gave up, one chip each with its count. They are recorded where the dispatcher already logs them,
+  as it runs, rather than worked out again afterwards.
+- Stations can be narrowed and ordered: a chip per role (producers, requesters, depots, fuel, and
+  the ones whose mode fights their tag), each showing how many rows it would leave; a box for one
+  resource; and every caption sorts, a second click reversing it. The tick over the table selects
+  every requester shown, so a limit goes onto all the requesters of one resource in two clicks.
+- The window follows its design: a top bar with the tabs, a status line with the page's counts in
+  the colour of what they mean, the tile in the cargo's paint colour on every row - the colour the
+  truck carrying it has in the world - badges for role, mode and phase, and inputs that belong to a
+  dark window. The tabs run Dispatch, Trucks, Stations, Timetable, Groups, Settings, and the window
+  opens on Dispatch. Recalculate bookings is called Rebuild bookings.
 
 ## 3.3.0
 
