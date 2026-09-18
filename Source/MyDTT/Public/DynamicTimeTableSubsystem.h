@@ -200,6 +200,9 @@ public:
 
     /** Pool trucks for ADTTSaveDataActor to write into the save. */
     void ExportPoolTrucks(TArray<FDTTSavedPoolTruck>& OutTrucks) const;
+    /** PlannedItems to and from the parallel arrays the save actor stores (see FDTTSavedTruckAnchors). */
+    static void PackPlannedItems(const TMap<FGuid, int32>& Planned, TArray<FGuid>& OutGuids, TArray<int32>& OutAmounts);
+    static void UnpackPlannedItems(const TArray<FGuid>& Guids, const TArray<int32>& Amounts, TMap<FGuid, int32>& OutPlanned);
 
     // Cargo paint. An autopilot truck wears the colour of what it carries; the paint is the
     // vehicle's own replicated customization, so a client without the mod sees it too. The colour

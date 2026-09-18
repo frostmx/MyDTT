@@ -156,8 +156,9 @@ struct FDTTDispatchTruckAnchors
     // Requester dock GUID -> items this lap plans to leave there (deficit at planning time).
     // Diagnostic: the transfer cap itself is recomputed from the live stock when the truck docks.
     // Saved with the lap: after a reload the last requester of a lap planned before the save
-    // still drains (IsLastPlannedRequester), instead of one lap of leftovers riding on.
-    UPROPERTY(SaveGame)
+    // still drains (IsLastPlannedRequester), instead of one lap of leftovers riding on. Saved as
+    // FDTTSavedTruckAnchors::PlannedGuids/PlannedAmounts, not as the map itself (see there).
+    UPROPERTY()
     TMap<FGuid, int32> PlannedItems;
 };
 
@@ -190,6 +191,16 @@ struct FDTTSavedTruckAnchors
 
     UPROPERTY(SaveGame)
     FDTTDispatchTruckAnchors Anchors;
+
+    // The lap's PlannedItems as two parallel arrays. A TMap with a struct key is written with the
+    // key serialized natively (16 raw bytes for FGuid), and third-party save readers such as
+    // satisfactory-calculator.com read every struct map key as tagged properties and fail on the
+    // whole save. Arrays of FGuid they read fine. Kept equal in length; see PackPlannedItems.
+    UPROPERTY(SaveGame)
+    TArray<FGuid> PlannedGuids;
+
+    UPROPERTY(SaveGame)
+    TArray<int32> PlannedAmounts;
 };
 
 USTRUCT(BlueprintType)
@@ -275,8 +286,8 @@ struct FDTTPoolTruckState
     UPROPERTY(SaveGame, BlueprintReadOnly, Category = "Dynamic Time Table")
     bool bParked = false;
 
-    /** Requester dock GUID -> items this lap planned to leave there. Saved with the lap. */
-    UPROPERTY(SaveGame)
+    /** Requester dock GUID -> items this lap planned to leave there. Saved with the lap, as FDTTSavedPoolTruck::PlannedGuids/PlannedAmounts. */
+    UPROPERTY()
     TMap<FGuid, int32> PlannedItems;
 
     /** World seconds of the last assignment. Runtime only. */
@@ -302,6 +313,13 @@ struct FDTTSavedPoolTruck
 
     UPROPERTY(SaveGame)
     FDTTPoolTruckState State;
+
+    // State.PlannedItems, split the same way as FDTTSavedTruckAnchors::PlannedGuids.
+    UPROPERTY(SaveGame)
+    TArray<FGuid> PlannedGuids;
+
+    UPROPERTY(SaveGame)
+    TArray<int32> PlannedAmounts;
 };
 
 /** One line of the Dispatch tab / "/dtt dispatch": a tagged station, a depot or a fuel stop. */

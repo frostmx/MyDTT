@@ -1527,7 +1527,8 @@ void UDynamicTimeTableSubsystem::InitializePersistence()
         for (const FDTTSavedTruckAnchors& Saved : Found->GetTruckAnchors())
         {
             if (!IsValid(Saved.Vehicle.Get()) || !Saved.Anchors.ProducerGuid.IsValid()) continue;
-            DispatchTruckAnchors.Add(Saved.Vehicle.Get(), Saved.Anchors);
+            FDTTDispatchTruckAnchors& Anchors = DispatchTruckAnchors.Add(Saved.Vehicle.Get(), Saved.Anchors);
+            UnpackPlannedItems(Saved.PlannedGuids, Saved.PlannedAmounts, Anchors.PlannedItems);
             ++Restored;
         }
         UE_LOG(LogDynamicTimeTableSubsystem, Display,
@@ -1539,7 +1540,8 @@ void UDynamicTimeTableSubsystem::InitializePersistence()
         for (const FDTTSavedPoolTruck& Saved : Found->GetPoolTrucks())
         {
             if (!IsValid(Saved.Vehicle.Get()) || Saved.State.Phase == EDTTTruckPhase::Unmanaged) continue;
-            PoolTrucks.Add(Saved.Vehicle.Get(), Saved.State);
+            FDTTPoolTruckState& State = PoolTrucks.Add(Saved.Vehicle.Get(), Saved.State);
+            UnpackPlannedItems(Saved.PlannedGuids, Saved.PlannedAmounts, State.PlannedItems);
             ++PoolRestored;
         }
         UE_LOG(LogDynamicTimeTableSubsystem, Display,
@@ -1605,7 +1607,7 @@ void UDynamicTimeTableSubsystem::SyncConfigurationToSaveActor()
     if (SaveDataActor.IsValid() && IsServer())
     {
         SaveDataActor->SetGroups(TArray<FDTTStationGroup>());
-        SaveDataActor->SetDataVersion(8);
+        SaveDataActor->SetDataVersion(9);
         SaveDataActor->SetSettings(Settings);
         SaveDataActor->SetPaintByCargo(bPaintByCargo);
     }
@@ -1620,6 +1622,7 @@ void UDynamicTimeTableSubsystem::ExportTruckAnchors(TArray<FDTTSavedTruckAnchors
         FDTTSavedTruckAnchors& Saved = OutAnchors.AddDefaulted_GetRef();
         Saved.Vehicle = Pair.Key.Get();
         Saved.Anchors = Pair.Value;
+        PackPlannedItems(Pair.Value.PlannedItems, Saved.PlannedGuids, Saved.PlannedAmounts);
     }
 }
 
@@ -1632,6 +1635,30 @@ void UDynamicTimeTableSubsystem::ExportPoolTrucks(TArray<FDTTSavedPoolTruck>& Ou
         FDTTSavedPoolTruck& Saved = OutTrucks.AddDefaulted_GetRef();
         Saved.Vehicle = Pair.Key.Get();
         Saved.State = Pair.Value;
+        PackPlannedItems(Pair.Value.PlannedItems, Saved.PlannedGuids, Saved.PlannedAmounts);
+    }
+}
+
+void UDynamicTimeTableSubsystem::PackPlannedItems(const TMap<FGuid, int32>& Planned, TArray<FGuid>& OutGuids, TArray<int32>& OutAmounts)
+{
+    OutGuids.Reset(Planned.Num());
+    OutAmounts.Reset(Planned.Num());
+    for (const auto& Pair : Planned)
+    {
+        OutGuids.Add(Pair.Key);
+        OutAmounts.Add(Pair.Value);
+    }
+}
+
+void UDynamicTimeTableSubsystem::UnpackPlannedItems(const TArray<FGuid>& Guids, const TArray<int32>& Amounts, TMap<FGuid, int32>& OutPlanned)
+{
+    // A save from 3.4.0 or earlier has no arrays; its map was written directly and is not read back
+    // any more, so such a truck finishes its current lap without a plan, as it would after a restart.
+    OutPlanned.Reset();
+    const int32 Num = FMath::Min(Guids.Num(), Amounts.Num());
+    for (int32 Index = 0; Index < Num; ++Index)
+    {
+        if (Guids[Index].IsValid()) OutPlanned.Add(Guids[Index], Amounts[Index]);
     }
 }
 

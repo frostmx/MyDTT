@@ -40,9 +40,10 @@ private:
     // 4 and later store no groups: the configuration lives in the station names themselves. The
     // actor stays because older saves reference the class, and an empty one is cheaper than the
     // risk of pulling a class out from under a load. 5 adds dispatch trucks' fuel anchors, 6 the
-    // shared-pool trucks, 7 the settings, 8 the cargo paint.
+    // shared-pool trucks, 7 the settings, 8 the cargo paint, 9 the lap plans as parallel arrays
+    // instead of a GUID-keyed map.
     UPROPERTY(SaveGame)
-    int32 DataVersion = 8;
+    int32 DataVersion = 9;
 
     UPROPERTY(SaveGame)
     TArray<FDTTStationGroup> SavedGroups;

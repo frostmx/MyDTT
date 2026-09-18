@@ -1,5 +1,13 @@
 ﻿# Changelog
 
+## 3.4.1
+
+- Saves open in the interactive map at satisfactory-calculator.com again. The plan of a truck's
+  current lap was saved as a map keyed by station GUID, which that site's save reader cannot parse,
+  and one such truck was enough to make the whole save fail to load there. The plan is now saved as
+  two plain lists. A save made by 3.4.0 still loads; its trucks only finish the current lap without
+  the plan, as after a restart. Server-only change: 3.4.0 clients keep working.
+
 ## 3.4.0
 
 - A Timetable tab, which answers the question the other tabs only circle around: what is happening
