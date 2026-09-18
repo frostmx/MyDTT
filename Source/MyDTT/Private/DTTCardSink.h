@@ -321,7 +321,8 @@ struct FDTTCardSink
     }
 
     /** An item icon of Size points; collapsed when there is no texture, keeping its place. */
-    void Icon(UPanelWidget* Parent, UTexture2D* Texture, float Size, const FMargin& Margin = FMargin(0, 0, 6, 0))
+    void Icon(UPanelWidget* Parent, UTexture2D* Texture, float Size, const FMargin& Margin = FMargin(0, 0, 6, 0),
+        bool bKeepSpace = false)
     {
         UImage* Image = nullptr;
         if (bBuild)
@@ -344,9 +345,11 @@ struct FDTTCardSink
         ++ImageIndex;
         if (!Image) return;
         if (Texture) Image->SetBrushFromTexture(Texture, false);
-        // The size box is what takes the space, so hide that.
+        // The size box is what takes the space, so hide that. In a table the column has to stay
+        // even when the item has no icon, so there it is hidden rather than collapsed.
         UWidget* Holder = Image->GetParent() ? static_cast<UWidget*>(Image->GetParent()) : static_cast<UWidget*>(Image);
-        Holder->SetVisibility(Texture ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed);
+        Holder->SetVisibility(Texture ? ESlateVisibility::SelfHitTestInvisible
+            : (bKeepSpace ? ESlateVisibility::Hidden : ESlateVisibility::Collapsed));
     }
 
     /** A thin fill bar; Percent 0..1. */
@@ -439,9 +442,26 @@ struct FDTTCardSink
                     if (Width <= 0.0f) S->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
                 }
             }
+            KeepColumn(T, Width);
             return T;
         }
-        return Text(nullptr, Value, Size, Color);
+        T = Text(nullptr, Value, Size, Color);
+        KeepColumn(T, Width);
+        return T;
+    }
+
+    /**
+     * An empty cell still owns its column. A size box whose child is collapsed reports no size
+     * at all - the width override does not survive a collapsed child - and the row's fill column
+     * swallows the difference, so one station without a group pushed every column after it out
+     * from under its caption. Empty text draws nothing either way; only the layout differs.
+     */
+    static void KeepColumn(UTextBlock* Text, float Width)
+    {
+        if (Text && Width > 0.0f && Text->GetVisibility() == ESlateVisibility::Collapsed)
+        {
+            Text->SetVisibility(ESlateVisibility::Hidden);
+        }
     }
 
     /**
@@ -492,18 +512,23 @@ struct FDTTCardSink
      * into a different row and would otherwise keep the last row's tick.
      */
     UDTTRowCheck* Check(UPanelWidget* Parent, bool bChecked, const FDTTRowTarget& Target,
-        bool bVisible = true, const FMargin& Margin = FMargin(0, 0, 6, 0))
+        bool bVisible = true, float Width = 0.0f, const FMargin& Margin = FMargin(0, 0, 6, 0))
     {
         UDTTRowCheck* C = nullptr;
         if (bBuild)
         {
             C = Tree->ConstructWidget<UDTTRowCheck>();
             C->Bind(RowAction);
+            // A box of the column's width, so that the caption above it and every row below
+            // stand in the same place: a check is whatever size the style makes it otherwise.
+            USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+            if (Width > 0.0f) Box->SetWidthOverride(Width);
+            Box->SetContent(C);
             if (Parent)
             {
-                Parent->AddChild(C);
-                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(C->Slot)) { S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center); }
-                Pad<UVerticalBoxSlot>(C, Margin);
+                Parent->AddChild(Box);
+                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot)) { S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center); }
+                Pad<UVerticalBoxSlot>(Box, Margin);
             }
             Card.Checks.Add(C);
         }
@@ -517,6 +542,7 @@ struct FDTTCardSink
         // SetIsChecked does not raise OnCheckStateChanged - that fires on a real toggle only -
         // so writing the state back here cannot be mistaken for the player ticking the box.
         if (C->IsChecked() != bChecked) C->SetIsChecked(bChecked);
+        // Hidden, not collapsed: the column has to keep its width in every row.
         C->SetVisibility(bVisible ? ESlateVisibility::Visible : ESlateVisibility::Hidden);
         return C;
     }

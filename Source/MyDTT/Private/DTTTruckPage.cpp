@@ -50,7 +50,7 @@ void UDynamicTimeTableWidget::PopulateTruckCard(const FDTTTruckRow& Row, const F
     UTexture2D* CargoIcon = IconFor(Row.CargoItemClass);
     if (!CargoIcon && Row.CargoStacks > 0) CargoIcon = IconFor(Row.ItemClass);
     if (!CargoIcon) CargoIcon = IconFor(Row.ItemClass);
-    Sink.Icon(Line, CargoIcon, DTTColIcon, FMargin(0, 0, 6, 0));
+    Sink.Icon(Line, CargoIcon, DTTColIcon, FMargin(0, 0, 6, 0), true);
 
     // The mod names a dispatch truck "<resource> -> <dock>", so the resource leads and the name is
     // only worth showing when the player chose one.

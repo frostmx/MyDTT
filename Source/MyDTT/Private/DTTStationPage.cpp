@@ -39,6 +39,9 @@ namespace
 void UDynamicTimeTableWidget::BuildStationHeader(UHorizontalBox* Row)
 {
     if (!Row) return;
+    // One caption per cell of the row, in the same order and with the same widths and margins.
+    // A caption that stands over the wrong column is worse than no caption, and the fill column
+    // takes up every point the two sides disagree about.
     HeadCell(WidgetTree, Row, FString(), DTTColCheck);
     HeadCell(WidgetTree, Row, FString(), DTTColIcon);
     HeadCell(WidgetTree, Row, TEXT("STATION"), 0.0f);
@@ -46,8 +49,9 @@ void UDynamicTimeTableWidget::BuildStationHeader(UHorizontalBox* Row)
     HeadCell(WidgetTree, Row, TEXT("GROUP"), DTTColGroup);
     HeadCell(WidgetTree, Row, TEXT("ROLE"), DTTColRole);
     HeadCell(WidgetTree, Row, TEXT("MODE"), DTTColMode);
-    HeadCell(WidgetTree, Row, TEXT("STOCK"), DTTStockBarWide + DTTColStock + 6.0f);
-    HeadCell(WidgetTree, Row, TEXT("LIMIT"), DTTColLimit, HAlign_Right);
+    HeadCell(WidgetTree, Row, TEXT("STOCK"), DTTStockBarWide, HAlign_Left, FMargin(0, 0, 8, 0));
+    HeadCell(WidgetTree, Row, FString(), DTTColStock);
+    HeadCell(WidgetTree, Row, TEXT("LIMIT"), DTTColLimit, HAlign_Right, FMargin(0, 0, 16, 0));
     HeadCell(WidgetTree, Row, TEXT("STATE"), DTTColState);
     HeadCell(WidgetTree, Row, TEXT("WAIT"), DTTColWait, HAlign_Right);
     HeadCell(WidgetTree, Row, FString(), DTTColChevron);
@@ -232,8 +236,8 @@ void UDynamicTimeTableWidget::PopulateStationCard(const FDTTStationRow& Row, con
     FDTTRowTarget Select = Toggle;
     Select.Action = EDTTRowAction::StationSelect;
     // Only a requester can carry a limit, so only a requester can be ticked for the limit box.
-    Sink.Check(Line, bSelected, Select, bRequester);
-    Sink.Icon(Line, IconFor(Row.ItemClass), DTTColIcon, FMargin(0, 0, 6, 0));
+    Sink.Check(Line, bSelected, Select, bRequester, DTTColCheck);
+    Sink.Icon(Line, IconFor(Row.ItemClass), DTTColIcon, FMargin(0, 0, 6, 0), true);
     Sink.Cell(Line, DTTStationName(Row.Name), 15, bMatches ? FLinearColor::White : DTTRed, 0.0f);
     Sink.Cell(Line, Row.ResourceId, 13, DTTCyan, DTTColItem);
     Sink.Cell(Line, Row.GroupName, 12, DTTSteel, DTTColGroup);

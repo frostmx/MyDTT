@@ -156,7 +156,7 @@ void UDynamicTimeTableWidget::PopulateResourceCard(const FString& Resource, cons
     Toggle.CardKey = CardId;
     UHorizontalBox* Line = Sink.Row(Body, DTTRowHeight, Toggle, FLinearColor::White);
 
-    Sink.Icon(Line, List.Num() > 0 ? IconFor(List[0]->ItemClass) : nullptr, DTTColIcon, FMargin(0, 0, 6, 0));
+    Sink.Icon(Line, List.Num() > 0 ? IconFor(List[0]->ItemClass) : nullptr, DTTColIcon, FMargin(0, 0, 6, 0), true);
     Sink.Cell(Line, Resource, 15, Accent, DTTColResource);
 
     FString ProducerText;
