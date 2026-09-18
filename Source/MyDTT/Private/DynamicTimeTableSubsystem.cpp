@@ -6428,7 +6428,14 @@ void UDynamicTimeTableSubsystem::BuildStationRows(TArray<FDTTStationRow>& OutRow
         const AFGBuildableDockingStation* Dock = IsValid(Identifier) ? Identifier->GetStation() : nullptr;
         Row.Dock = Identifier;
         Row.DockingPathNodeGuid = Guid;
-        Row.Name = StripAllTags(FullName).TrimStartAndEnd();
+        // The same treatment as BuildDispatchRows: an auto-named dock keeps the caption written
+        // behind its tag ("-240/m -> Ingots"), everything else loses the tags and nothing more.
+        {
+            FString Head, Tag, Tail;
+            Row.Name = DTSSplitAutoBlock(FullName, Head, Tag, Tail)
+                ? (Head.TrimStartAndEnd() + TEXT(" ") + Tail).TrimStartAndEnd()
+                : StripAllTags(FullName).TrimStartAndEnd();
+        }
         if (Row.Name.IsEmpty()) Row.Name = FullName.TrimStartAndEnd();
         FString Base, GroupName;
         int32 Slots = 1;

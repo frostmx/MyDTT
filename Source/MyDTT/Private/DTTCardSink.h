@@ -141,6 +141,7 @@ namespace DTTUI
     inline constexpr float DTTColCargo = 108.0f;
     // Stations table.
     inline constexpr float DTTColCheck = 26.0f;
+    inline constexpr float DTTColItem = 132.0f;
     inline constexpr float DTTColGroup = 104.0f;
     inline constexpr float DTTColRole = 78.0f;
     inline constexpr float DTTColMode = 64.0f;

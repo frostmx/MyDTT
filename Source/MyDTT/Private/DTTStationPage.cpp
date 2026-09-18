@@ -42,6 +42,7 @@ void UDynamicTimeTableWidget::BuildStationHeader(UHorizontalBox* Row)
     HeadCell(WidgetTree, Row, FString(), DTTColCheck);
     HeadCell(WidgetTree, Row, FString(), DTTColIcon);
     HeadCell(WidgetTree, Row, TEXT("STATION"), 0.0f);
+    HeadCell(WidgetTree, Row, TEXT("RESOURCE"), DTTColItem);
     HeadCell(WidgetTree, Row, TEXT("GROUP"), DTTColGroup);
     HeadCell(WidgetTree, Row, TEXT("ROLE"), DTTColRole);
     HeadCell(WidgetTree, Row, TEXT("MODE"), DTTColMode);
@@ -63,6 +64,8 @@ void UDynamicTimeTableWidget::BuildStationTools(UHorizontalBox* Row)
     StationLimitInput->SetMinValue(0); StationLimitInput->SetMaxValue(9999);
     StationLimitInput->SetMinSliderValue(0); StationLimitInput->SetMaxSliderValue(200);
     StationLimitInput->SetDelta(1); StationLimitInput->SetValue(0);
+    // A limit is stacks, and a spin box that offers 0.0 invites a number nobody can set.
+    StationLimitInput->SetMinFractionalDigits(0); StationLimitInput->SetMaxFractionalDigits(0);
     StationLimitInput->SetMinDesiredWidth(90);
     AddRowItem(Row, StationLimitInput, 4);
 
@@ -160,8 +163,9 @@ void UDynamicTimeTableWidget::RefreshStationDisplay()
         Shown.Add(&Row);
     }
 
-    // The tick is part of the key: a card whose shape is the same either way still has to be
-    // told, and telling it through the key is what keeps the update pass honest.
+    // The tick is deliberately not in the key: a ticked row has exactly the shape of an unticked
+    // one, and both the box and the row's tint are written on every pass. Only what changes the
+    // widget count belongs here - whether the row is open, and what kind of station it is.
     TArray<FString> Keys;
     TArray<bool> Expanded;
     TArray<FString> Ids;
@@ -231,6 +235,7 @@ void UDynamicTimeTableWidget::PopulateStationCard(const FDTTStationRow& Row, con
     Sink.Check(Line, bSelected, Select, bRequester);
     Sink.Icon(Line, IconFor(Row.ItemClass), DTTColIcon, FMargin(0, 0, 6, 0));
     Sink.Cell(Line, DTTStationName(Row.Name), 15, bMatches ? FLinearColor::White : DTTRed, 0.0f);
+    Sink.Cell(Line, Row.ResourceId, 13, DTTCyan, DTTColItem);
     Sink.Cell(Line, Row.GroupName, 12, DTTSteel, DTTColGroup);
     Sink.Cell(Line, RoleText(Row), 12, bDepot || bFuel ? DTTSteel : DTTGrey, DTTColRole);
 
@@ -254,7 +259,7 @@ void UDynamicTimeTableWidget::PopulateStationCard(const FDTTStationRow& Row, con
     // The limit as the name spells it, and a dash when it says nothing: the number in the tag is
     // what the box writes, so it is the number the table has to show.
     Sink.Cell(Line, bRequester ? (Row.TagThreshold > 0 ? FString::Printf(TEXT("%d"), Row.TagThreshold) : FString(TEXT("-"))) : FString(),
-        12, Row.TagThreshold > 0 ? FLinearColor::White : DTTDim, DTTColLimit, HAlign_Right);
+        12, Row.TagThreshold > 0 ? FLinearColor::White : DTTDim, DTTColLimit, HAlign_Right, FMargin(0, 0, 16, 0));
 
     FString State;
     FLinearColor StateColor = DTTDim;
