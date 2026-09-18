@@ -34,6 +34,7 @@ struct FDTTCardWidgets
     UPROPERTY() TArray<TObjectPtr<UProgressBar>> Bars;
     UPROPERTY() TArray<TObjectPtr<UImage>> Images;
     UPROPERTY() TArray<TObjectPtr<class UDTTRowButton>> Buttons;
+    UPROPERTY() TArray<TObjectPtr<class UDTTRowCheck>> Checks;
 };
 class USpinBox;
 class UTextBlock;

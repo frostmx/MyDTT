@@ -172,14 +172,14 @@ struct FDTTCardSink
     UWidgetTree* Tree = nullptr;
     bool bBuild = true;
     FDTTCardWidgets& Card;
-    int32 TextIndex = 0, BorderIndex = 0, BarIndex = 0, ImageIndex = 0, ButtonIndex = 0;
+    int32 TextIndex = 0, BorderIndex = 0, BarIndex = 0, ImageIndex = 0, ButtonIndex = 0, CheckIndex = 0;
     /** What every control this sink makes reports to; see UDynamicTimeTableWidget::HandleRowAction. */
     FDTTRowActionDelegate RowAction;
 
     FDTTCardSink(UWidgetTree* InTree, bool bInBuild, FDTTCardWidgets& InCard) : Tree(InTree), bBuild(bInBuild), Card(InCard) {}
 
     /** True when an update walked past what the build stored: the shape changed without the key noticing. */
-    bool Overran() const { return TextIndex != Card.Texts.Num() || BorderIndex != Card.Borders.Num() || BarIndex != Card.Bars.Num() || ImageIndex != Card.Images.Num() || ButtonIndex != Card.Buttons.Num(); }
+    bool Overran() const { return TextIndex != Card.Texts.Num() || BorderIndex != Card.Borders.Num() || BarIndex != Card.Bars.Num() || ImageIndex != Card.Images.Num() || ButtonIndex != Card.Buttons.Num() || CheckIndex != Card.Checks.Num(); }
 
     template <typename TSlot>
     static void Pad(UWidget* Widget, const FMargin& Margin)
@@ -474,6 +474,41 @@ struct FDTTCardSink
         UWidget* Holder = B->GetParent() ? static_cast<UWidget*>(B->GetParent()) : static_cast<UWidget*>(B);
         Holder->SetVisibility(bVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
         return B;
+    }
+
+    /**
+     * A tick box in a row, for a selection the page holds. Same discipline as Button: never leave
+     * the call out on a condition. bChecked is written on every pass, because the box is recycled
+     * into a different row and would otherwise keep the last row's tick.
+     */
+    UDTTRowCheck* Check(UPanelWidget* Parent, bool bChecked, const FDTTRowTarget& Target,
+        bool bVisible = true, const FMargin& Margin = FMargin(0, 0, 6, 0))
+    {
+        UDTTRowCheck* C = nullptr;
+        if (bBuild)
+        {
+            C = Tree->ConstructWidget<UDTTRowCheck>();
+            C->Bind(RowAction);
+            if (Parent)
+            {
+                Parent->AddChild(C);
+                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(C->Slot)) { S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center); }
+                Pad<UVerticalBoxSlot>(C, Margin);
+            }
+            Card.Checks.Add(C);
+        }
+        else if (Card.Checks.IsValidIndex(CheckIndex))
+        {
+            C = Card.Checks[CheckIndex].Get();
+        }
+        ++CheckIndex;
+        if (!C) return nullptr;
+        C->Attach(Target);
+        // SetIsChecked does not raise OnCheckStateChanged - that fires on a real toggle only -
+        // so writing the state back here cannot be mistaken for the player ticking the box.
+        if (C->IsChecked() != bChecked) C->SetIsChecked(bChecked);
+        C->SetVisibility(bVisible ? ESlateVisibility::Visible : ESlateVisibility::Hidden);
+        return C;
     }
 
     /**

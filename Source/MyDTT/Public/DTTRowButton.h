@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/Button.h"
+#include "Components/CheckBox.h"
 #include "DTTRowButton.generated.h"
 
 /**
@@ -21,6 +22,17 @@ enum class EDTTRowAction : uint8
     TruckAutopilotOn,
     TruckAutopilotOff,
     TruckRebuildLap,
+    /** Open or close one row of the Stations page. */
+    ToggleExpandStation,
+    /** Tick a station's row into the selection the limit box writes to. */
+    StationSelect,
+    /** Put the limit standing in the page's box on every selected station. */
+    StationApplyLimit,
+    StationClearSelection,
+    StationStayOn,
+    StationStayOff,
+    StationClearClaim,
+    StationSendNow,
 };
 
 /**
@@ -36,7 +48,7 @@ struct FDTTRowTarget
     EDTTRowAction Action = EDTTRowAction::None;
     TWeakObjectPtr<class AFGWheeledVehicleIdentifier> Truck;
     TWeakObjectPtr<class AFGDockingStationIdentifier> Dock;
-    /** Which card an expand toggles. Empty for everything else. */
+    /** Which card an expand toggles, and which station a tick selects. Empty for everything else. */
     FString CardKey;
 };
 
@@ -69,6 +81,28 @@ public:
 private:
     UFUNCTION()
     void HandleClicked();
+
+    FDTTRowActionDelegate OnAction;
+    FDTTRowTarget Target;
+};
+
+/**
+ * A tick box that knows which row it is in. Everything said above about UDTTRowButton holds here
+ * too, including Attach on every pass: OnCheckStateChanged carries the new state and no sender.
+ */
+UCLASS(NotBlueprintable, NotPlaceable)
+class MYDTT_API UDTTRowCheck : public UCheckBox
+{
+    GENERATED_BODY()
+
+public:
+    void Bind(const FDTTRowActionDelegate& Delegate);
+    void Attach(const FDTTRowTarget& InTarget) { Target = InTarget; }
+    const FDTTRowTarget& GetTarget() const { return Target; }
+
+private:
+    UFUNCTION()
+    void HandleChanged(bool bIsChecked);
 
     FDTTRowActionDelegate OnAction;
     FDTTRowTarget Target;
