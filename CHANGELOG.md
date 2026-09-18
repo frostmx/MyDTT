@@ -1,5 +1,20 @@
 ﻿# Changelog
 
+## 3.4.2
+
+- The Timetable no longer slows the server down. It worked out the road length of every leg of
+  every truck's route by a path search, remembered only for one refresh, and asked again every
+  second and a half for every player with the tab open: with fifty trucks the dedicated server's
+  tick rate fell from above 40 to between 15 and 25, which players felt as ping and lag. Road
+  lengths are now kept for five minutes, and one refresh starts at most six new searches.
+- Every section of the window is timed on the server; one that takes 8 ms or more is logged as
+  SNAPSHOT_SLOW with its name, so the log says which tab costs what.
+- An open Dispatch row drew the call line and the fill target of each requester at the wrong place:
+  the bar stretched across the column while the marks were placed for its own width, so a station
+  calling at 88 % had its yellow mark at a quarter. The bar keeps its width now.
+- Protocol unchanged: 3.4.0 and 3.4.1 clients keep working with a 3.4.2 server and the other way
+  round.
+
 ## 3.4.1
 
 - Saves open in the interactive map at satisfactory-calculator.com again. The plan of a truck's
