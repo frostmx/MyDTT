@@ -82,6 +82,7 @@ void UDynamicTimeTableWidget::NativeConstruct()
     DispatchTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleDispatchTabClicked);
     TrucksTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleTrucksTabClicked);
     StationsTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleStationsTabClicked);
+    TimetableTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleTimetableTabClicked);
     SettingsTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsTabClicked);
     SettingsSaveButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsSaveClicked);
     SettingsDefaultsButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsDefaultsClicked);
@@ -255,6 +256,7 @@ void UDynamicTimeTableWidget::RefreshRuntimeDisplay()
     if (ActiveTab == EDTTTab::Dispatch) { RefreshDispatchDisplay(); return; }
     if (ActiveTab == EDTTTab::Trucks) { RefreshTruckDisplay(); return; }
     if (ActiveTab == EDTTTab::Stations) { RefreshStationDisplay(); return; }
+    if (ActiveTab == EDTTTab::Timetable) { RefreshTimetableDisplay(); return; }
     if (ActiveTab == EDTTTab::Settings) return;
     if (!GroupScrollBox) return;
 
@@ -280,6 +282,7 @@ int32 UDynamicTimeTableWidget::GetRequestedSections() const
     case EDTTTab::Dispatch: return EDTTSnapshotSection::Dispatch;
     case EDTTTab::Trucks: return EDTTSnapshotSection::Trucks;
     case EDTTTab::Stations: return EDTTSnapshotSection::Stations;
+    case EDTTTab::Timetable: return EDTTSnapshotSection::Timetable;
     default: return EDTTSnapshotSection::Groups;
     }
 }
@@ -437,6 +440,7 @@ void UDynamicTimeTableWidget::SetActiveTab(EDTTTab Tab)
     if (DispatchTabButton) DispatchTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Dispatch ? Active : Inactive);
     if (TrucksTabButton) TrucksTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Trucks ? Active : Inactive);
     if (StationsTabButton) StationsTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Stations ? Active : Inactive);
+    if (TimetableTabButton) TimetableTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Timetable ? Active : Inactive);
     if (SettingsTabButton) SettingsTabButton->SetBackgroundColor(ActiveTab == EDTTTab::Settings ? Active : Inactive);
     // Recalculate rebuilds the group bookings of the balancer, which only the Groups tab shows.
     if (RecalculateButton) RecalculateButton->SetVisibility(ActiveTab == EDTTTab::Groups ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
@@ -450,6 +454,7 @@ void UDynamicTimeTableWidget::HandleGroupsTabClicked() { SetActiveTab(EDTTTab::G
 void UDynamicTimeTableWidget::HandleDispatchTabClicked() { SetActiveTab(EDTTTab::Dispatch); }
 void UDynamicTimeTableWidget::HandleTrucksTabClicked() { SetActiveTab(EDTTTab::Trucks); }
 void UDynamicTimeTableWidget::HandleStationsTabClicked() { SetActiveTab(EDTTTab::Stations); }
+void UDynamicTimeTableWidget::HandleTimetableTabClicked() { SetActiveTab(EDTTTab::Timetable); }
 
 UTexture2D* UDynamicTimeTableWidget::IconFor(const TSoftClassPtr<UFGItemDescriptor>& ItemClass)
 {

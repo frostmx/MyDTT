@@ -71,6 +71,7 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     DispatchTabButton = MakeButton(WidgetTree,TEXT("Dispatch")); AddRowItem(Tabs,DispatchTabButton,3);
     TrucksTabButton = MakeButton(WidgetTree,TEXT("Trucks")); AddRowItem(Tabs,TrucksTabButton,3);
     StationsTabButton = MakeButton(WidgetTree,TEXT("Stations")); AddRowItem(Tabs,StationsTabButton,3);
+    TimetableTabButton = MakeButton(WidgetTree,TEXT("Timetable")); AddRowItem(Tabs,TimetableTabButton,3);
     SettingsTabButton = MakeButton(WidgetTree,TEXT("Settings")); AddRowItem(Tabs,SettingsTabButton,3);
 
     Pages = WidgetTree->ConstructWidget<UWidgetSwitcher>();
@@ -98,6 +99,10 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     BuildStationTools(StationTools);
     BuildStationHeader(StationHeader);
     StationFilter->OnTextChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleStationFilterChanged);
+    UHorizontalBox* TimetableHeader = nullptr;
+    Pages->AddChild(BuildCardPage(TimetableScrollBox, TimetableFilter, TimetableHeader));
+    BuildTimetableHeader(TimetableHeader);
+    TimetableFilter->OnTextChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleTimetableFilterChanged);
     UVerticalBox* SettingsPage = WidgetTree->ConstructWidget<UVerticalBox>();
     Pages->AddChild(SettingsPage);
     BuildSettingsPanel(SettingsPage);
@@ -148,6 +153,7 @@ UVerticalBox* UDynamicTimeTableWidget::BuildCardPage(TObjectPtr<UScrollBox>& Out
 void UDynamicTimeTableWidget::HandleDispatchFilterChanged(const FText&) { RefreshDispatchDisplay(); }
 void UDynamicTimeTableWidget::HandleTruckFilterChanged(const FText&) { RefreshTruckDisplay(); }
 void UDynamicTimeTableWidget::HandleStationFilterChanged(const FText&) { RefreshStationDisplay(); }
+void UDynamicTimeTableWidget::HandleTimetableFilterChanged(const FText&) { RefreshTimetableDisplay(); }
 
 void UDynamicTimeTableWidget::BuildEditorPanel(UVerticalBox* Main)
 {

@@ -5710,6 +5710,9 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
 {
     const UWorld* World = GetWorld();
     LastPoolDispatchSeconds = IsValid(World) ? World->GetTimeSeconds() : 0.0;
+    // What follows describes this pass only; a running total would say a truck is stuck long
+    // after it moved.
+    LastPoolSkips.Reset();
 
     // Pointers into PoolTrucks: nothing below adds or removes an entry.
     TArray<TPair<AFGWheeledVehicleIdentifier*, FDTTPoolTruckState*>> Idle;
@@ -5749,6 +5752,7 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
         if (!ItemClass)
         {
             UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_SKIP Resource='%s' Reason=item-class-not-found"), *Station.ResourceId);
+            RecordPoolSkip(Station.ResourceId, EDTTSkipReason::ItemClassNotFound);
             continue;
         }
         TArray<FDTTOpenRequester> Open;
@@ -5795,6 +5799,7 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
             {
                 UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_SKIP Truck='%s' Resource='%s' Reason=form Trigger=%s"),
                     *DTSVehicleName(Vehicle), *Demand.ResourceId, Trigger);
+                RecordPoolSkip(Demand.ResourceId, EDTTSkipReason::Form, Demand.Open);
                 continue;
             }
             const bool bCargoDrained = IsCargoDrainedAtDepot(State);
@@ -5812,12 +5817,14 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
             {
                 UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_SKIP Truck='%s' Resource='%s' Reason=cargo Trigger=%s"),
                     *DTSVehicleName(Vehicle), *Demand.ResourceId, Trigger);
+                RecordPoolSkip(Demand.ResourceId, EDTTSkipReason::ForeignCargo, Demand.Open);
                 continue;
             }
             if (bFromCargo && (bCargoDrained || OnBoardStacksOf(Vehicle, ItemClass) <= 0))
             {
                 UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_SKIP Truck='%s' Resource='%s' Reason=no-cargo Trigger=%s"),
                     *DTSVehicleName(Vehicle), *Demand.ResourceId, Trigger);
+                RecordPoolSkip(Demand.ResourceId, EDTTSkipReason::NoCargo, Demand.Open);
                 continue;
             }
             const FGuid From = State.ChainFromGuid.IsValid() ? State.ChainFromGuid
@@ -5833,6 +5840,7 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
                 {
                     UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_SKIP Truck='%s' Resource='%s' Reason=unreachable Trigger=%s"),
                         *DTSVehicleName(Vehicle), *Demand.ResourceId, Trigger);
+                    RecordPoolSkip(Demand.ResourceId, EDTTSkipReason::Unreachable, Demand.Open);
                     continue;
                 }
             }
@@ -5843,6 +5851,7 @@ void UDynamicTimeTableSubsystem::RunPoolDispatch(const TCHAR* Trigger)
             // The timer pass repeats every 5 s while a demand stays unserved; only a pass with a
             // reason to expect a change (a truck just parked) says so at Display.
             const TCHAR* Why = bFromCargo ? TEXT("no-producer-with-stock") : TEXT("no-suitable-truck");
+            RecordPoolSkip(Demand.ResourceId, bFromCargo ? EDTTSkipReason::NoProducerWithStock : EDTTSkipReason::NoSuitableTruck, Demand.Open);
             if (bTimerPass)
             {
                 UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("POOL_SKIP Resource='%s' Open=%d Reason=%s Idle=%d Trigger=%s"), *Demand.ResourceId, Demand.Open, Why, Idle.Num(), Trigger);
@@ -6186,6 +6195,209 @@ bool UDynamicTimeTableSubsystem::RebuildTruckLap(AFGWheeledVehicleIdentifier* Ve
     ProcessCurrentTruckTarget(Vehicle, TEXT("window rebuild"));
     OutMessage = FString::Printf(TEXT("dTT: rebuilt the lap of '%s'."), *DTSVehicleName(Vehicle));
     return true;
+}
+
+// ---------------------------------------------------------------------------
+// Distance. The fuel path above walks the same network and throws the length away; this is its
+// mirror image, and the two are kept side by side so that a change to one is obvious in the other.
+// ---------------------------------------------------------------------------
+
+float UDynamicTimeTableSubsystem::SumSegmentLength(AFGVehicleSubsystem* VehicleSubsystem, const FGuid& FromNodeGuid, const FGuid& ToNodeGuid) const
+{
+    if (!IsValid(VehicleSubsystem) || !FromNodeGuid.IsValid() || !ToNodeGuid.IsValid()) return -1.0f;
+
+    UFGVehiclePathNetwork* Network = VehicleSubsystem->FindNetworkByPathNodeGuid(FromNodeGuid);
+    if (!IsValid(Network) || Network != VehicleSubsystem->FindNetworkByPathNodeGuid(ToNodeGuid)) return -1.0f;
+
+    const int32 FromNodeIndex = Network->FindPathNodeIndexByGuid(FromNodeGuid);
+    const int32 ToNodeIndex = Network->FindPathNodeIndexByGuid(ToNodeGuid);
+    if (FromNodeIndex == INDEX_NONE || ToNodeIndex == INDEX_NONE) return -1.0f;
+
+    const int32 SegmentIndex = Network->FindPathIndexBetweenPathNodes(FromNodeIndex, ToNodeIndex);
+    if (SegmentIndex == INDEX_NONE) return -1.0f;
+
+    const FVehiclePathNetworkSegmentData Segment = Network->GetPathSegmentAtIndex(SegmentIndex);
+    return FMath::IsFinite(Segment.SegmentLength) && Segment.SegmentLength >= 0.0f ? Segment.SegmentLength : -1.0f;
+}
+
+float UDynamicTimeTableSubsystem::EstimatePathLengthCm(AFGVehicleSubsystem* VehicleSubsystem, const UFGVehiclePathPreset* Preset,
+    const FGuid& From, const FGuid& To, TMap<TPair<FGuid, FGuid>, float>* Cache) const
+{
+    if (!IsValid(VehicleSubsystem) || !Preset || !From.IsValid() || !To.IsValid()) return -1.0f;
+    if (From == To) return 0.0f;
+
+    // Every truck of one resource drives the same legs, so a table's worth of rows asks for the
+    // same handful of paths over and over.
+    const TPair<FGuid, FGuid> Key(From, To);
+    if (Cache) { if (const float* Found = Cache->Find(Key)) return *Found; }
+
+    float Total = -1.0f;
+    UFGVehiclePathNetwork* Network = VehicleSubsystem->FindNetworkByPathNodeGuid(From);
+    if (IsValid(Network) && Network == VehicleSubsystem->FindNetworkByPathNodeGuid(To))
+    {
+        TArray<FGuid> PathNodes;
+        if (Network->FindVehiclePath(From, To, Preset, PathNodes) && PathNodes.Num() > 0)
+        {
+            // FindVehiclePath leaves out the node it starts from, as in the fuel walk above.
+            FGuid Previous = From;
+            float Sum = 0.0f;
+            bool bOk = true;
+            for (const FGuid& Node : PathNodes)
+            {
+                if (!Node.IsValid()) { bOk = false; break; }
+                if (Node == Previous) continue;
+                const float Length = SumSegmentLength(VehicleSubsystem, Previous, Node);
+                if (Length < 0.0f) { bOk = false; break; }
+                Sum += Length;
+                Previous = Node;
+            }
+            if (bOk) Total = Sum;
+        }
+    }
+    if (Cache) Cache->Add(Key, Total);
+    return Total;
+}
+
+float UDynamicTimeTableSubsystem::EstimateDistanceLeftMetres(AFGWheeledVehicleIdentifier* Vehicle, TMap<TPair<FGuid, FGuid>, float>* Cache) const
+{
+    if (!IsValid(Vehicle)) return -1.0f;
+    const TArray<FGuid>& Route = Vehicle->GetVehicleRoute();
+    const int32 Index = Vehicle->GetCurrentTargetWaypointIndex();
+    if (!Route.IsValidIndex(Index)) return -1.0f;
+
+    AFGWheeledVehicle* Wheeled = Vehicle->GetOwnerVehicle();
+    AFGVehicleSubsystem* VehicleSubsystem = AFGVehicleSubsystem::Get(GetWorld());
+    const UFGVehiclePathPreset* Preset = IsValid(Wheeled) ? Wheeled->GetVehiclePathPreset() : nullptr;
+    if (!IsValid(VehicleSubsystem) || !Preset) return -1.0f;
+
+    float Centimetres = 0.0f;
+    if (AFGDockingStationIdentifier* Target = FindDockByPathNode(Route[Index]))
+    {
+        Centimetres = FVector::Dist(Vehicle->GetRealActorLocation(), Target->GetRealActorLocation());
+    }
+    for (int32 Stop = Index; Stop + 1 < Route.Num(); ++Stop)
+    {
+        const float Leg = EstimatePathLengthCm(VehicleSubsystem, Preset, Route[Stop], Route[Stop + 1], Cache);
+        if (Leg < 0.0f) return -1.0f;
+        Centimetres += Leg;
+    }
+    return Centimetres / 100.0f;
+}
+
+// ---------------------------------------------------------------------------
+// The Timetable rows.
+// ---------------------------------------------------------------------------
+
+void UDynamicTimeTableSubsystem::RecordPoolSkip(const FString& ResourceId, EDTTSkipReason Reason, int32 OpenRequests)
+{
+    for (FDTTReasonRow& Row : LastPoolSkips)
+    {
+        if (Row.Reason == Reason && Row.ResourceId == ResourceId)
+        {
+            ++Row.Count;
+            if (OpenRequests > 0) Row.OpenRequests = OpenRequests;
+            return;
+        }
+    }
+    FDTTReasonRow& Row = LastPoolSkips.AddDefaulted_GetRef();
+    Row.ResourceId = ResourceId;
+    Row.Reason = Reason;
+    Row.Count = 1;
+    Row.OpenRequests = OpenRequests;
+}
+
+void UDynamicTimeTableSubsystem::GetPoolSkipRows(TArray<FDTTReasonRow>& OutRows) const
+{
+    OutRows = LastPoolSkips;
+    // The reason that stopped the most trucks first: that is the one worth doing something about.
+    OutRows.Sort([](const FDTTReasonRow& A, const FDTTReasonRow& B)
+    {
+        if (A.Count != B.Count) return A.Count > B.Count;
+        return A.ResourceId < B.ResourceId;
+    });
+}
+
+void UDynamicTimeTableSubsystem::BuildLapRows(TArray<FDTTLapRow>& OutRows) const
+{
+    OutRows.Reset();
+    // The laps are the truck rows with the metres added. Building them a second way here would
+    // be a second answer to "where is that truck going", and the two would drift apart.
+    TArray<FDTTTruckRow> Trucks;
+    BuildTruckRows(Trucks);
+    TMap<TPair<FGuid, FGuid>, float> LegCache;
+    for (const FDTTTruckRow& Truck : Trucks)
+    {
+        AFGWheeledVehicleIdentifier* Vehicle = Truck.Truck.Get();
+        if (!IsValid(Vehicle)) continue;
+        FDTTLapRow& Row = OutRows.AddDefaulted_GetRef();
+        Row.Truck = Vehicle;
+        Row.TruckName = Truck.Name;
+        Row.ResourceId = Truck.ResourceId;
+        Row.ItemClass = Truck.ItemClass.IsNull() ? Truck.CargoItemClass : Truck.ItemClass;
+        Row.RouteStops = Truck.RouteStops;
+        Row.TargetIndex = Truck.TargetIndex;
+        Row.CargoStacks = Truck.CargoStacks;
+        Row.CargoCapacityStacks = Truck.CargoCapacityStacks;
+        Row.Phase = Truck.Phase;
+        Row.bAutopilot = Truck.bAutopilot;
+        Row.bDocking = Truck.bDocking;
+        const float Metres = EstimateDistanceLeftMetres(Vehicle, &LegCache);
+        Row.DistanceLeftMetres = Metres >= 0.0f ? FMath::RoundToInt(Metres) : -1;
+    }
+    // Longest drive left first: the table is read to find who is far from done.
+    OutRows.Sort([](const FDTTLapRow& A, const FDTTLapRow& B)
+    {
+        if ((A.DistanceLeftMetres >= 0) != (B.DistanceLeftMetres >= 0)) return A.DistanceLeftMetres >= 0;
+        if (A.DistanceLeftMetres != B.DistanceLeftMetres) return A.DistanceLeftMetres > B.DistanceLeftMetres;
+        return A.TruckName < B.TruckName;
+    });
+}
+
+void UDynamicTimeTableSubsystem::BuildQueueRows(TArray<FDTTQueueRow>& OutRows) const
+{
+    OutRows.Reset();
+    // One pass per resource through the dispatcher's own collector, in the dispatcher's own order
+    // (bByWaitTime): an empty station first, then whoever has waited longest. Reproducing that
+    // order here would be a second policy nobody asked for.
+    TSet<FString> Seen;
+    for (const FDTTDispatchStation& Station : DispatchStations)
+    {
+        if (GetEffectiveDispatchRole(Station) != EDTTDispatchRole::Requester) continue;
+        const FString Key = Station.ResourceId.ToLower();
+        if (Seen.Contains(Key)) continue;
+        Seen.Add(Key);
+        const TSubclassOf<UFGItemDescriptor> ItemClass = ResolveItemClassForResource(Station.ResourceId);
+        if (!ItemClass) continue;
+        TArray<FDTTOpenRequester> Open;
+        CollectOpenRequesters(Station.ResourceId, ItemClass, nullptr, Open, /*bByWaitTime*/ true);
+        for (const FDTTOpenRequester& Request : Open)
+        {
+            if (!Request.Station) continue;
+            FDTTQueueRow& Row = OutRows.AddDefaulted_GetRef();
+            Row.Dock = Request.Station->DockingStationIdentifier.Get();
+            Row.DockingPathNodeGuid = Request.Station->DockingPathNodeGuid;
+            Row.Name = StripAllTags(Request.Station->DisplayName).TrimStartAndEnd();
+            if (Row.Name.IsEmpty()) Row.Name = Request.Station->DisplayName;
+            Row.ResourceId = Request.Station->ResourceId;
+            Row.ItemClass = TSoftClassPtr<UFGItemDescriptor>(ItemClass.Get());
+            Row.WaitingSeconds = FMath::Max(0, FMath::RoundToInt(Request.WaitingSeconds));
+            Row.StockStacks = Request.StockStacks;
+            Row.TriggerStacks = Request.TriggerStacks;
+            Row.CapacityStacks = Request.CapacityStacks;
+            if (const TWeakObjectPtr<AFGWheeledVehicleIdentifier>* Owner = RequesterClaims.Find(Request.Station->DockingPathNodeGuid))
+            {
+                Row.ClaimOwner = Owner->IsValid() ? DTSVehicleName(Owner->Get()) : TEXT("<invalid vehicle>");
+            }
+        }
+    }
+    // Across resources the same rule as within one: whoever has waited longest is at the top.
+    OutRows.Sort([](const FDTTQueueRow& A, const FDTTQueueRow& B)
+    {
+        const bool bClaimedA = !A.ClaimOwner.IsEmpty(), bClaimedB = !B.ClaimOwner.IsEmpty();
+        if (bClaimedA != bClaimedB) return !bClaimedA;
+        if (A.WaitingSeconds != B.WaitingSeconds) return A.WaitingSeconds > B.WaitingSeconds;
+        return A.Name < B.Name;
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -6823,6 +7035,14 @@ void UDynamicTimeTableSubsystem::GetTruckWhyLines(const FString& TruckQuery, TAr
     }
     OutLines.Add(FString::Printf(TEXT("  route[%d] target=%d: %s"), Route.Num(), TargetIndex,
         Stops.Num() > 0 ? *FString::Join(Stops, TEXT(" > ")) : TEXT("(empty)")));
+    // The same number the Timetable tab shows, from the same call: a figure in a window that
+    // nothing else can be asked for is a figure nobody can check.
+    {
+        const float Metres = EstimateDistanceLeftMetres(Vehicle);
+        OutLines.Add(Metres >= 0.0f
+            ? FString::Printf(TEXT("  distance left this lap: ~%d m (straight line to the next stop, road for the rest)"), FMath::RoundToInt(Metres))
+            : FString(TEXT("  distance left this lap: unknown (no costable path from here)")));
+    }
 
     // What it carries: the reason a parked truck is skipped more often than any other.
     TSubclassOf<UFGItemDescriptor> CargoClass;

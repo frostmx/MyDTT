@@ -53,6 +53,7 @@ enum class EDTTTab : int32
     Dispatch,
     Trucks,
     Stations,
+    Timetable,
     Settings,
     Count
 };
@@ -86,6 +87,7 @@ private:
     UPROPERTY() TObjectPtr<UButton> DispatchTabButton;
     UPROPERTY() TObjectPtr<UButton> TrucksTabButton;
     UPROPERTY() TObjectPtr<UButton> StationsTabButton;
+    UPROPERTY() TObjectPtr<UButton> TimetableTabButton;
     UPROPERTY() TObjectPtr<UButton> SettingsTabButton;
     // Settings page: one control per FDTTSettings field, filled from the server's copy on tab
     // open and after a result, never while the user is editing (bSettingsEdited).
@@ -124,9 +126,11 @@ private:
     UPROPERTY() TObjectPtr<UScrollBox> DispatchScrollBox;
     UPROPERTY() TObjectPtr<UScrollBox> TruckScrollBox;
     UPROPERTY() TObjectPtr<UScrollBox> StationScrollBox;
+    UPROPERTY() TObjectPtr<UScrollBox> TimetableScrollBox;
     UPROPERTY() TObjectPtr<UEditableTextBox> DispatchFilter;
     UPROPERTY() TObjectPtr<UEditableTextBox> TruckFilter;
     UPROPERTY() TObjectPtr<UEditableTextBox> StationFilter;
+    UPROPERTY() TObjectPtr<UEditableTextBox> TimetableFilter;
     // The Stations page edits the limit in one box above the table and writes it to every ticked
     // row. One box and not one per row: a spin box inside a card is recycled into another station
     // every refresh, and a half-typed number would be carried over to it or thrown away.
@@ -141,6 +145,7 @@ private:
     UPROPERTY() TArray<FDTTCardWidgets> DispatchCards;
     UPROPERTY() TArray<FDTTCardWidgets> TruckCards;
     UPROPERTY() TArray<FDTTCardWidgets> StationCards;
+    UPROPERTY() TArray<FDTTCardWidgets> TimetableCards;
     /** Item icons by descriptor path; a miss is cached too so an unresolvable class is not loaded again every refresh. */
     UPROPERTY() TMap<FSoftObjectPath, TObjectPtr<UTexture2D>> IconCache;
     UTexture2D* IconFor(const TSoftClassPtr<class UFGItemDescriptor>& ItemClass);
@@ -222,6 +227,7 @@ private:
     void RefreshDispatchDisplay();
     void RefreshTruckDisplay();
     void RefreshStationDisplay();
+    void RefreshTimetableDisplay();
     void SyncCards(UScrollBox* Page, TArray<FDTTCardWidgets>& Cards, const TArray<FString>& Keys,
         TFunctionRef<void(int32, FDTTCardSink&)> Fill);
     /** Bound to HandleRowAction once and handed to every sink, which binds it to every control. */
@@ -232,6 +238,11 @@ private:
     void PopulateFuelCard(const TArray<const FDTTDispatchRow*>& FuelStops, FDTTCardSink& Sink);
     void PopulateTruckCard(const FDTTTruckRow& Row, const FString& CardId, bool bExpanded, FDTTCardSink& Sink);
     void PopulateStationCard(const FDTTStationRow& Row, const FString& CardId, bool bExpanded, FDTTCardSink& Sink);
+    void PopulateLapCard(const FDTTLapRow& Row, FDTTCardSink& Sink);
+    void PopulateQueueCard(const FDTTQueueRow& Row, FDTTCardSink& Sink);
+    void PopulateReasonCard(const FDTTReasonRow& Row, FDTTCardSink& Sink);
+    /** A line of its own between the three blocks of the Timetable page. */
+    void PopulateSectionCard(const FString& Title, const FString& Summary, FDTTCardSink& Sink);
     /** The station rows the window is looking at: the snapshot's on a client, the subsystem's on a host. */
     void GatherStationRows(TArray<FDTTStationRow>& OutRows) const;
     /** The ticked docks, as handles, for an operation that acts on the selection. */
@@ -240,6 +251,7 @@ private:
     void BuildDispatchHeader(class UHorizontalBox* Row);
     void BuildTruckHeader(class UHorizontalBox* Row);
     void BuildStationHeader(class UHorizontalBox* Row);
+    void BuildTimetableHeader(class UHorizontalBox* Row);
     /** The limit box and the two buttons that act on the ticked rows. */
     void BuildStationTools(class UHorizontalBox* Row);
     void RebuildRuntimeDisplay();
@@ -266,6 +278,8 @@ private:
         class UHorizontalBox*& OutHeader, class UHorizontalBox** OutTools = nullptr);
     UFUNCTION() void HandleTrucksTabClicked();
     UFUNCTION() void HandleStationsTabClicked();
+    UFUNCTION() void HandleTimetableTabClicked();
+    UFUNCTION() void HandleTimetableFilterChanged(const FText& Text);
     UFUNCTION() void HandleStationFilterChanged(const FText& Text);
     /** The two page-level buttons of the Stations tab; they act on the ticked rows, not on one. */
     UFUNCTION() void HandleStationApplyClicked();

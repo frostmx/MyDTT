@@ -86,6 +86,14 @@ public:
      * so the two tables can never tell different stories about one dock.
      */
     void BuildStationRows(TArray<FDTTStationRow>& OutRows) const;
+    /**
+     * The Timetable tab. Laps are the truck rows with the metres added, so the two tabs cannot
+     * disagree; the queue is CollectOpenRequesters in the dispatcher's own order; the reasons are
+     * what the last pool pass recorded as it ran, not a second guess at it afterwards.
+     */
+    void BuildLapRows(TArray<FDTTLapRow>& OutRows) const;
+    void BuildQueueRows(TArray<FDTTQueueRow>& OutRows) const;
+    void GetPoolSkipRows(TArray<FDTTReasonRow>& OutRows) const;
     /** Rows behind the Trucks tab, the chat listing and the snapshot. */
     void BuildTruckRows(TArray<FDTTTruckRow>& OutRows, const FString& ResourceFilter = FString()) const;
     static FString FormatDispatchRow(const FDTTDispatchRow& Row);
@@ -371,6 +379,14 @@ private:
     // despawn/retag - see PruneStaleRequesterClaims and the cleanup in RebuildGroupsFromNames.
     TMap<FGuid, TWeakObjectPtr<AFGWheeledVehicleIdentifier>> RequesterClaims;
     TMap<FGuid, double> RequesterClaimedAtWorldSeconds;
+    /**
+     * What the last RunPoolDispatch pass could not do, recorded where it happened. Reset at the
+     * top of every pass, so it always describes one pass and not a running total. Not SaveGame:
+     * it is worth nothing a second after the pass, let alone after a load.
+     */
+    TArray<FDTTReasonRow> LastPoolSkips;
+    /** Adds one to the count for this resource and reason, or starts it at one. */
+    void RecordPoolSkip(const FString& ResourceId, EDTTSkipReason Reason, int32 OpenRequests = 0);
     // When a requester was first seen open with nobody claiming it, so the window can show how
     // long it has been waiting. Kept by the 1 Hz poll, not saved: a load restarts the clock.
     TMap<FGuid, double> RequesterOpenSinceWorldSeconds;
@@ -567,6 +583,22 @@ private:
     /** Fuel cost of the actual path between two arbitrary nodes on the same network, or negative on failure. */
     float EstimatePathFuelConsumptionMW(class AFGVehicleSubsystem* VehicleSubsystem, const class UFGVehiclePathPreset* Preset,
         TSubclassOf<class AFGWheeledVehicle> VehicleType, const FGuid& From, const FGuid& To) const;
+    /**
+     * Length of one directed edge of the vehicle path network in centimetres, or negative on
+     * failure. SegmentLength and not VehicleSegmentVirtualLength: the virtual one is weighted by
+     * the climb for fuel, which is what fuel wants and what a distance must not have.
+     */
+    float SumSegmentLength(class AFGVehicleSubsystem* VehicleSubsystem, const FGuid& FromNodeGuid, const FGuid& ToNodeGuid) const;
+    /** Length of the actual path between two nodes on the same network, in centimetres. */
+    float EstimatePathLengthCm(class AFGVehicleSubsystem* VehicleSubsystem, const class UFGVehiclePathPreset* Preset,
+        const FGuid& From, const FGuid& To, TMap<TPair<FGuid, FGuid>, float>* Cache = nullptr) const;
+    /**
+     * Metres of road left before the truck finishes the lap it is on: the straight line to the
+     * stop it is heading for, plus the path over the stops after it. The remainder of the leg the
+     * truck is standing in cannot be had from the network - a truck sits between nodes - and on a
+     * lap of kilometres the straight line is a small share of one leg and costs nothing.
+     */
+    float EstimateDistanceLeftMetres(AFGWheeledVehicleIdentifier* Vehicle, TMap<TPair<FGuid, FGuid>, float>* Cache = nullptr) const;
     /** Cost of the closed Producer/requester loop in the same units as the vanilla route-cost UI. */
     float EstimateLoopFuelConsumptionMW(class AFGWheeledVehicle* Vehicle, const TArray<FGuid>& Loop) const;
     /** Current fuel stock and this loop's per-lap need, in fuel items. False if either is not estimable. */

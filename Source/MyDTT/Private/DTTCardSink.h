@@ -149,6 +149,8 @@ namespace DTTUI
     inline constexpr float DTTColLimit = 48.0f;
     /** One station's own bar, wider than the eight that share a resource row. */
     inline constexpr float DTTStockBarWide = 96.0f;
+    // Timetable.
+    inline constexpr float DTTColLeft = 86.0f;
     /** One requester's bar inside a resource row; eight of them fit before the row gives up. */
     inline constexpr float DTTStockBarWidth = 54.0f;
     inline constexpr int32 DTTMaxStockBars = 8;
@@ -588,6 +590,59 @@ struct FDTTCardSink
         if (B) { B->SetPercent(FMath::Clamp(Fill, 0.0f, 1.0f)); B->SetFillColorAndOpacity(FillColor); }
         BarMark(Stack, Trigger, Width, DTTUI::DTTYellow);
         BarMark(Stack, Target, Width, DTTUI::DTTCyan);
+    }
+
+    /**
+     * A lap drawn as its stops: one mark each, the one the truck is driving to lit and the rest
+     * dim. Where a truck is in its lap is a glance this way; as a list of station names it was a
+     * line of text nobody read. The stop count belongs in the card's key - it decides how many
+     * marks there are, and a card that changes shape without its key noticing is the one failure
+     * this sink cannot see.
+     */
+    void Strip(UPanelWidget* Parent, int32 Stops, int32 Current, const FLinearColor& Colour,
+        float Height = 12.0f, const FMargin& Margin = FMargin(0, 0, 8, 0))
+    {
+        UHorizontalBox* Line = nullptr;
+        if (bBuild)
+        {
+            Line = Tree->ConstructWidget<UHorizontalBox>();
+            if (Parent)
+            {
+                Parent->AddChild(Line);
+                if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Line->Slot))
+                {
+                    S->SetPadding(Margin); S->SetVerticalAlignment(VAlign_Center);
+                    S->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+                }
+            }
+        }
+        const FLinearColor Dimmed(Colour.R * 0.35f, Colour.G * 0.35f, Colour.B * 0.35f, 0.9f);
+        for (int32 Index = 0; Index < Stops; ++Index)
+        {
+            UBorder* Mark = nullptr;
+            if (bBuild)
+            {
+                Mark = Tree->ConstructWidget<UBorder>();
+                USizeBox* Box = Tree->ConstructWidget<USizeBox>();
+                Box->SetHeightOverride(Height); Box->SetContent(Mark);
+                if (Line)
+                {
+                    Line->AddChild(Box);
+                    if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Box->Slot))
+                    {
+                        S->SetPadding(FMargin(0, 0, 3, 0)); S->SetVerticalAlignment(VAlign_Center);
+                        S->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+                    }
+                }
+                Card.Borders.Add(Mark);
+            }
+            else if (Card.Borders.IsValidIndex(BorderIndex))
+            {
+                Mark = Card.Borders[BorderIndex].Get();
+            }
+            ++BorderIndex;
+            if (Mark) Mark->SetBrushColor(Index == Current ? Colour : Dimmed);
+        }
     }
 
     /** One 2-point line across a MarkedBar. A level outside 0..1 has nothing to mark, so it hides. */

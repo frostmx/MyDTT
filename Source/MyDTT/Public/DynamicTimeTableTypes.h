@@ -436,6 +436,96 @@ namespace EDTTStationFlags
 }
 
 /**
+ * Why a pool pass did not send a truck. These mirror the POOL_SKIP reasons the dispatcher
+ * already logs, one for one - the counts are recorded where those lines are written rather than
+ * worked out again later, because working them out again means a path search per resource on
+ * every refresh, and because two answers to "why is nothing moving" would be one too many.
+ */
+UENUM(BlueprintType)
+enum class EDTTSkipReason : uint8
+{
+    None = 0,
+    /** The resource in the tag resolves to no item: a typo, or a language the world does not use. */
+    ItemClassNotFound,
+    /** Solid truck against a fluid station, or the other way round. */
+    Form,
+    /** The truck is carrying something else. */
+    ForeignCargo,
+    /** The lap would start at a consumer and the truck has nothing on board. */
+    NoCargo,
+    /** No vehicle path from where the truck is to the station. */
+    Unreachable,
+    /** Nobody is producing it, or the producers are empty. */
+    NoProducerWithStock,
+    /** There is stock, but no free truck that fits. */
+    NoSuitableTruck,
+};
+
+/** One truck's lap: where it is going, along which stops, and how far is left of them. */
+USTRUCT(BlueprintType)
+struct FDTTLapRow
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 TruckNameId = INDEX_NONE;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 ResourceNameId = INDEX_NONE;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString TruckName;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString ResourceId;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TSoftClassPtr<class UFGItemDescriptor> ItemClass;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TObjectPtr<AFGWheeledVehicleIdentifier> Truck = nullptr;
+    /** The stops of the lap, as places in the snapshot's dock-name table. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TArray<int32> StopIds;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TArray<FString> RouteStops;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 TargetIndex = INDEX_NONE;
+    /**
+     * Metres of road left to the end of this lap, along the path the truck will actually drive.
+     * -1 when no path can be costed. Never a time: the game does not tell anyone what speed a
+     * truck will hold, and a made-up ETA is worse than no ETA.
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 DistanceLeftMetres = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 CargoStacks = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 CargoCapacityStacks = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") EDTTTruckPhase Phase = EDTTTruckPhase::Unmanaged;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bAutopilot = false;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") bool bDocking = false;
+};
+
+/** One open request, in the order the dispatcher will look at them. */
+USTRUCT(BlueprintType)
+struct FDTTQueueRow
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 NameId = INDEX_NONE;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 ResourceNameId = INDEX_NONE;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 ClaimTruckId = INDEX_NONE;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString Name;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString ResourceId;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString ClaimOwner;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TSoftClassPtr<class UFGItemDescriptor> ItemClass;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TObjectPtr<AFGDockingStationIdentifier> Dock = nullptr;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FGuid DockingPathNodeGuid;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 WaitingSeconds = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 StockStacks = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 TriggerStacks = -1;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 CapacityStacks = -1;
+};
+
+/** How often one reason stopped one resource in the dispatcher's last pass. */
+USTRUCT(BlueprintType)
+struct FDTTReasonRow
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 ResourceNameId = INDEX_NONE;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString ResourceId;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") EDTTSkipReason Reason = EDTTSkipReason::None;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 Count = 0;
+    /** Open requests of that resource when the pass ran. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 OpenRequests = 0;
+};
+
+/**
  * The tunables. Saved with the world and edited from the Settings tab of the window (or
  * "/dtt set"); the server's copy is the one that counts, a remote client only proposes.
  */
