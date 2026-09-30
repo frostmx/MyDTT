@@ -1,5 +1,25 @@
 ﻿# Changelog
 
+## 4.1.0
+
+- Hotkeys: F1 opens and closes the window, and the Settings tab lets you choose any of F1-F12
+  for it and give every tab a key of its own, which opens the window on that tab, switches an open
+  window to it and closes the window it already shows. The keys are yours alone: kept in this
+  computer's GameUserSettings.ini, not in the save.
+- Alerts in chat: when a request goes overdue, a station's mode fights its tag, a truck on
+  autopilot runs dry or a drone port cannot afford its trip, a line from "dTT" goes into everyone's
+  chat, once per event; a world that loads with something already wrong gets one summary. The
+  `ChatAlerts` setting turns it off. Protocol 20.
+- A two-sided port is named sending side first: `(Battery) Plant +120/m | (Plastic) -30/m -> Battery`,
+  the player's text in the first block, in the order of the window's bars. Names written the
+  other way round are read and rewritten by the next pass.
+- A Drones row carries two tiles, one over the other: what the port sends on top, what it
+  receives below, in the order of the bars; a two-sided name takes two lines, one per side, and
+  so does the destination.
+- The Drones table sorts by its captions like the Stations table; the distance to the pair is a
+  column of its own, the destination is the pair's plain name, and a tile keeps the item of its
+  side while that side stands empty between two visits of the drone. Protocol 19.
+
 ## 4.0.0
 
 - A Drones tab: one row per vanilla drone port, with what it sends (the input inventory the belts
