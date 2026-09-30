@@ -73,6 +73,7 @@ public:
     virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
     virtual void NativeDestruct() override;
     virtual void OnEscapePressed_Implementation() override;
+    virtual FReply NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table")
     void RefreshData();

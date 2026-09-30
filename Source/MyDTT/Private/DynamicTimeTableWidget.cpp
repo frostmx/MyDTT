@@ -55,6 +55,10 @@ UDynamicTimeTableWidget::UDynamicTimeTableWidget(const FObjectInitializer& Objec
     mSupportsStacking = false;
     mSupportsCaching = false;
     mRestoreFocusWhenLost = true;
+    // The window takes keyboard focus itself so that Escape reaches it: it is put up with
+    // AddToViewport, outside the game's interact-widget stack, and the stack's own Escape
+    // (OnEscapePressed) never fires for it.
+    SetIsFocusable(true);
 }
 
 void UDynamicTimeTableWidget::NativeOnInitialized()
@@ -200,6 +204,18 @@ void UDynamicTimeTableWidget::NativeDestruct()
 }
 
 void UDynamicTimeTableWidget::OnEscapePressed_Implementation() { CloseWindow(); }
+
+FReply UDynamicTimeTableWidget::NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
+{
+    // Preview runs from the window down to the focused control, so Escape closes the window
+    // even while a filter box holds the focus - the box never gets to see it.
+    if (InKeyEvent.GetKey() == EKeys::Escape)
+    {
+        CloseWindow();
+        return FReply::Handled();
+    }
+    return Super::NativeOnPreviewKeyDown(InGeometry, InKeyEvent);
+}
 
 bool UDynamicTimeTableWidget::IsRemoteClient() const{return GetWorld()&&GetWorld()->GetNetMode()==NM_Client;}
 const TArray<FDTTStationGroup>& UDynamicTimeTableWidget::ViewGroups()const{if(IsRemoteClient()&&RemoteCallObject)return RemoteCallObject->GetSnapshot().Groups;static TArray<FDTTStationGroup> Empty;if(auto*S=GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())return S->GetStationGroups();return Empty;}
