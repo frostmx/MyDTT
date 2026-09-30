@@ -1,5 +1,28 @@
 ﻿# Changelog
 
+## 4.0.0
+
+- A Drones tab: one row per vanilla drone port, with what it sends (the input inventory the belts
+  fill and the drone empties), what it receives (the output inventory the drone fills and the belts
+  empty), the drone's own hold, where the drone is and which port it flies to. An open row lists
+  the items of all three, the fuel in the port with the cost of one round trip, and the last trip.
+  Rows are coloured: red when the drone has no fuel for the trip, yellow when it cannot unload at a
+  port that also has cargo waiting to leave, green when it is out on its trip or waits with a full
+  hold at a port that only receives, yellow when the port holds nothing either way. The mod does not
+  steer drones; the tab shows. `/dtt drones [filter]` prints the same rows.
+- Auto-naming covers drone ports, under the same switch as the docking stations. A port has both
+  sides at once, so both are walked: the belts leaving its outputs say what it receives, the belts
+  feeding its inputs say what it sends, and the fuel belt is left out. A one-sided port is named
+  exactly like a dock; a two-sided one carries its sending side after a bar:
+  `(Plastic) Plant -30/m -> Battery | (Battery) +120/m`. Preview, apply, strip and the one-station
+  query take ports too. A player's rename of a port is noticed by the once-a-second poll: the game's
+  setter cannot be hooked.
+- Cargo paint covers drones: a drone wears the colour of what it carries, keeps it on the empty leg,
+  and gets its own paint back when the paint is switched off. Its original paint is saved with the
+  world (save data version 10).
+- Escape closes the window.
+- Protocol 18: the window needs a client and a server of the same version.
+
 ## 3.4.2
 
 - The Timetable no longer slows the server down. It worked out the road length of every leg of
