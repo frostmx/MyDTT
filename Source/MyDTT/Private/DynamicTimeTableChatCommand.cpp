@@ -18,7 +18,7 @@ ADynamicTimeTableChatCommand::ADynamicTimeTableChatCommand()
     Usage = NSLOCTEXT(
         "DynamicTimeTable",
         "ChatCommand.DTT.Usage",
-        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt trucks [resource] - list dispatch and pool trucks; /dtt why <truck> - what one truck is doing and what stands in its way; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt settings - show the settings; /dtt set <field> <value> - change one setting; /dtt autoname [apply|strip|gamenames [apply]|<station>] - name stations from their belts; /dtt paint [on|off] - colour autopilot trucks by what they carry; /dtt recalc - rebuild active bookings");
+        "/dtt - Open DynamicTimeTable; /dtt groups - list groups; /dtt dispatch [resource] - list resource dispatch, optionally filtered to one resource; /dtt trucks [resource] - list dispatch and pool trucks; /dtt drones [filter] - list drone ports with what they hold; /dtt why <truck> - what one truck is doing and what stands in its way; /dtt depots - list depots and pool trucks; /dtt park <truck> - send a truck to the nearest free depot; /dtt release <truck> - let a parked truck go; /dtt settings - show the settings; /dtt set <field> <value> - change one setting; /dtt autoname [apply|strip|gamenames [apply]|<station>] - name stations from their belts; /dtt paint [on|off] - colour autopilot trucks by what they carry; /dtt recalc - rebuild active bookings");
     Aliases.Add(TEXT("dynamictimetable"));
 }
 
@@ -103,6 +103,19 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
         const FString ResourceFilter = Arguments.Num() >= 2 ? Arguments[1] : FString();
         TArray<FString> Lines;
         Subsystem->GetTruckStatusLines(Lines, ResourceFilter);
+        for (const FString& Line : Lines)
+        {
+            Sender->SendChatMessage(Line, FLinearColor(0.20f, 0.80f, 1.00f));
+        }
+        return EExecutionStatus::COMPLETED;
+    }
+
+    if (Arguments.Num() >= 1 && Arguments[0].Equals(TEXT("drones"), ESearchCase::IgnoreCase))
+    {
+        // A port's name may contain spaces; everything after the verb is the filter.
+        TArray<FString> Rest(Arguments.GetData() + 1, Arguments.Num() - 1);
+        TArray<FString> Lines;
+        Subsystem->GetDroneStatusLines(Lines, FString::Join(Rest, TEXT(" ")).TrimStartAndEnd());
         for (const FString& Line : Lines)
         {
             Sender->SendChatMessage(Line, FLinearColor(0.20f, 0.80f, 1.00f));
@@ -277,9 +290,9 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
         if (Arguments.Num() < 2)
         {
             Sender->SendChatMessage(
-                FString::Printf(TEXT("dTT: cargo paint is %s; %d truck(s) wear a cargo colour. /dtt paint on|off"),
+                FString::Printf(TEXT("dTT: cargo paint is %s; %d truck(s) and %d drone(s) wear a cargo colour. /dtt paint on|off"),
                     Subsystem->IsPaintByCargoEnabled() ? TEXT("on") : TEXT("off"),
-                    Subsystem->GetPaintedTruckCount()),
+                    Subsystem->GetPaintedTruckCount(), Subsystem->GetPaintedDroneCount()),
                 FLinearColor(0.20f, 0.80f, 1.00f));
             return EExecutionStatus::COMPLETED;
         }
@@ -295,8 +308,8 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
             bWas == bOn
                 ? FString::Printf(TEXT("dTT: cargo paint was already %s."), bOn ? TEXT("on") : TEXT("off"))
                 : (bOn
-                    ? FString(TEXT("dTT: cargo paint on. Autopilot trucks take the colour of their cargo and their own paint comes back when they empty."))
-                    : FString(TEXT("dTT: cargo paint off. Every truck this mod painted has its own colour back."))),
+                    ? FString(TEXT("dTT: cargo paint on. Autopilot trucks and drones take the colour of their cargo and keep it until the next load."))
+                    : FString(TEXT("dTT: cargo paint off. Every truck and drone this mod painted has its own colour back."))),
             FLinearColor(0.20f, 0.80f, 1.00f));
         return EExecutionStatus::COMPLETED;
     }

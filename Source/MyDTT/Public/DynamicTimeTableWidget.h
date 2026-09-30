@@ -53,6 +53,7 @@ enum class EDTTTab : int32
     Dispatch = 0,
     Trucks,
     Stations,
+    Drones,
     Timetable,
     Groups,
     Settings,
@@ -88,6 +89,7 @@ private:
     UPROPERTY() TObjectPtr<UButton> DispatchTabButton;
     UPROPERTY() TObjectPtr<UButton> TrucksTabButton;
     UPROPERTY() TObjectPtr<UButton> StationsTabButton;
+    UPROPERTY() TObjectPtr<UButton> DronesTabButton;
     UPROPERTY() TObjectPtr<UButton> TimetableTabButton;
     UPROPERTY() TObjectPtr<UButton> SettingsTabButton;
     // Settings page: one control per FDTTSettings field, filled from the server's copy on tab
@@ -127,6 +129,7 @@ private:
     UPROPERTY() TObjectPtr<UScrollBox> DispatchScrollBox;
     UPROPERTY() TObjectPtr<UScrollBox> TruckScrollBox;
     UPROPERTY() TObjectPtr<UScrollBox> StationScrollBox;
+    UPROPERTY() TObjectPtr<UScrollBox> DroneScrollBox;
     UPROPERTY() TObjectPtr<UScrollBox> TimetableScrollBox;
     /** The right-hand pane of the Timetable: open requests and the reasons nothing moves. */
     UPROPERTY() TObjectPtr<UScrollBox> QueueScrollBox;
@@ -146,6 +149,7 @@ private:
     UPROPERTY() TObjectPtr<UEditableTextBox> DispatchFilter;
     UPROPERTY() TObjectPtr<UEditableTextBox> TruckFilter;
     UPROPERTY() TObjectPtr<UEditableTextBox> StationFilter;
+    UPROPERTY() TObjectPtr<UEditableTextBox> DroneFilter;
     UPROPERTY() TObjectPtr<UEditableTextBox> TimetableFilter;
     // The Stations page edits the limit in one box above the table and writes it to every ticked
     // row. One box and not one per row: a spin box inside a card is recycled into another station
@@ -181,6 +185,7 @@ private:
     UPROPERTY() TArray<FDTTCardWidgets> DispatchCards;
     UPROPERTY() TArray<FDTTCardWidgets> TruckCards;
     UPROPERTY() TArray<FDTTCardWidgets> StationCards;
+    UPROPERTY() TArray<FDTTCardWidgets> DroneCards;
     UPROPERTY() TArray<FDTTCardWidgets> TimetableCards;
     /** Item icons by descriptor path; a miss is cached too so an unresolvable class is not loaded again every refresh. */
     UPROPERTY() TMap<FSoftObjectPath, TObjectPtr<UTexture2D>> IconCache;
@@ -198,6 +203,7 @@ private:
     FString ExpandedDispatchKey;
     FString ExpandedTruckKey;
     FString ExpandedStationKey;
+    FString ExpandedDroneKey;
     /**
      * An action that asks twice before it happens, and the card it belongs to. Only switching
      * an autopilot off needs this: it takes the truck out of the mod's hands altogether, and
@@ -266,6 +272,7 @@ private:
     void RefreshDispatchDisplay();
     void RefreshTruckDisplay();
     void RefreshStationDisplay();
+    void RefreshDroneDisplay();
     void RefreshTimetableDisplay();
     /** Writes the status line; the rest of its blocks collapse. Source is the right-hand note. */
     void SetStatusLine(const DTTUI::FDTTStatusLine& Line, const FString& Source);
@@ -285,6 +292,7 @@ private:
     void PopulateFuelCard(const TArray<const FDTTDispatchRow*>& FuelStops, FDTTCardSink& Sink);
     void PopulateTruckCard(const FDTTTruckRow& Row, const FString& CardId, bool bExpanded, FDTTCardSink& Sink);
     void PopulateStationCard(const FDTTStationRow& Row, const FString& CardId, bool bExpanded, FDTTCardSink& Sink);
+    void PopulateDroneCard(const FDTTDroneRow& Row, const FString& CardId, bool bExpanded, FDTTCardSink& Sink);
     /** LapWidth is the room the lap line has, which decides how many stops it draws. */
     void PopulateLapCard(const FDTTLapRow& Row, float LapWidth, FDTTCardSink& Sink);
     void PopulateQueueCard(const FDTTQueueRow& Row, FDTTCardSink& Sink);
@@ -300,6 +308,7 @@ private:
     void BuildDispatchHeader(class UHorizontalBox* Row);
     void BuildTruckHeader(class UHorizontalBox* Row);
     void BuildStationHeader(class UHorizontalBox* Row);
+    void BuildDroneHeader(class UHorizontalBox* Row);
     void BuildTimetableHeader(class UHorizontalBox* Row);
     /** The limit box and the two buttons that act on the ticked rows. */
     void BuildStationTools(class UHorizontalBox* Row);
@@ -330,6 +339,8 @@ private:
     UFUNCTION() void HandleStationResourceChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
     UFUNCTION() void HandleTrucksTabClicked();
     UFUNCTION() void HandleStationsTabClicked();
+    UFUNCTION() void HandleDronesTabClicked();
+    UFUNCTION() void HandleDroneFilterChanged(const FText& Text);
     UFUNCTION() void HandleTimetableTabClicked();
     UFUNCTION() void HandleTimetableFilterChanged(const FText& Text);
     UFUNCTION() void HandleStationFilterChanged(const FText& Text);

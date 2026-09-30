@@ -12,6 +12,7 @@ class AFGTrainStationIdentifier;
 class AFGRailroadTimeTable;
 class AFGDockingStationIdentifier;
 class AFGWheeledVehicleIdentifier;
+class AFGDroneVehicle;
 class ADTTSaveDataActor;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FDTTGroupsChangedDelegate);
@@ -96,6 +97,18 @@ public:
     void GetPoolSkipRows(TArray<FDTTReasonRow>& OutRows) const;
     /** Rows behind the Trucks tab, the chat listing and the snapshot. */
     void BuildTruckRows(TArray<FDTTTruckRow>& OutRows, const FString& ResourceFilter = FString()) const;
+    /**
+     * Rows behind the Drones tab, /dtt drones and the snapshot: every vanilla drone port with what
+     * its two inventories and its drone hold. Read-only - the mod does not steer drones.
+     */
+    void BuildDroneRows(TArray<FDTTDroneRow>& OutRows) const;
+    /** /dtt drones: one line per port; Filter matches the port's name, its pair's or an item's. */
+    void GetDroneStatusLines(TArray<FString>& OutLines, const FString& Filter = FString()) const;
+    static FString FormatDroneRow(const FDTTDroneRow& Row);
+    /** "En route", "Cannot unload" - the game's EDroneStatus in words. */
+    static FString DroneStatusLabel(uint8 Status);
+    /** True when the row's text - port, pair or any item it holds - contains Filter. */
+    static bool DroneRowMatches(const FDTTDroneRow& Row, const FString& Filter);
     static FString FormatDispatchRow(const FDTTDispatchRow& Row);
     static FString FormatTruckRow(const FDTTTruckRow& Row);
     static FString PhaseLabel(EDTTTruckPhase Phase);
@@ -204,15 +217,18 @@ public:
     static void PackPlannedItems(const TMap<FGuid, int32>& Planned, TArray<FGuid>& OutGuids, TArray<int32>& OutAmounts);
     static void UnpackPlannedItems(const TArray<FGuid>& Guids, const TArray<int32>& Amounts, TMap<FGuid, int32>& OutPlanned);
 
-    // Cargo paint. An autopilot truck wears the colour of what it carries; the paint is the
-    // vehicle's own replicated customization, so a client without the mod sees it too. The colour
-    // comes from FDTTCargoPaint; this half decides who wears what and remembers what they wore.
+    // Cargo paint. An autopilot truck wears the colour of what it carries, and so does a drone;
+    // the paint is the vehicle's own replicated customization, so a client without the mod sees
+    // it too. The colour comes from FDTTCargoPaint; this half decides who wears what and
+    // remembers what they wore.
     bool IsPaintByCargoEnabled() const { return bPaintByCargo; }
-    /** Switching off repaints every truck this mod had painted. Server only. */
+    /** Switching off repaints every truck and drone this mod had painted. Server only. */
     void SetPaintByCargo(bool bEnabled, const TCHAR* Source);
     int32 GetPaintedTruckCount() const;
+    int32 GetPaintedDroneCount() const;
     /** The paints trucks wore before this mod touched them, for ADTTSaveDataActor. */
     void ExportTruckPaints(TArray<FDTTSavedTruckPaint>& OutPaints) const;
+    void ExportDronePaints(TArray<FDTTSavedDronePaint>& OutPaints) const;
     /** /dtt depots: one line per depot with its claim, plus the pool trucks. */
     void GetDepotStatusLines(TArray<FString>& OutLines) const;
     /** /dtt park <truck>: sends a truck to the nearest free depot, joining the pool if needed. */
@@ -294,6 +310,30 @@ private:
         TSet<TWeakObjectPtr<AActor>> Machines;
     };
     TMap<FGuid, FDTTAutoNameReach> AutoNameMachines;
+    /**
+     * The same for drone ports, which have no guid: keyed by the port's info actor, the half of a
+     * port that is always there. A port has both sides at once, so up to two reaches.
+     */
+    TMap<TWeakObjectPtr<class AFGDroneStationInfo>, TArray<FDTTAutoNameReach>> AutoNameDroneMachines;
+    /** Drone ports to walk again, and the ones to walk before the rest. */
+    TSet<TWeakObjectPtr<class AFGDroneStationInfo>> AutoNameDirtyPorts;
+    TArray<TWeakObjectPtr<class AFGDroneStationInfo>> AutoNameUrgentPorts;
+    /**
+     * Every port's name as this mod last saw it. A player's rename of a port is found by
+     * comparing, once a second: the game's setter carries no UFUNCTION, and a hook on such a
+     * setter has failed to fire before (see HandleVehicleRouteChanged).
+     */
+    TMap<TWeakObjectPtr<class AFGDroneStationInfo>, FString> DronePortNamesSeen;
+    /** True when another dock or port already reaches these machines with this item, the same way round. */
+    bool SharesAutoNameChain(const FDTTAutoNameReach& Reach, const FGuid* SkipDock, const class AFGDroneStationInfo* SkipPort) const;
+    void MarkDronePortUrgentForAutoName(class AFGDroneStationInfo* Info, const TCHAR* Reason);
+    void DetectDronePortRenames();
+    /** Walks both sides of one drone port and writes the result; returns true when the name changed. */
+    bool ProcessAutoNameForDronePort(class AFGDroneStationInfo* Info, bool bPreviewOnly, TArray<FString>* OutLines, bool bExplainAll = false,
+        const TMap<TSubclassOf<class UFGItemDescriptor>, FString>* WorldWords = nullptr);
+    bool RenameDronePortGuarded(class AFGDroneStationInfo* Info, const FString& NewName);
+    /** A drone port's name lives on its info actor. */
+    static FString DronePortName(const class AFGDroneStationInfo* Info);
     double AutoNameDirtySinceSeconds = 0.0;
     double LastAutoNameSweepSeconds = 0.0;
     /** Called once a second from PollTruckStates; debounces, sweeps and renames. */
@@ -484,6 +524,14 @@ private:
     bool bPaintByCargo = false;
     /** What a truck wore before the first cargo colour went on it. Saved with the world. */
     TMap<TWeakObjectPtr<AFGWheeledVehicleIdentifier>, FFactoryCustomizationData> OriginalTruckPaints;
+    /** The item most of an inventory is, by item count; null for an empty or missing one. */
+    static TSubclassOf<class UFGItemDescriptor> DominantItemClassIn(class UFGInventoryComponent* Storage);
+    /** Paints every drone in the world for its cargo. A drone has no autopilot switch: all of them fly themselves. */
+    void TickDroneCargoPaint();
+    /** Puts back the paint remembered for this drone, if any. */
+    void RestoreDronePaint(AFGDroneVehicle* Drone, const TCHAR* Reason);
+    /** What a drone wore before the first cargo colour went on it. Saved with the world (DataVersion 10). */
+    TMap<TWeakObjectPtr<AFGDroneVehicle>, FFactoryCustomizationData> OriginalDronePaints;
 
     /** "Plastic x3, Screws x1" for what the truck carries. */
     FString DescribeCargo(AFGWheeledVehicleIdentifier* Vehicle, TSubclassOf<class UFGItemDescriptor>* OutSingleClass = nullptr) const;

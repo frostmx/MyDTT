@@ -89,6 +89,16 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
                 X.StationRows.SetNum(MaxSnapshotRows);
             }
         }
+        if (X.Sections & EDTTSnapshotSection::Drones)
+        {
+            FSectionClock Clock(TEXT("Drones"));
+            S->BuildDroneRows(X.DroneRows);
+            if (X.DroneRows.Num() > MaxSnapshotRows)
+            {
+                UE_LOG(LogDynamicTimeTableRCO, Warning, TEXT("SNAPSHOT_TRUNCATED Section=Drones Rows=%d Max=%d"), X.DroneRows.Num(), MaxSnapshotRows);
+                X.DroneRows.SetNum(MaxSnapshotRows);
+            }
+        }
     }
     // Names go into the snapshot's two tables and the rows keep a place in them. This is what
     // holds the route stops to a few KB; see FDTTClientSnapshot for the arithmetic. It happens
@@ -146,6 +156,13 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
             R.ClaimTruckId = Intern(SeenTrucks, X.TruckNames, R.ClaimOwner);
             R.Name.Empty(); R.ResourceId.Empty(); R.GroupName.Empty(); R.ClaimOwner.Empty();
         }
+        // Drone ports share the dock table: a pair's name is another row's own name.
+        for (FDTTDroneRow& R : X.DroneRows)
+        {
+            R.NameId = Intern(SeenDocks, X.DockNames, R.Name);
+            R.PairedNameId = Intern(SeenDocks, X.DockNames, R.PairedName);
+            R.Name.Empty(); R.PairedName.Empty();
+        }
     }
 
     // Rough size, for the log: strings dominate, everything else is a few bytes per row. The row
@@ -164,8 +181,10 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
     Bytes += 52 * X.StationRows.Num();
     for (const auto& R : X.LapRows) Bytes += 68 + 4 * R.StopIds.Num();
     Bytes += 44 * X.QueueRows.Num() + 16 * X.ReasonRows.Num();
-    UE_LOG(LogDynamicTimeTableRCO, Verbose, TEXT("SNAPSHOT_SIZE Sections=%d Groups=%d DispatchRows=%d TruckRows=%d StationRows=%d LapRows=%d QueueRows=%d DockNames=%d TruckNames=%d ApproxBytes=%lld"),
-        X.Sections, X.Groups.Num(), X.DispatchRows.Num(), X.TruckRows.Num(), X.StationRows.Num(), X.LapRows.Num(), X.QueueRows.Num(),
+    // A drone row is numbers plus up to nine item lines, each a class reference and a count.
+    for (const auto& R : X.DroneRows) Bytes += 72 + 12 * (R.ExportItems.Num() + R.ImportItems.Num() + R.CargoItems.Num());
+    UE_LOG(LogDynamicTimeTableRCO, Verbose, TEXT("SNAPSHOT_SIZE Sections=%d Groups=%d DispatchRows=%d TruckRows=%d StationRows=%d LapRows=%d QueueRows=%d DroneRows=%d DockNames=%d TruckNames=%d ApproxBytes=%lld"),
+        X.Sections, X.Groups.Num(), X.DispatchRows.Num(), X.TruckRows.Num(), X.StationRows.Num(), X.LapRows.Num(), X.QueueRows.Num(), X.DroneRows.Num(),
         X.DockNames.Num(), X.TruckNames.Num(), Bytes);
     Client_ReceiveSnapshot(X);
 }
@@ -262,6 +281,15 @@ void UDynamicTimeTableRemoteCallObject::Client_ReceiveSnapshot_Implementation(co
             R.ResourceId = Expand(X.DockNames, R.ResourceNameId);
             R.GroupName = Expand(X.DockNames, R.GroupNameId);
             R.ClaimOwner = Expand(X.TruckNames, R.ClaimTruckId);
+        }
+    }
+    if (X.Sections & EDTTSnapshotSection::Drones)
+    {
+        CachedSnapshot.DroneRows = X.DroneRows;
+        for (FDTTDroneRow& R : CachedSnapshot.DroneRows)
+        {
+            R.Name = Expand(X.DockNames, R.NameId);
+            R.PairedName = Expand(X.DockNames, R.PairedNameId);
         }
     }
     OnSnapshotChanged.Broadcast();

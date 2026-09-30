@@ -86,6 +86,7 @@ void UDynamicTimeTableWidget::NativeConstruct()
     DispatchTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleDispatchTabClicked);
     TrucksTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleTrucksTabClicked);
     StationsTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleStationsTabClicked);
+    DronesTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleDronesTabClicked);
     TimetableTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleTimetableTabClicked);
     SettingsTabButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsTabClicked);
     SettingsSaveButton->OnClicked.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingsSaveClicked);
@@ -260,6 +261,7 @@ void UDynamicTimeTableWidget::RefreshRuntimeDisplay()
     if (ActiveTab == EDTTTab::Dispatch) { RefreshDispatchDisplay(); return; }
     if (ActiveTab == EDTTTab::Trucks) { RefreshTruckDisplay(); return; }
     if (ActiveTab == EDTTTab::Stations) { RefreshStationDisplay(); return; }
+    if (ActiveTab == EDTTTab::Drones) { RefreshDroneDisplay(); return; }
     if (ActiveTab == EDTTTab::Timetable) { RefreshTimetableDisplay(); return; }
     if (ActiveTab == EDTTTab::Settings)
     {
@@ -290,6 +292,7 @@ int32 UDynamicTimeTableWidget::GetRequestedSections() const
     case EDTTTab::Dispatch: return EDTTSnapshotSection::Dispatch;
     case EDTTTab::Trucks: return EDTTSnapshotSection::Trucks;
     case EDTTTab::Stations: return EDTTSnapshotSection::Stations;
+    case EDTTTab::Drones: return EDTTSnapshotSection::Drones;
     case EDTTTab::Timetable: return EDTTSnapshotSection::Timetable;
     default: return EDTTSnapshotSection::Groups;
     }
@@ -320,6 +323,12 @@ void UDynamicTimeTableWidget::HandleRowAction(const FDTTRowTarget& Target)
     {
         ExpandedStationKey = ExpandedStationKey == Target.CardKey ? FString() : Target.CardKey;
         RefreshStationDisplay();
+        return;
+    }
+    if (Target.Action == EDTTRowAction::ToggleExpandDrone)
+    {
+        ExpandedDroneKey = ExpandedDroneKey == Target.CardKey ? FString() : Target.CardKey;
+        RefreshDroneDisplay();
         return;
     }
     // The chips and captions of the Stations table: what it shows, and in what order.
@@ -476,6 +485,7 @@ void UDynamicTimeTableWidget::SetActiveTab(EDTTTab Tab)
     Style(DispatchTabButton, EDTTTab::Dispatch);
     Style(TrucksTabButton, EDTTTab::Trucks);
     Style(StationsTabButton, EDTTTab::Stations);
+    Style(DronesTabButton, EDTTTab::Drones);
     Style(TimetableTabButton, EDTTTab::Timetable);
     Style(GroupsTabButton, EDTTTab::Groups);
     Style(SettingsTabButton, EDTTTab::Settings);
@@ -491,6 +501,7 @@ void UDynamicTimeTableWidget::HandleGroupsTabClicked() { SetActiveTab(EDTTTab::G
 void UDynamicTimeTableWidget::HandleDispatchTabClicked() { SetActiveTab(EDTTTab::Dispatch); }
 void UDynamicTimeTableWidget::HandleTrucksTabClicked() { SetActiveTab(EDTTTab::Trucks); }
 void UDynamicTimeTableWidget::HandleStationsTabClicked() { SetActiveTab(EDTTTab::Stations); }
+void UDynamicTimeTableWidget::HandleDronesTabClicked() { SetActiveTab(EDTTTab::Drones); }
 void UDynamicTimeTableWidget::HandleTimetableTabClicked() { SetActiveTab(EDTTTab::Timetable); }
 
 void UDynamicTimeTableWidget::SetStatusLine(const DTTUI::FDTTStatusLine& Line, const FString& Source)

@@ -1,5 +1,6 @@
 #include "DTTSaveDataActor.h"
 #include "DynamicTimeTableSubsystem.h"
+#include "FGDroneVehicle.h"
 #include "FGTrainStationIdentifier.h"
 #include "WheeledVehicles/FGDockingStationIdentifier.h"
 #include "WheeledVehicles/FGWheeledVehicleIdentifier.h"
@@ -39,13 +40,14 @@ void ADTTSaveDataActor::PreSaveGame_Implementation(int32 saveVersion, int32 game
             Subsystem->ExportTruckAnchors(SavedTruckAnchors);
             Subsystem->ExportPoolTrucks(SavedPoolTrucks);
             Subsystem->ExportTruckPaints(SavedTruckPaints);
+            Subsystem->ExportDronePaints(SavedDronePaints);
             SavedSettings = Subsystem->GetSettings();
             bSavedPaintByCargo = Subsystem->IsPaintByCargoEnabled();
         }
     }
     UE_LOG(LogDynamicTimeTableSaveData, Display,
-        TEXT("Saving dTT configuration. Groups=%d TruckAnchors=%d PoolTrucks=%d TruckPaints=%d DataVersion=%d"),
-        SavedGroups.Num(), SavedTruckAnchors.Num(), SavedPoolTrucks.Num(), SavedTruckPaints.Num(), DataVersion);
+        TEXT("Saving dTT configuration. Groups=%d TruckAnchors=%d PoolTrucks=%d TruckPaints=%d DronePaints=%d DataVersion=%d"),
+        SavedGroups.Num(), SavedTruckAnchors.Num(), SavedPoolTrucks.Num(), SavedTruckPaints.Num(), SavedDronePaints.Num(), DataVersion);
 }
 
 void ADTTSaveDataActor::PostSaveGame_Implementation(int32 saveVersion, int32 gameVersion)
@@ -94,6 +96,13 @@ void ADTTSaveDataActor::GatherDependencies_Implementation(TArray<UObject*>& out_
         }
     }
     for (const FDTTSavedTruckPaint& Saved : SavedTruckPaints)
+    {
+        if (IsValid(Saved.Vehicle.Get()))
+        {
+            out_dependentObjects.AddUnique(Saved.Vehicle.Get());
+        }
+    }
+    for (const FDTTSavedDronePaint& Saved : SavedDronePaints)
     {
         if (IsValid(Saved.Vehicle.Get()))
         {

@@ -10,6 +10,7 @@
 #include "Buildables/FGBuildableConveyorBase.h"
 #include "Buildables/FGBuildableConveyorMonitor.h"
 #include "Buildables/FGBuildableDockingStation.h"
+#include "Buildables/FGBuildableDroneStation.h"
 #include "Buildables/FGBuildableGeneratorFuel.h"
 #include "Buildables/FGBuildableManufacturer.h"
 #include "Buildables/FGBuildablePipeReservoir.h"
@@ -741,6 +742,17 @@ TSubclassOf<UFGItemDescriptor> FDTTAutoNameScanner::DockCargo(AFGBuildableDockin
     return DTSDockCargoItem(Station, Ports);
 }
 
+namespace
+{
+    /**
+     * The walk itself, once a building's ports and their direction are known. Owner is the
+     * building the ports belong to - a truck dock or a drone port - and is only ever used as a
+     * name for the log and as a node the walk must not pass through.
+     */
+    bool DTSScanSide(AActor* Owner, const TArray<UFGConnectionComponent*>& DockPorts, bool bRequester, bool bFluidDock,
+        FDTSItem Cargo, const FDTTAutoNameLimits& Limits, FDTSItem Preferred, FDTTAutoNameResult& Out);
+}
+
 bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAutoNameLimits& Limits,
     TSubclassOf<UFGItemDescriptor> Preferred, FDTTAutoNameResult& Out)
 {
@@ -766,6 +778,67 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
     FDTSItem Cargo = DTSDockCargoItem(Station, DockPorts);
     if (Cargo && DTSIsFluidItem(Cargo) != bFluidDock) Cargo = nullptr;
     if (Preferred && DTSIsFluidItem(Preferred) != bFluidDock) Preferred = nullptr;
+
+    return DTSScanSide(Station, DockPorts, bRequester, bFluidDock, Cargo, Limits, Preferred, Out);
+}
+
+bool FDTTAutoNameScanner::ScanDronePort(AFGBuildableDroneStation* Port, const FDTTAutoNameLimits& Limits,
+    TSubclassOf<UFGItemDescriptor> PreferredImport, TSubclassOf<UFGItemDescriptor> PreferredExport,
+    FDTTAutoNameResult& OutImport, FDTTAutoNameResult& OutExport)
+{
+    OutImport = FDTTAutoNameResult();
+    OutExport = FDTTAutoNameResult();
+    if (!IsValid(Port))
+    {
+        OutImport.SkipReason = TEXT("no-station");
+        OutExport.SkipReason = TEXT("no-station");
+        return false;
+    }
+
+    // The port's own connectors are public here, unlike a dock's. The one that feeds the fuel slot
+    // is told apart by the tag the game itself checks when it collects from it.
+    static const FName FuelTag(TEXT("Fuel"));
+    TArray<UFGConnectionComponent*> Ins, Outs;
+    for (UFGFactoryConnectionComponent* Connection : Port->GetConnectionComponents())
+    {
+        if (!IsValid(Connection) || !Connection->IsConnected()) continue;
+        if (Connection->GetDirection() == EFactoryConnectionDirection::FCD_OUTPUT) Outs.Add(Connection);
+        else if (Connection->GetDirection() == EFactoryConnectionDirection::FCD_INPUT && !Connection->ComponentHasTag(FuelTag)) Ins.Add(Connection);
+    }
+
+    // What the port receives leaves it by belt: the witness is the output inventory, which the
+    // drone fills. A drone port carries solids only.
+    if (Outs.Num() == 0) OutImport.SkipReason = TEXT("no-belt");
+    else
+    {
+        TMap<FDTSItem, int64> Held;
+        DTSTallyInventory(Port->GetOutputInventory(), Held);
+        FDTSItem Cargo = DTSMostHeld(Held);
+        if (Cargo && DTSIsFluidItem(Cargo)) Cargo = nullptr;
+        if (PreferredImport && DTSIsFluidItem(PreferredImport)) PreferredImport = nullptr;
+        DTSScanSide(Port, Outs, true, false, Cargo, Limits, PreferredImport, OutImport);
+    }
+
+    // What it sends arrives by belt into the input inventory, which the drone empties.
+    if (Ins.Num() == 0) OutExport.SkipReason = TEXT("no-belt");
+    else
+    {
+        TMap<FDTSItem, int64> Held;
+        DTSTallyInventory(Port->GetInputInventory(), Held);
+        FDTSItem Cargo = DTSMostHeld(Held);
+        if (Cargo && DTSIsFluidItem(Cargo)) Cargo = nullptr;
+        if (PreferredExport && DTSIsFluidItem(PreferredExport)) PreferredExport = nullptr;
+        DTSScanSide(Port, Ins, false, false, Cargo, Limits, PreferredExport, OutExport);
+    }
+    return OutImport.bValid || OutExport.bValid;
+}
+
+namespace
+{
+bool DTSScanSide(AActor* Owner, const TArray<UFGConnectionComponent*>& DockPorts, bool bRequester, bool bFluidDock,
+    FDTSItem Cargo, const FDTTAutoNameLimits& Limits, FDTSItem Preferred, FDTTAutoNameResult& Out)
+{
+    Out.bFluidDock = bFluidDock;
 
     FDTSWalk Walk;
     Walk.NodeBudget = FMath::Max(16, Limits.MaxNodes);
@@ -956,7 +1029,7 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
         if (ProductWalk.bOverflow)
         {
             Out.bMoreProducts = true;
-            UE_LOG(LogDTTAutoName, Verbose, TEXT("AUTONAME_PRODUCTS_CUT Station=%s Machines=%d"), *Station->GetName(), VisitedMachines.Num());
+            UE_LOG(LogDTTAutoName, Verbose, TEXT("AUTONAME_PRODUCTS_CUT Station=%s Machines=%d"), *GetNameSafe(Owner), VisitedMachines.Num());
         }
 
         Products.ValueSort([](float A, float B) { return A > B; });
@@ -988,7 +1061,7 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
             FDTSWalk Flow;
             Flow.NodeBudget = FMath::Max(16, Limits.MaxNodes) * 16;
             TSet<AActor*> Visited;
-            Visited.Add(Station);
+            Visited.Add(Owner);
             float Reaching = 0.0f;
             for (UFGConnectionComponent* Seed : DTSSeeds(DockPorts))
             {
@@ -996,7 +1069,7 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
             }
             if (Flow.bOverflow)
             {
-                UE_LOG(LogDTTAutoName, Verbose, TEXT("AUTONAME_SHARE_CUT Station=%s Line=%.1f"), *Station->GetName(), Rate);
+                UE_LOG(LogDTTAutoName, Verbose, TEXT("AUTONAME_SHARE_CUT Station=%s Line=%.1f"), *GetNameSafe(Owner), Rate);
             }
             else
             {
@@ -1028,4 +1101,5 @@ bool FDTTAutoNameScanner::Scan(AFGBuildableDockingStation* Station, const FDTTAu
 
     Out.bValid = true;
     return true;
+}
 }

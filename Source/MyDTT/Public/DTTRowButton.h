@@ -24,6 +24,7 @@ enum class EDTTRowAction : uint8
     TruckRebuildLap,
     /** Open or close one row of the Stations page. */
     ToggleExpandStation,
+    ToggleExpandDrone,
     /** Tick a station's row into the selection the limit box writes to. */
     StationSelect,
     StationStayOn,

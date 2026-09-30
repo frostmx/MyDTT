@@ -801,20 +801,25 @@ struct FDTTCardSink
         return Line;
     }
 
-    /** A column of a Row: fixed width so the columns line up, or Width 0 to take what is left. */
+    /**
+     * A column of a Row: fixed width so the columns line up, or Width 0 to take what is left.
+     * bWrap lets the text run onto the following lines instead of ending in an ellipsis; the row
+     * has to be tall enough for them, the box clips whatever still does not fit.
+     */
     UTextBlock* Cell(UPanelWidget* Line, const FString& Value, int32 Size, const FLinearColor& Color,
-        float Width, EHorizontalAlignment Align = HAlign_Left, const FMargin& Margin = FMargin(0, 0, 6, 0))
+        float Width, EHorizontalAlignment Align = HAlign_Left, const FMargin& Margin = FMargin(0, 0, 6, 0),
+        bool bWrap = false)
     {
         UTextBlock* T = nullptr;
         if (bBuild)
         {
             USizeBox* Box = Tree->ConstructWidget<USizeBox>();
             if (Width > 0.0f) Box->SetWidthOverride(Width);
-            T = Text(nullptr, Value, Size, Color);
+            T = Text(nullptr, Value, Size, Color, bWrap);
             // A size box holds a column's width but does not stop the text inside it from drawing
             // past that: a long station name printed straight over the next column. The ellipsis
             // says the name goes on, which a clean cut would not.
-            T->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
+            if (!bWrap) T->SetTextOverflowPolicy(ETextOverflowPolicy::Ellipsis);
             Box->SetClipping(EWidgetClipping::ClipToBounds);
             Box->SetContent(T);
             // The text fills its column and justifies itself inside it. Aligning the slot

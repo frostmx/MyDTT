@@ -17,6 +17,10 @@
 #include "WheeledVehicles/FGWheeledVehicle.h"
 #include "WheeledVehicles/FGWheeledVehicleIdentifier.h"
 #include "FGDockableInterface.h"
+#include "FGDroneStationInfo.h"
+#include "FGDroneSubsystem.h"
+#include "FGDroneVehicle.h"
+#include "Buildables/FGBuildableDroneStation.h"
 #include "Buildables/FGBuildableDockingStation.h"
 #include "Buildables/FGBuildableConveyorBase.h"
 #include "Buildables/FGBuildablePipeline.h"
@@ -267,6 +271,35 @@ namespace
         Result = Result.IsEmpty() ? Tag : FString::Printf(TEXT("%s %s"), *Tag, *Result);
         if (!Tail.IsEmpty()) Result += FString::Printf(TEXT(" %s"), *Tail);
         return Result;
+    }
+
+    /**
+     * The sending side of a drone port that also receives: "(Plastic) Plant -30/m -> Battery |
+     * (Battery) +120/m". The group after the bar is cut off first, because the truck grammar
+     * above allows one sign and one tail and would read the whole thing as the player's text.
+     */
+    bool DTSSplitDroneExport(const FString& FullName, FString& OutMain, FString& OutWord, FString& OutTail)
+    {
+        OutMain = FullName.TrimStartAndEnd();
+        OutWord.Reset();
+        OutTail.Reset();
+        const int32 Bar = OutMain.Find(TEXT(" | ("), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+        if (Bar == INDEX_NONE) return false;
+        const FString Group = OutMain.Mid(Bar + 3);
+        int32 Close = INDEX_NONE;
+        if (!Group.FindChar(TEXT(')'), Close)) return false;
+        const FString Word = Group.Mid(1, Close - 1).TrimStartAndEnd();
+        const FString Tail = Group.Mid(Close + 1).TrimStartAndEnd();
+        if (Word.IsEmpty() || !Tail.StartsWith(TEXT("+")) || !DTSIsAutoTail(Tail)) return false;
+        OutWord = Word;
+        OutTail = Tail;
+        OutMain = OutMain.Left(Bar).TrimEnd();
+        return true;
+    }
+
+    FString DTSJoinDroneExport(const FString& Main, const FString& Word, const FString& Tail)
+    {
+        return FString::Printf(TEXT("%s | (%s) %s"), *Main, *Word, *Tail);
     }
 
     /**
@@ -850,12 +883,243 @@ void UDynamicTimeTableSubsystem::MarkAllDocksForAutoName(const TCHAR* Reason)
         AutoNameDirty.Add(Identifier->GetPathNodeGUID(), &bAlready);
         if (!bAlready) ++Added;
     }
+    // Drone ports go the same way, under the same switch: they are stations of the same kind to
+    // the player, only with belts on both sides.
+    if (AFGDroneSubsystem* Drones = AFGDroneSubsystem::Get(GetWorld()))
+    {
+        for (AFGDroneStationInfo* Info : Drones->GetAllStations())
+        {
+            if (!IsValid(Info)) continue;
+            bool bAlready = false;
+            AutoNameDirtyPorts.Add(Info, &bAlready);
+            if (!bAlready) ++Added;
+        }
+    }
     if (Added > 0)
     {
         AutoNameDirtySinceSeconds = FPlatformTime::Seconds();
         UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("AUTONAME_DIRTY Reason=%s Added=%d Total=%d"),
-            Reason, Added, AutoNameDirty.Num());
+            Reason, Added, AutoNameDirty.Num() + AutoNameDirtyPorts.Num());
     }
+}
+
+void UDynamicTimeTableSubsystem::MarkDronePortUrgentForAutoName(AFGDroneStationInfo* Info, const TCHAR* Reason)
+{
+    if (!IsValid(Info) || !GetSettings().bAutoNameStations) return;
+    bool bAlready = false;
+    AutoNameDirtyPorts.Add(Info, &bAlready);
+    if (!bAlready) AutoNameDirtySinceSeconds = FPlatformTime::Seconds();
+    AutoNameUrgentPorts.AddUnique(Info);
+    UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("AUTONAME_URGENT Name=\"%s\" Reason=%s"), *DronePortName(Info), Reason);
+}
+
+void UDynamicTimeTableSubsystem::DetectDronePortRenames()
+{
+    AFGDroneSubsystem* Drones = AFGDroneSubsystem::Get(GetWorld());
+    if (!IsValid(Drones)) return;
+    for (auto It = DronePortNamesSeen.CreateIterator(); It; ++It)
+        if (!It.Key().IsValid()) It.RemoveCurrent();
+    for (AFGDroneStationInfo* Info : Drones->GetAllStations())
+    {
+        if (!IsValid(Info)) continue;
+        const FString Name = DronePortName(Info);
+        FString* Seen = DronePortNamesSeen.Find(Info);
+        // First sighting only records: a port that appears is the builder hook's business.
+        if (!Seen) { DronePortNamesSeen.Add(Info, Name); continue; }
+        if (*Seen == Name) continue;
+        UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("STATION_RENAMED Kind=Drone Old=\"%s\" New=\"%s\""), **Seen, *Name);
+        *Seen = Name;
+        MarkDronePortUrgentForAutoName(Info, TEXT("renamed"));
+    }
+}
+
+FString UDynamicTimeTableSubsystem::DronePortName(const AFGDroneStationInfo* Info)
+{
+    return IsValid(Info) ? Info->GetBuildingTag_Implementation() : FString();
+}
+
+bool UDynamicTimeTableSubsystem::SharesAutoNameChain(const FDTTAutoNameReach& Reach, const FGuid* SkipDock, const AFGDroneStationInfo* SkipPort) const
+{
+    auto Overlaps = [&Reach](const FDTTAutoNameReach& Other)
+    {
+        if (Other.ItemClass != Reach.ItemClass || Other.bRequester != Reach.bRequester) return false;
+        for (const TWeakObjectPtr<AActor>& Machine : Reach.Machines)
+        {
+            if (Other.Machines.Contains(Machine)) return true;
+        }
+        return false;
+    };
+    for (const TPair<FGuid, FDTTAutoNameReach>& Pair : AutoNameMachines)
+    {
+        if (SkipDock && Pair.Key == *SkipDock) continue;
+        if (Overlaps(Pair.Value)) return true;
+    }
+    for (const TPair<TWeakObjectPtr<AFGDroneStationInfo>, TArray<FDTTAutoNameReach>>& Pair : AutoNameDroneMachines)
+    {
+        if (SkipPort && Pair.Key.Get() == SkipPort) continue;
+        for (const FDTTAutoNameReach& Other : Pair.Value)
+        {
+            if (Overlaps(Other)) return true;
+        }
+    }
+    return false;
+}
+
+bool UDynamicTimeTableSubsystem::RenameDronePortGuarded(AFGDroneStationInfo* Info, const FString& NewName)
+{
+    if (!IsValid(Info) || !IsServer()) return false;
+    if (DronePortName(Info) == NewName) return true;
+    AFGDroneSubsystem* Drones = AFGDroneSubsystem::Get(GetWorld());
+    if (!IsValid(Drones)) return false;
+    InternalNameChanges.Add(Info);
+    Drones->SetStationName(Info, NewName);
+    InternalNameChanges.Remove(Info);
+    const bool bOk = DronePortName(Info) == NewName;
+    // The poll compares names to find the player's renames; this one is the mod's own.
+    DronePortNamesSeen.Add(Info, DronePortName(Info));
+    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("STATION_RETAGGED Kind=Drone New='%s' Applied=%s"),
+        *NewName, bOk ? TEXT("true") : TEXT("false"));
+    return bOk;
+}
+
+bool UDynamicTimeTableSubsystem::ProcessAutoNameForDronePort(AFGDroneStationInfo* Info, bool bPreviewOnly, TArray<FString>* OutLines, bool bExplainAll,
+    const TMap<TSubclassOf<UFGItemDescriptor>, FString>* WorldWords)
+{
+    if (!IsValid(Info)) return false;
+    const FString Current = DronePortName(Info);
+
+    auto Skip = [&](const FString& Reason)
+    {
+        AutoNameDroneMachines.Remove(Info);
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("AUTONAME_SKIP Name=\"%s\" Reason=%s"), *Current, *Reason);
+        if (OutLines) OutLines->Add(FString::Printf(TEXT("%s - skipped (%s)"), *Current, *Reason));
+        return false;
+    };
+
+    // A name that ends in a full stop belongs to the player, completely - the same rule as a dock's.
+    if (Current.TrimStartAndEnd().EndsWith(TEXT("."))) return Skip(TEXT("player-owned-name"));
+    AFGBuildableDroneStation* Station = Info->GetStation();
+    if (!IsValid(Station)) return Skip(TEXT("station-not-loaded"));
+
+    FDTTAutoNameLimits Limits;
+    Limits.MaxNodes = GetSettings().AutoNameMaxNodes;
+    Limits.MaxProducts = GetSettings().AutoNameMaxProducts;
+    Limits.bExplainAll = bExplainAll;
+
+    // The name in its parts: the sending group after the bar first, then the truck-style block
+    // of what is left. A one-sided port carries its one tag in front; the sign of the tail says
+    // which side that tag names.
+    FString Main, ExportWord, ExportTail;
+    const bool bHadExport = DTSSplitDroneExport(Current, Main, ExportWord, ExportTail);
+    FString PrevHead, PrevTag, PrevTail;
+    const bool bHadAuto = DTSSplitAutoBlock(Main, PrevHead, PrevTag, PrevTail);
+    const bool bAutoWasUnsure = bHadAuto && PrevTail.Contains(TEXT("?"));
+    const bool bExportWasUnsure = bHadExport && ExportTail.Contains(TEXT("?"));
+    const bool bMainIsExport = bHadAuto && !bHadExport && PrevTail.StartsWith(TEXT("+"));
+
+    FString TagBase, TagResource;
+    EDTTDispatchRole TagRole = EDTTDispatchRole::None;
+    int32 TagThreshold = 0;
+    bool bTagStayUntilEmpty = false;
+    const bool bHasTag = ParseDispatchTag(Main, TagBase, TagResource, TagRole, TagThreshold, &bTagStayUntilEmpty);
+    const TSubclassOf<UFGItemDescriptor> TagItem = (bHasTag && !bAutoWasUnsure) ? ResolveItemClassForResource(TagResource) : nullptr;
+    const TSubclassOf<UFGItemDescriptor> PreferredImport = bMainIsExport ? nullptr : TagItem;
+    TSubclassOf<UFGItemDescriptor> PreferredExport = bMainIsExport ? TagItem : nullptr;
+    if (bHadExport && !bExportWasUnsure) PreferredExport = ResolveItemClassForResource(ExportWord);
+
+    FDTTAutoNameResult Import, Export;
+    FDTTAutoNameScanner::ScanDronePort(Station, Limits, PreferredImport, PreferredExport, Import, Export);
+    if (Import.bValid) { LocalizeAutoNameResult(Import); if (Import.ResourceName.IsEmpty()) { Import.bValid = false; Import.SkipReason = TEXT("resource-has-no-name"); } }
+    if (Export.bValid) { LocalizeAutoNameResult(Export); if (Export.ResourceName.IsEmpty()) { Export.bValid = false; Export.SkipReason = TEXT("resource-has-no-name"); } }
+    if (!Import.bValid && !Export.bValid)
+    {
+        return Skip(Import.SkipReason == Export.SkipReason ? Import.SkipReason : FString::Printf(TEXT("%s/%s"), *Import.SkipReason, *Export.SkipReason));
+    }
+
+    // The '*' against every dock and port: two stations pouring into one chain both see the whole
+    // demand of it, and a port that collects from a line another dock collects from is not alone.
+    auto ReachOf = [](const FDTTAutoNameResult& Result)
+    {
+        FDTTAutoNameReach Reach;
+        Reach.ItemClass = Result.ItemClass;
+        Reach.bRequester = Result.bRequester;
+        for (const TWeakObjectPtr<AActor>& Machine : Result.Machines) Reach.Machines.Add(Machine);
+        return Reach;
+    };
+    TArray<FDTTAutoNameReach> Reaches;
+    bool bSharedImport = false, bSharedExport = false;
+    if (Import.bValid) { FDTTAutoNameReach Reach = ReachOf(Import); bSharedImport = SharesAutoNameChain(Reach, nullptr, Info); Reaches.Add(MoveTemp(Reach)); }
+    if (Export.bValid) { FDTTAutoNameReach Reach = ReachOf(Export); bSharedExport = SharesAutoNameChain(Reach, nullptr, Info); Reaches.Add(MoveTemp(Reach)); }
+
+    // What the port receives is the main block of its name, spelled exactly like a requester
+    // dock; a port that only sends is spelled like a collecting dock. The one that does both puts
+    // the sending side after a bar, so the leading tag always says what is brought here.
+    const FDTTAutoNameResult& MainResult = Import.bValid ? Import : Export;
+    const bool bMainShared = Import.bValid ? bSharedImport : bSharedExport;
+    FString Source = Main;
+    FString OldExportWord = bHadExport ? ExportWord : FString();
+    bool bTagForMain = bHasTag;
+    if (bMainIsExport && Import.bValid)
+    {
+        // The port used to only send and its tag named that; now it receives too, so the word
+        // moves behind the bar and the main block starts from the player's own text.
+        Source = PrevHead;
+        OldExportWord = TagResource;
+        bTagForMain = false;
+    }
+    const bool bOwnWord = bTagForMain && !ResolveItemClassForResource(TagResource);
+    const bool bSameResource = bTagForMain && MainResult.ItemClass && (bOwnWord || (TagItem && TagItem == MainResult.ItemClass));
+    const bool bRelabel = bExplainAll || AutoNameRelabelPending;
+    const bool bKeepWord = bSameResource && !(bRelabel && ResolveItemClassByName(TagResource));
+    const FString* WorldWord = WorldWords ? WorldWords->Find(MainResult.ItemClass) : nullptr;
+    FString NewName = DTSComposeAutoName(Source, MainResult, bMainShared, bSameResource, bKeepWord, WorldWord);
+
+    if (Import.bValid && Export.bValid)
+    {
+        // The word for what the port sends follows the same rule as a tag: the one already in the
+        // name while it still means this item, else the world's word, else the game's.
+        FString Word = Export.ResourceName;
+        if (!OldExportWord.IsEmpty())
+        {
+            const TSubclassOf<UFGItemDescriptor> OldItem = ResolveItemClassForResource(OldExportWord);
+            const bool bOldSame = !OldItem || OldItem == Export.ItemClass;
+            if (bOldSame && !(bRelabel && ResolveItemClassByName(OldExportWord))) Word = OldExportWord;
+        }
+        if (Word == Export.ResourceName)
+        {
+            if (const FString* ExportWorldWord = WorldWords ? WorldWords->Find(Export.ItemClass) : nullptr) Word = *ExportWorldWord;
+        }
+        NewName = DTSJoinDroneExport(NewName, DTSSanitizeProductName(Word), DTSMakeAutoTail(Export, bSharedExport, 0, false));
+    }
+
+    // A measurement, not a decision: recorded by a preview too, so the '*' marks agree with the
+    // apply that follows.
+    AutoNameDroneMachines.Add(Info, MoveTemp(Reaches));
+
+    const bool bChanges = NewName != Current;
+    if (bPreviewOnly)
+    {
+        if (OutLines)
+        {
+            OutLines->Add(bChanges
+                ? FString::Printf(TEXT("%s %s %s"), *Current, *DTSAutoArrow(), *NewName)
+                : FString::Printf(TEXT("%s - already current"), *Current));
+        }
+        return bChanges;
+    }
+
+    if (bChanges && RenameDronePortGuarded(Info, NewName))
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("AUTONAME_RENAMED Kind=Drone Old=\"%s\" New=\"%s\" Receives=%.1f Sends=%.1f"),
+            *Current, *NewName, Import.bValid ? Import.RatePerMinute : 0.0f, Export.bValid ? Export.RatePerMinute : 0.0f);
+        if (OutLines) OutLines->Add(FString::Printf(TEXT("%s %s %s"), *Current, *DTSAutoArrow(), *NewName));
+    }
+    else
+    {
+        UE_LOG(LogDynamicTimeTableSubsystem, Verbose, TEXT("AUTONAME_RESULT Kind=Drone Name=\"%s\" Receives=\"%s\" Sends=\"%s\""),
+            *Current, Import.bValid ? *Import.ResourceName : TEXT("-"), Export.bValid ? *Export.ResourceName : TEXT("-"));
+    }
+    return bChanges;
 }
 
 void UDynamicTimeTableSubsystem::MarkDockUrgentForAutoName(AFGDockingStationIdentifier* Identifier, const TCHAR* Reason)
@@ -936,17 +1200,7 @@ bool UDynamicTimeTableSubsystem::ProcessAutoNameForStation(AFGDockingStationIden
     Reach.bRequester = Result.bRequester;
     for (const TWeakObjectPtr<AActor>& Machine : Result.Machines) Reach.Machines.Add(Machine);
 
-    bool bShared = false;
-    for (const TPair<FGuid, FDTTAutoNameReach>& Pair : AutoNameMachines)
-    {
-        if (Pair.Key == Guid) continue;
-        if (Pair.Value.ItemClass != Reach.ItemClass || Pair.Value.bRequester != Reach.bRequester) continue;
-        for (const TWeakObjectPtr<AActor>& Machine : Reach.Machines)
-        {
-            if (Pair.Value.Machines.Contains(Machine)) { bShared = true; break; }
-        }
-        if (bShared) break;
-    }
+    const bool bShared = SharesAutoNameChain(Reach, &Guid, nullptr);
 
     // The number a player wrote is kept while the cargo is the same thing - compared as an item
     // class, not as text, or the first pass would drop it just because the tag was written in
@@ -1036,11 +1290,19 @@ int32 UDynamicTimeTableSubsystem::RunAutoNamePass(bool bApplyAll, bool bPreviewO
     // walked first would miss the '*' and pick it up a pass later. A pass over the whole world
     // therefore walks twice: once to fill the map, once to name from it. The timed pass needs no
     // such thing - it walks what changed, and the map is already full from before.
+    AFGDroneSubsystem* Drones = AFGDroneSubsystem::Get(GetWorld());
     if (bWholeWorld)
     {
         for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
         {
             if (IsValid(Identifier)) ProcessAutoNameForStation(Identifier, true, nullptr, bWholeWorld);
+        }
+        if (IsValid(Drones))
+        {
+            for (AFGDroneStationInfo* Info : Drones->GetAllStations())
+            {
+                if (IsValid(Info)) ProcessAutoNameForDronePort(Info, true, nullptr, bWholeWorld);
+            }
         }
     }
 
@@ -1057,6 +1319,8 @@ int32 UDynamicTimeTableSubsystem::RunAutoNamePass(bool bApplyAll, bool bPreviewO
         {
             if (const AFGBuildableDockingStation* Dock = Cast<AFGBuildableDockingStation>(Actor))
                 MarkDockUrgentForAutoName(Dock->GetStationIdentifier(), TEXT("built"));
+            else if (const AFGBuildableDroneStation* Port = Cast<AFGBuildableDroneStation>(Actor))
+                MarkDronePortUrgentForAutoName(Port->GetInfo(), TEXT("built"));
         };
         for (const TWeakObjectPtr<const AActor>& Weak : AutoNameBuilt)
         {
@@ -1098,6 +1362,17 @@ int32 UDynamicTimeTableSubsystem::RunAutoNamePass(bool bApplyAll, bool bPreviewO
             }
         }
     }
+    if (!bWholeWorld && AutoNameUrgentPorts.Num() > 0)
+    {
+        TArray<TWeakObjectPtr<AFGDroneStationInfo>> Urgent = MoveTemp(AutoNameUrgentPorts);
+        AutoNameUrgentPorts.Reset();
+        for (const TWeakObjectPtr<AFGDroneStationInfo>& Weak : Urgent)
+        {
+            if (!AutoNameDirtyPorts.Contains(Weak)) continue;
+            AutoNameDirtyPorts.Remove(Weak);
+            if (ProcessAutoNameForDronePort(Weak.Get(), false, nullptr, false, &WorldWords)) ++Changed;
+        }
+    }
 
     for (AFGDockingStationIdentifier* Identifier : Vehicles->GetDockingStations())
     {
@@ -1120,10 +1395,31 @@ int32 UDynamicTimeTableSubsystem::RunAutoNamePass(bool bApplyAll, bool bPreviewO
         }
     }
 
+    // The drone ports, in what is left of the budget: the same pass, the same rules.
+    if (IsValid(Drones))
+    {
+        for (AFGDroneStationInfo* Info : Drones->GetAllStations())
+        {
+            if (Budget <= 0) break;
+            if (!IsValid(Info)) continue;
+            const int32 LinesBefore = OutLines ? OutLines->Num() : 0;
+            if (!bApplyAll && !bPreviewOnly && !AutoNameDirtyPorts.Contains(Info)) continue;
+
+            --Budget;
+            if (!bPreviewOnly) AutoNameDirtyPorts.Remove(Info);
+            if (ProcessAutoNameForDronePort(Info, bPreviewOnly, OutLines, bWholeWorld, &WorldWords)) ++Changed;
+            if (OutLines)
+            {
+                for (int32 Line = LinesBefore; Line < OutLines->Num(); ++Line)
+                    UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("AUTONAME_LINE %s"), *(*OutLines)[Line]);
+            }
+        }
+    }
+
     if (Changed > 0 && !bPreviewOnly) RebuildGroupsFromNames();
     // The relabel after a language change is a one-off: done once the world was written, or once
     // the dirty set the change filled has been worked through.
-    if (!bPreviewOnly && (bApplyAll || AutoNameDirty.Num() == 0)) AutoNameRelabelPending = false;
+    if (!bPreviewOnly && (bApplyAll || (AutoNameDirty.Num() == 0 && AutoNameDirtyPorts.Num() == 0))) AutoNameRelabelPending = false;
     return Changed;
 }
 
@@ -1146,8 +1442,29 @@ int32 UDynamicTimeTableSubsystem::StripAutoNames(TArray<FString>* OutLines)
             if (OutLines) OutLines->Add(FString::Printf(TEXT("%s %s %s"), *Current, *DTSAutoArrow(), *Bare));
         }
     }
+    if (AFGDroneSubsystem* Drones = AFGDroneSubsystem::Get(GetWorld()))
+    {
+        for (AFGDroneStationInfo* Info : Drones->GetAllStations())
+        {
+            if (!IsValid(Info)) continue;
+            const FString Current = DronePortName(Info);
+            // The sending group goes whole, tag and all: the receiving tag stays for the same
+            // reason a dock's does.
+            FString Main, ExportWord, ExportTail;
+            DTSSplitDroneExport(Current, Main, ExportWord, ExportTail);
+            const FString Bare = StripAutoBlock(Main);
+            if (Bare == Current.TrimStartAndEnd()) continue;
+            if (RenameDronePortGuarded(Info, Bare))
+            {
+                ++Stripped;
+                if (OutLines) OutLines->Add(FString::Printf(TEXT("%s %s %s"), *Current, *DTSAutoArrow(), *Bare));
+            }
+        }
+    }
     AutoNameMachines.Reset();
+    AutoNameDroneMachines.Reset();
     AutoNameDirty.Reset();
+    AutoNameDirtyPorts.Reset();
     if (Stripped > 0) RebuildGroupsFromNames();
     return Stripped;
 }
@@ -1290,8 +1607,61 @@ bool UDynamicTimeTableSubsystem::DescribeAutoName(const FString& StationQuery, T
     }
     if (!IsValid(Identifier))
     {
-        OutLines.Add(FString::Printf(TEXT("dTT: no docking station matches \"%s\"."), *StationQuery));
-        return false;
+        // No dock of that name: perhaps a drone port. Both of its sides are described, and the
+        // name it would get comes from the same pass a preview runs.
+        AFGDroneSubsystem* Drones = AFGDroneSubsystem::Get(GetWorld());
+        AFGDroneStationInfo* Port = nullptr;
+        if (IsValid(Drones))
+        {
+            for (AFGDroneStationInfo* Candidate : Drones->GetAllStations())
+            {
+                if (!IsValid(Candidate)) continue;
+                const FString Name = DronePortName(Candidate);
+                if (Name.Equals(StationQuery, ESearchCase::IgnoreCase)) { Port = Candidate; break; }
+                if (!Port && Name.Contains(StationQuery, ESearchCase::IgnoreCase)) Port = Candidate;
+            }
+        }
+        if (!IsValid(Port))
+        {
+            OutLines.Add(FString::Printf(TEXT("dTT: no docking station or drone port matches \"%s\"."), *StationQuery));
+            return false;
+        }
+        const FString Current = DronePortName(Port);
+        AFGBuildableDroneStation* Station = Port->GetStation();
+        if (!IsValid(Station))
+        {
+            OutLines.Add(FString::Printf(TEXT("%s: port not loaded"), *Current));
+            return false;
+        }
+        FDTTAutoNameLimits Limits;
+        Limits.MaxNodes = GetSettings().AutoNameMaxNodes;
+        Limits.MaxProducts = GetSettings().AutoNameMaxProducts;
+        Limits.bExplainAll = true;
+        FDTTAutoNameResult Import, Export;
+        FDTTAutoNameScanner::ScanDronePort(Station, Limits, nullptr, nullptr, Import, Export);
+        auto Side = [&](const TCHAR* Verb, FDTTAutoNameResult& Result)
+        {
+            if (!Result.bValid) { OutLines.Add(FString::Printf(TEXT("%s: %s nothing (%s)"), *Current, Verb, *Result.SkipReason)); return; }
+            const_cast<UDynamicTimeTableSubsystem*>(this)->LocalizeAutoNameResult(Result);
+            if (Result.bWarehouse)
+            {
+                OutLines.Add(FString::Printf(TEXT("%s: %s %s, no machines - %d store(s)"), *Current, Verb, *Result.ResourceName, Result.StoreCount));
+                return;
+            }
+            OutLines.Add(FString::Printf(TEXT("%s: %s %s, %s/min, %d machine(s), decided by %s%s"), *Current, Verb, *Result.ResourceName,
+                *DTSFormatRate(Result.RatePerMinute), Result.Machines.Num(), *Result.DecidedBy, Result.bMixed ? TEXT(", mixed") : TEXT("")));
+            if (Result.Products.Num() > 0)
+                OutLines.Add(FString::Printf(TEXT("  ends as %s%s"), *FString::Join(Result.Products, TEXT(", ")), Result.bMoreProducts ? TEXT(" ...") : TEXT("")));
+        };
+        Side(TEXT("receives"), Import);
+        Side(TEXT("sends"), Export);
+        TArray<FString> Preview;
+        const TMap<TSubclassOf<UFGItemDescriptor>, FString> WorldWords = CollectWorldWords();
+        const_cast<UDynamicTimeTableSubsystem*>(this)->ProcessAutoNameForDronePort(Port, true, &Preview, true, &WorldWords);
+        for (const FString& Line : Preview) OutLines.Add(FString::Printf(TEXT("  name would be: %s"), *Line));
+        for (const FString& Line : OutLines)
+            UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("AUTONAME_LINE %s"), *Line);
+        return true;
     }
 
     const FString Current = Identifier->GetStationName().ToString();
@@ -1407,7 +1777,9 @@ void UDynamicTimeTableSubsystem::TickAutoName()
         MarkAllDocksForAutoName(TEXT("sweep"));
     }
 
-    if (AutoNameDirty.Num() == 0) return;
+    DetectDronePortRenames();
+
+    if (AutoNameDirty.Num() == 0 && AutoNameDirtyPorts.Num() == 0) return;
     if (Now - AutoNameDirtySinceSeconds < Current.AutoNameDebounceSeconds) return;
 
     RunAutoNamePass(false, false, nullptr);
@@ -1571,9 +1943,17 @@ void UDynamicTimeTableSubsystem::InitializePersistence()
                 OriginalTruckPaints.Add(Saved.Vehicle.Get(), Saved.Original);
                 ++PaintsRestored;
             }
+            int32 DronePaintsRestored = 0;
+            for (const FDTTSavedDronePaint& Saved : Found->GetDronePaints())
+            {
+                if (!IsValid(Saved.Vehicle.Get())) continue;
+                OriginalDronePaints.Add(Saved.Vehicle.Get(), Saved.Original);
+                ++DronePaintsRestored;
+            }
             UE_LOG(LogDynamicTimeTableSubsystem, Display,
-                TEXT("CARGO_PAINT_RESTORED Enabled=%s Count=%d Saved=%d"),
-                bPaintByCargo ? TEXT("true") : TEXT("false"), PaintsRestored, Found->GetTruckPaints().Num());
+                TEXT("CARGO_PAINT_RESTORED Enabled=%s Count=%d Saved=%d Drones=%d DronesSaved=%d"),
+                bPaintByCargo ? TEXT("true") : TEXT("false"), PaintsRestored, Found->GetTruckPaints().Num(),
+                DronePaintsRestored, Found->GetDronePaints().Num());
         }
     }
     else if (GetWorld()->GetNetMode() != NM_Client)
@@ -1607,7 +1987,7 @@ void UDynamicTimeTableSubsystem::SyncConfigurationToSaveActor()
     if (SaveDataActor.IsValid() && IsServer())
     {
         SaveDataActor->SetGroups(TArray<FDTTStationGroup>());
-        SaveDataActor->SetDataVersion(9);
+        SaveDataActor->SetDataVersion(10);
         SaveDataActor->SetSettings(Settings);
         SaveDataActor->SetPaintByCargo(bPaintByCargo);
     }
@@ -4061,6 +4441,7 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
         if (!It.Key().IsValid()) It.RemoveCurrent();
     for (auto It = OriginalTruckPaints.CreateIterator(); It; ++It)
         if (!It.Key().IsValid()) It.RemoveCurrent();
+    TickDroneCargoPaint();
 
     for (AFGWheeledVehicleIdentifier* Vehicle : V->GetAllVehicles())
     {
@@ -4858,10 +5239,39 @@ FString UDynamicTimeTableSubsystem::DescribeCargo(AFGWheeledVehicleIdentifier* V
     return FString::Join(Parts, TEXT(", "));
 }
 
+namespace
+{
+    /**
+     * A vehicle that follows its owner's player-state colour would be repainted by the game right
+     * back, every time. Read by reflection: the flag is a UPROPERTY but protected, and an access
+     * transformer for one bool would cost a full FactoryGame rebuild.
+     */
+    bool DTSFollowsPlayerColour(const AFGVehicle* Vehicle)
+    {
+        static const FBoolProperty* MatchProperty =
+            CastField<FBoolProperty>(AFGVehicle::StaticClass()->FindPropertyByName(TEXT("mMatchCustomizationDataWithPlayerState")));
+        if (!MatchProperty || !MatchProperty->GetPropertyValue_InContainer(Vehicle)) return false;
+
+        static TSet<FString> Announced;
+        const FString Key = Vehicle->GetClass()->GetName();
+        if (!Announced.Contains(Key))
+        {
+            Announced.Add(Key);
+            UE_LOG(LogDynamicTimeTableSubsystem, Log,
+                TEXT("CARGO_PAINT_SKIPPED Class='%s' Reason=matches player state"), *Key);
+        }
+        return true;
+    }
+}
+
 TSubclassOf<UFGItemDescriptor> UDynamicTimeTableSubsystem::DominantCargoClass(AFGWheeledVehicleIdentifier* Vehicle) const
 {
     AFGWheeledVehicle* WheeledVehicle = IsValid(Vehicle) ? Vehicle->GetOwnerVehicle() : nullptr;
-    UFGInventoryComponent* Storage = IsValid(WheeledVehicle) ? WheeledVehicle->GetStorageInventory() : nullptr;
+    return DominantItemClassIn(IsValid(WheeledVehicle) ? WheeledVehicle->GetStorageInventory() : nullptr);
+}
+
+TSubclassOf<UFGItemDescriptor> UDynamicTimeTableSubsystem::DominantItemClassIn(UFGInventoryComponent* Storage)
+{
     if (!IsValid(Storage)) return nullptr;
 
     TArray<FInventoryStack> Stacks;
@@ -4890,23 +5300,7 @@ void UDynamicTimeTableSubsystem::TickCargoPaint(AFGWheeledVehicleIdentifier* Veh
     AFGWheeledVehicle* WheeledVehicle = Vehicle->GetOwnerVehicle();
     if (!IsValid(WheeledVehicle)) return;
 
-    // A vehicle that follows its owner's player-state colour would be repainted by the game right
-    // back, every time. Read by reflection: the flag is a UPROPERTY but protected, and an access
-    // transformer for one bool would cost a full FactoryGame rebuild.
-    static const FBoolProperty* MatchProperty =
-        CastField<FBoolProperty>(AFGVehicle::StaticClass()->FindPropertyByName(TEXT("mMatchCustomizationDataWithPlayerState")));
-    if (MatchProperty && MatchProperty->GetPropertyValue_InContainer(WheeledVehicle))
-    {
-        static TSet<FString> Announced;
-        const FString Key = WheeledVehicle->GetClass()->GetName();
-        if (!Announced.Contains(Key))
-        {
-            Announced.Add(Key);
-            UE_LOG(LogDynamicTimeTableSubsystem, Log,
-                TEXT("CARGO_PAINT_SKIPPED Class='%s' Reason=matches player state"), *Key);
-        }
-        return;
-    }
+    if (DTSFollowsPlayerColour(WheeledVehicle)) return;
 
     const TSubclassOf<UFGItemDescriptor> Cargo = DominantCargoClass(Vehicle);
     if (!Cargo)
@@ -4952,6 +5346,51 @@ void UDynamicTimeTableSubsystem::RestoreTruckPaint(AFGWheeledVehicleIdentifier* 
     OriginalTruckPaints.Remove(Vehicle);
 }
 
+void UDynamicTimeTableSubsystem::TickDroneCargoPaint()
+{
+    for (auto It = OriginalDronePaints.CreateIterator(); It; ++It)
+        if (!It.Key().IsValid()) It.RemoveCurrent();
+    if (!bPaintByCargo || !FDTTCargoPaint::IsAvailable()) return;
+
+    AFGDroneSubsystem* Drones = AFGDroneSubsystem::Get(GetWorld());
+    if (!IsValid(Drones)) return;
+
+    for (AFGDroneVehicle* Drone : Drones->GetAllDrones())
+    {
+        if (!IsValid(Drone) || DTSFollowsPlayerColour(Drone)) continue;
+
+        // Same rule as a truck: an empty hold keeps the colour of the last load. A drone based at
+        // the consumer flies out empty and comes back full, so between loads it would otherwise
+        // be in its own paint for exactly the leg on which it says nothing about itself anyway.
+        const TSubclassOf<UFGItemDescriptor> Cargo = DominantItemClassIn(Drone->GetStorageInventory());
+        if (!Cargo) continue;
+
+        const FDTTCargoColors Colors = FDTTCargoPaint::ColorsFor(Cargo);
+        const FFactoryCustomizationData& Current = Drone->GetCustomizationData_Native();
+        if (FDTTCargoPaint::IsPainted(Current, Colors)) continue;
+
+        if (!OriginalDronePaints.Contains(Drone))
+        {
+            OriginalDronePaints.Add(Drone, Current);
+        }
+        Drone->SetCustomizationData_Native(FDTTCargoPaint::MakePaint(Current, Colors), /*skipCombine*/ true);
+        UE_LOG(LogDynamicTimeTableSubsystem, Log, TEXT("CARGO_PAINT Drone='%s' Item='%s' Primary=%s Secondary=%s"),
+            *Drone->GetName(), *UFGItemDescriptor::GetItemName(Cargo).ToString(),
+            *Colors.Primary.ToString(), *Colors.Secondary.ToString());
+    }
+}
+
+void UDynamicTimeTableSubsystem::RestoreDronePaint(AFGDroneVehicle* Drone, const TCHAR* Reason)
+{
+    if (!IsValid(Drone)) return;
+    const FFactoryCustomizationData* Original = OriginalDronePaints.Find(Drone);
+    if (!Original) return;
+
+    Drone->SetCustomizationData_Native(*Original, /*skipCombine*/ true);
+    UE_LOG(LogDynamicTimeTableSubsystem, Log, TEXT("CARGO_PAINT_RESTORED Drone='%s' Reason=%s"), *Drone->GetName(), Reason);
+    OriginalDronePaints.Remove(Drone);
+}
+
 void UDynamicTimeTableSubsystem::SetPaintByCargo(bool bEnabled, const TCHAR* Source)
 {
     if (!IsServer() || bPaintByCargo == bEnabled) return;
@@ -4967,6 +5406,14 @@ void UDynamicTimeTableSubsystem::SetPaintByCargo(bool bEnabled, const TCHAR* Sou
             RestoreTruckPaint(Key.Get(), TEXT("paint off"));
         }
         OriginalTruckPaints.Reset();
+
+        TArray<TWeakObjectPtr<AFGDroneVehicle>> PaintedDrones;
+        OriginalDronePaints.GetKeys(PaintedDrones);
+        for (const TWeakObjectPtr<AFGDroneVehicle>& Key : PaintedDrones)
+        {
+            RestoreDronePaint(Key.Get(), TEXT("paint off"));
+        }
+        OriginalDronePaints.Reset();
     }
     UE_LOG(LogDynamicTimeTableSubsystem, Display, TEXT("CARGO_PAINT_SET Enabled=%s Source=%s"),
         bEnabled ? TEXT("true") : TEXT("false"), Source);
@@ -4980,6 +5427,29 @@ int32 UDynamicTimeTableSubsystem::GetPaintedTruckCount() const
         if (Pair.Key.IsValid()) ++Count;
     }
     return Count;
+}
+
+int32 UDynamicTimeTableSubsystem::GetPaintedDroneCount() const
+{
+    int32 Count = 0;
+    for (const auto& Pair : OriginalDronePaints)
+    {
+        if (Pair.Key.IsValid()) ++Count;
+    }
+    return Count;
+}
+
+void UDynamicTimeTableSubsystem::ExportDronePaints(TArray<FDTTSavedDronePaint>& OutPaints) const
+{
+    OutPaints.Reset();
+    for (const auto& Pair : OriginalDronePaints)
+    {
+        if (!Pair.Key.IsValid()) continue;
+        FDTTSavedDronePaint Saved;
+        Saved.Vehicle = Pair.Key.Get();
+        Saved.Original = Pair.Value;
+        OutPaints.Add(Saved);
+    }
 }
 
 void UDynamicTimeTableSubsystem::ExportTruckPaints(TArray<FDTTSavedTruckPaint>& OutPaints) const

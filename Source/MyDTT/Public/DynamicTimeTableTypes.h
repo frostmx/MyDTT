@@ -180,6 +180,19 @@ struct FDTTSavedTruckPaint
     FFactoryCustomizationData Original;
 };
 
+/** The same for a drone. A drone has no identifier actor: the vehicle itself is what is saved. */
+USTRUCT()
+struct FDTTSavedDronePaint
+{
+    GENERATED_BODY()
+
+    UPROPERTY(SaveGame)
+    TObjectPtr<class AFGDroneVehicle> Vehicle = nullptr;
+
+    UPROPERTY(SaveGame)
+    FFactoryCustomizationData Original;
+};
+
 /** One dispatch truck's anchors as stored by ADTTSaveDataActor. */
 USTRUCT()
 struct FDTTSavedTruckAnchors
@@ -452,6 +465,101 @@ namespace EDTTStationFlags
         Open        = 1 << 7,
     };
 }
+
+/** One item and how much of it: a line of an inventory on the Drones tab. */
+USTRUCT(BlueprintType)
+struct FDTTItemAmount
+{
+    GENERATED_BODY()
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TSoftClassPtr<class UFGItemDescriptor> ItemClass;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 Count = 0;
+};
+
+/** Where a drone port's own drone is right now. */
+UENUM(BlueprintType)
+enum class EDTTDronePlace : uint8
+{
+    /** The port has no drone: others fly to it. */
+    None = 0,
+    Home,
+    AtPair,
+    ToPair,
+    ToHome
+};
+
+/** The bits of FDTTDroneRow::Flags. */
+namespace EDTTDroneFlags
+{
+    enum Type : uint8
+    {
+        None               = 0,
+        HasDrone           = 1 << 0,
+        /** The drone cannot unload at a port that also has cargo to send: it holds the port up. */
+        UnloadBlocksExport = 1 << 1,
+        /** A cargo belt (not the fuel one) is connected to an input: the port sends things away. */
+        ExportBelt         = 1 << 2,
+        /** A belt is connected to an output: the port receives things. */
+        ImportBelt         = 1 << 3,
+        /** Drones are circling, waiting for their turn to dock here. */
+        Queue              = 1 << 4,
+    };
+}
+
+/**
+ * One vanilla drone port on the Drones tab.
+ *
+ * A port has no role of its own: belts fill its input inventory, which is what a drone takes
+ * away, and a drone fills its output inventory, which is what the belts carry off. Both are here,
+ * with the hold of the port's own drone. The mod only shows this - nothing here steers a drone.
+ */
+USTRUCT(BlueprintType)
+struct FDTTDroneRow
+{
+    GENERATED_BODY()
+
+    /** Places in FDTTClientSnapshot::DockNames; -1 for a name there is none of. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 NameId = INDEX_NONE;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 PairedNameId = INDEX_NONE;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString Name;
+    /** The port this one is paired with: where its drone flies. Empty when there is none. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") FString PairedName;
+    /** The port's info actor, the half of a port the game replicates to every client at all times. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TObjectPtr<class AFGDroneStationInfo> Port = nullptr;
+    /** EDroneStatus, as the game keeps it for the port's own drone. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") uint8 Status = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") EDTTDronePlace Place = EDTTDronePlace::None;
+    /** EDTTDroneFlags. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") uint8 Flags = 0;
+
+    /** What waits to be taken away (input inventory), what was brought (output inventory), the drone's hold. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TArray<FDTTItemAmount> ExportItems;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TArray<FDTTItemAmount> ImportItems;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TArray<FDTTItemAmount> CargoItems;
+    /** Slots taken and slots there are; the fill is in stacks, a percentage, so one item in a slot is not a full slot. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") uint8 ExportSlots = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") uint8 ExportCapacity = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") uint8 ExportFill = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") uint8 ImportSlots = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") uint8 ImportCapacity = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") uint8 ImportFill = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") uint8 CargoSlots = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") uint8 CargoCapacity = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") uint8 CargoFill = 0;
+
+    /** The fuel in the port, and what one round trip to the pair costs of it. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TSoftClassPtr<class UFGItemDescriptor> FuelClass;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 FuelCount = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") float FuelPerTrip = 0.0f;
+
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 DistanceMeters = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 RoundTripSeconds = 0;
+    /** Items the last round trip brought here and took away. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 TripItemsIn = 0;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 TripItemsOut = 0;
+    /** How many other ports are paired with this one. */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") int32 InLinks = 0;
+};
 
 /**
  * Why a pool pass did not send a truck. These mirror the POOL_SKIP reasons the dispatcher

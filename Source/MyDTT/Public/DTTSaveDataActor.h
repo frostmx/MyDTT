@@ -35,15 +35,16 @@ public:
     bool IsPaintByCargo() const { return bSavedPaintByCargo; }
     void SetPaintByCargo(bool bInPaintByCargo) { bSavedPaintByCargo = bInPaintByCargo; }
     const TArray<FDTTSavedTruckPaint>& GetTruckPaints() const { return SavedTruckPaints; }
+    const TArray<FDTTSavedDronePaint>& GetDronePaints() const { return SavedDronePaints; }
 
 private:
     // 4 and later store no groups: the configuration lives in the station names themselves. The
     // actor stays because older saves reference the class, and an empty one is cheaper than the
     // risk of pulling a class out from under a load. 5 adds dispatch trucks' fuel anchors, 6 the
     // shared-pool trucks, 7 the settings, 8 the cargo paint, 9 the lap plans as parallel arrays
-    // instead of a GUID-keyed map.
+    // instead of a GUID-keyed map, 10 the drones' own paints.
     UPROPERTY(SaveGame)
-    int32 DataVersion = 9;
+    int32 DataVersion = 10;
 
     UPROPERTY(SaveGame)
     TArray<FDTTStationGroup> SavedGroups;
@@ -68,4 +69,8 @@ private:
 
     UPROPERTY(SaveGame)
     TArray<FDTTSavedTruckPaint> SavedTruckPaints;
+
+    // DataVersion 10. Empty in an older save, which is also what "no drone was painted" looks like.
+    UPROPERTY(SaveGame)
+    TArray<FDTTSavedDronePaint> SavedDronePaints;
 };

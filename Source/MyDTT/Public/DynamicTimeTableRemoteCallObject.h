@@ -14,6 +14,7 @@ namespace EDTTSnapshotSection
         Trucks = 4,
         Stations = 8,
         Timetable = 16,
+        Drones = 32,
     };
 }
 USTRUCT(BlueprintType)
@@ -34,6 +35,7 @@ struct FDTTClientSnapshot
     UPROPERTY(BlueprintReadOnly) TArray<FDTTLapRow> LapRows;
     UPROPERTY(BlueprintReadOnly) TArray<FDTTQueueRow> QueueRows;
     UPROPERTY(BlueprintReadOnly) TArray<FDTTReasonRow> ReasonRows;
+    UPROPERTY(BlueprintReadOnly) TArray<FDTTDroneRow> DroneRows;
     /**
      * Every station and truck name the rows above refer to, each written once. A truck's route
      * stops used to ride as full names on every truck: 400 trucks with six stops each is about
@@ -71,7 +73,8 @@ public:
     //     dispatcher to look again.
     // 17: the Timetable section - laps with the metres left of them, the queue of open requests
     //     in the dispatcher's own order, and what the last pool pass could not do.
-    static constexpr int32 ProtocolVersion = 17;
+    // 18: the Drones section - every drone port with its two inventories, its drone and its pair.
+    static constexpr int32 ProtocolVersion = 18;
     // A section is cut here so that the whole snapshot stays well under the 64 KB reliable bunch.
     static constexpr int32 MaxSnapshotRows = 400;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;

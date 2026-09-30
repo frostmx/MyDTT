@@ -72,6 +72,7 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     DispatchTabButton = MakeButton(WidgetTree, TEXT("Dispatch"), EDTTButton::Tab); AddRowItem(Tabs, DispatchTabButton, 1);
     TrucksTabButton = MakeButton(WidgetTree, TEXT("Trucks"), EDTTButton::Tab); AddRowItem(Tabs, TrucksTabButton, 1);
     StationsTabButton = MakeButton(WidgetTree, TEXT("Stations"), EDTTButton::Tab); AddRowItem(Tabs, StationsTabButton, 1);
+    DronesTabButton = MakeButton(WidgetTree, TEXT("Drones"), EDTTButton::Tab); AddRowItem(Tabs, DronesTabButton, 1);
     TimetableTabButton = MakeButton(WidgetTree, TEXT("Timetable"), EDTTButton::Tab); AddRowItem(Tabs, TimetableTabButton, 1);
     GroupsTabButton = MakeButton(WidgetTree, TEXT("Groups"), EDTTButton::Tab); AddRowItem(Tabs, GroupsTabButton, 1);
     SettingsTabButton = MakeButton(WidgetTree, TEXT("Settings"), EDTTButton::Tab); AddRowItem(Tabs, SettingsTabButton, 1);
@@ -120,6 +121,10 @@ void UDynamicTimeTableWidget::BuildWidgetTree()
     BuildStationTools(StationTools);
     BuildStationHeader(StationHeader);
     StationFilter->OnTextChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleStationFilterChanged);
+    UHorizontalBox* DroneHeader = nullptr;
+    Pages->AddChild(BuildCardPage(DroneScrollBox, DroneFilter, DroneHeader));
+    BuildDroneHeader(DroneHeader);
+    DroneFilter->OnTextChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleDroneFilterChanged);
     Pages->AddChild(BuildTimetablePage());
     UVerticalBox* GroupsPage = WidgetTree->ConstructWidget<UVerticalBox>();
     Pages->AddChild(GroupsPage);
@@ -183,6 +188,7 @@ UVerticalBox* UDynamicTimeTableWidget::BuildCardPage(TObjectPtr<UScrollBox>& Out
 void UDynamicTimeTableWidget::HandleDispatchFilterChanged(const FText&) { RefreshDispatchDisplay(); }
 void UDynamicTimeTableWidget::HandleTruckFilterChanged(const FText&) { RefreshTruckDisplay(); }
 void UDynamicTimeTableWidget::HandleStationFilterChanged(const FText&) { RefreshStationDisplay(); }
+void UDynamicTimeTableWidget::HandleDroneFilterChanged(const FText&) { RefreshDroneDisplay(); }
 void UDynamicTimeTableWidget::HandleTimetableFilterChanged(const FText&) { RefreshTimetableDisplay(); }
 
 void UDynamicTimeTableWidget::BuildEditorPanel(UVerticalBox* Main)

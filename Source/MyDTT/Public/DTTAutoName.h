@@ -4,6 +4,7 @@
 #include "Templates/SubclassOf.h"
 
 class AFGBuildableDockingStation;
+class AFGBuildableDroneStation;
 class UFGItemDescriptor;
 
 /**
@@ -119,4 +120,14 @@ public:
 
     /** What the dock holds right now: the most numerous item in it, or its fluid. Null when empty. */
     static TSubclassOf<UFGItemDescriptor> DockCargo(AFGBuildableDockingStation* Station);
+
+    /**
+     * A drone port, which has both sides at once: belts leave it through its outputs (what it
+     * receives, walked downstream like a requester dock) and feed it through its inputs (what it
+     * sends, walked upstream like a collector). The fuel input is not a cargo belt and is left out.
+     * Each side is a result of its own; true when at least one side is valid.
+     */
+    static bool ScanDronePort(AFGBuildableDroneStation* Port, const FDTTAutoNameLimits& Limits,
+        TSubclassOf<UFGItemDescriptor> PreferredImport, TSubclassOf<UFGItemDescriptor> PreferredExport,
+        FDTTAutoNameResult& OutImport, FDTTAutoNameResult& OutExport);
 };
