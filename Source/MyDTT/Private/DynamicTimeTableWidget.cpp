@@ -4,7 +4,9 @@
 #include "DynamicTimeTableRemoteCallObject.h"
 #include "DTTItemNames.h"
 #include "DTTCargoPaint.h"
+#include "DTTHotkeys.h"
 #include "FGPlayerController.h"
+#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "WheeledVehicles/FGWheeledVehicleIdentifier.h"
 #include "WheeledVehicles/FGDockingStationIdentifier.h"
 #include "Engine/Texture2D.h"
@@ -98,16 +100,19 @@ void UDynamicTimeTableWidget::NativeConstruct()
     for (USpinBox* Spin : { SettingSolidRequest.Get(), SettingFluidRequest.Get(), SettingRequestBuffer.Get(),
         SettingLeftoverHold.Get(), SettingTopUpInterval.Get(), SettingDispatchInterval.Get(), SettingMaxRequesters.Get(),
         SettingClaimTimeout.Get(), SettingOverdueMinutes.Get(), SettingIdleRecheck.Get(), SettingFuelCritical.Get(), SettingFuelSkip.Get(),
-        SettingAutoNameDebounce.Get(), SettingAutoNameSweep.Get(), SettingAutoNameMaxNodes.Get(), SettingAutoNameMaxProducts.Get() })
+        SettingAutoNameDebounce.Get(), SettingAutoNameSweep.Get(), SettingAutoNameMaxNodes.Get(), SettingAutoNameMaxProducts.Get(),
+        SettingFuelLegMargin.Get(), SettingFuelReach.Get() })
     {
         if (Spin) Spin->OnValueChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingSpinChanged);
     }
     for (UCheckBox* Check : { SettingExactQuantities.Get(), SettingFluidFullLoad.Get(), SettingDrainLeftovers.Get(), SettingUnloadAtDepot.Get(), SettingSkipProducer.Get(),
-        SettingAutoName.Get() })
+        SettingAutoName.Get(), SettingChatAlerts.Get(), SettingStayUntilEmpty.Get() })
     {
         if (Check) Check->OnCheckStateChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingCheckChanged);
     }
     if (SettingNamingLanguage) SettingNamingLanguage->OnSelectionChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleSettingComboChanged);
+    if (HotkeyWindowCombo) HotkeyWindowCombo->OnSelectionChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleHotkeyComboChanged);
+    for (UComboBoxString* Combo : HotkeyTabCombos) if (Combo) Combo->OnSelectionChanged.AddDynamic(this, &UDynamicTimeTableWidget::HandleHotkeyComboChanged);
     SetDefaultFocusWidget(CloseButton);
 
     if (UDynamicTimeTableSubsystem* Subsystem = GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>())
@@ -209,12 +214,99 @@ FReply UDynamicTimeTableWidget::NativeOnPreviewKeyDown(const FGeometry& InGeomet
 {
     // Preview runs from the window down to the focused control, so Escape closes the window
     // even while a filter box holds the focus - the box never gets to see it.
-    if (InKeyEvent.GetKey() == EKeys::Escape)
+    const FKey Key = InKeyEvent.GetKey();
+    if (Key == EKeys::Escape)
     {
         CloseWindow();
         return FReply::Handled();
     }
+    // The hotkeys too: an open window holds the input in UI-only mode, so the game's mapping
+    // never sees them and the window has to answer them itself. A repeat of a held key is not
+    // a second press.
+    if (!InKeyEvent.IsRepeat())
+    {
+        const UDynamicTimeTableSubsystem* Subsystem = GetWorld() ? GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>() : nullptr;
+        const UDTTHotkeys* Hotkeys = Subsystem ? Subsystem->GetHotkeys() : nullptr;
+        if (Hotkeys && Key.IsValid())
+        {
+            AFGPlayerController* PC = Cast<AFGPlayerController>(GetOwningPlayer());
+            if (Key == Hotkeys->WindowKey) { Toggle(PC, -1); return FReply::Handled(); }
+            for (int32 Tab = 0; Tab < Hotkeys->TabKeys.Num(); ++Tab)
+            {
+                if (Key == Hotkeys->TabKeys[Tab]) { Toggle(PC, Tab); return FReply::Handled(); }
+            }
+        }
+    }
     return Super::NativeOnPreviewKeyDown(InGeometry, InKeyEvent);
+}
+
+UDynamicTimeTableWidget* UDynamicTimeTableWidget::FindOpen(APlayerController* PC)
+{
+    if (!IsValid(PC)) return nullptr;
+    TArray<UUserWidget*> Widgets;
+    UWidgetBlueprintLibrary::GetAllWidgetsOfClass(PC, Widgets, UDynamicTimeTableWidget::StaticClass(), true);
+    for (UUserWidget* Widget : Widgets)
+    {
+        if (UDynamicTimeTableWidget* Window = Cast<UDynamicTimeTableWidget>(Widget)) if (IsValid(Window)) return Window;
+    }
+    return nullptr;
+}
+
+void UDynamicTimeTableWidget::Toggle(AFGPlayerController* PC, int32 Tab)
+{
+    if (!IsValid(PC) || !PC->IsLocalController()) return;
+    UDynamicTimeTableRemoteCallObject* RCO = Cast<UDynamicTimeTableRemoteCallObject>(
+        PC->GetRemoteCallObjectOfClass(UDynamicTimeTableRemoteCallObject::StaticClass()));
+    const bool bTab = Tab >= 0 && Tab < int32(EDTTTab::Count);
+
+    if (UDynamicTimeTableWidget* Open = FindOpen(PC))
+    {
+        if (bTab && Open->GetActiveTab() != EDTTTab(Tab))
+        {
+            Open->SetActiveTab(EDTTTab(Tab));
+            return;
+        }
+        // CloseWindow puts the input mode back; the live poll of a remote client stops with it.
+        Open->CloseWindow();
+        if (RCO) RCO->StopLiveUpdates();
+        return;
+    }
+
+    if (!IsValid(PC->GetGameUI()))
+    {
+        UE_LOG(LogDynamicTimeTableWidget, Warning, TEXT("dTT: the window was asked for before the game UI was ready."));
+        return;
+    }
+    UDynamicTimeTableWidget* Window = CreateWidget<UDynamicTimeTableWidget>(PC, UDynamicTimeTableWidget::StaticClass());
+    if (!IsValid(Window))
+    {
+        UE_LOG(LogDynamicTimeTableWidget, Error, TEXT("dTT: CreateWidget returned null."));
+        return;
+    }
+    // NativeConstruct opens on ActiveTab, so a requested tab is set before the window goes up.
+    if (bTab) Window->ActiveTab = EDTTTab(Tab);
+
+    // AddToViewport is used deliberately here. The Satisfactory AddInteractWidget Blueprint event
+    // only updates the stack for native widgets in this build and did not attach the pure C++
+    // widget to the viewport.
+    Window->AddToViewport(1000);
+
+    FInputModeGameAndUI InputMode;
+    InputMode.SetWidgetToFocus(Window->TakeWidget());
+    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+    InputMode.SetHideCursorDuringCapture(false);
+    PC->SetInputMode(InputMode);
+    PC->SetShowMouseCursor(true);
+    PC->bEnableClickEvents = true;
+    PC->bEnableMouseOverEvents = true;
+    PC->CurrentMouseCursor = EMouseCursor::Default;
+    PC->SetIgnoreMoveInput(true);
+    PC->SetIgnoreLookInput(true);
+
+    // A remote client's rows come from the server; the poll that fetches them runs while the
+    // window is up.
+    if (RCO && PC->GetWorld() && PC->GetWorld()->GetNetMode() == NM_Client) RCO->StartLiveUpdates();
+    UE_LOG(LogDynamicTimeTableWidget, Verbose, TEXT("dTT: window opened%s."), bTab ? TEXT(" on a tab") : TEXT(""));
 }
 
 bool UDynamicTimeTableWidget::IsRemoteClient() const{return GetWorld()&&GetWorld()->GetNetMode()==NM_Client;}
@@ -360,6 +452,14 @@ void UDynamicTimeTableWidget::HandleRowAction(const FDTTRowTarget& Target)
         if (StationSort == Column) bStationSortDescending = !bStationSortDescending;
         else { StationSort = Column; bStationSortDescending = false; }
         RefreshStationDisplay();
+        return;
+    }
+    if (Target.Action == EDTTRowAction::DroneSort)
+    {
+        const EDTTDroneSort Column = EDTTDroneSort(FMath::Clamp(Target.Value, 0, int32(EDTTDroneSort::Count) - 1));
+        if (DroneSort == Column) bDroneSortDescending = !bDroneSortDescending;
+        else { DroneSort = Column; bDroneSortDescending = false; }
+        RefreshDroneDisplay();
         return;
     }
     if (Target.Action == EDTTRowAction::StationSelectAll)

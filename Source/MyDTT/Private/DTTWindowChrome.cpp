@@ -13,6 +13,7 @@
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "Components/EditableTextBox.h"
 #include "Components/ScrollBox.h"
+#include "DTTHotkeys.h"
 
 using namespace DTTUI;
 
@@ -279,6 +280,29 @@ void UDynamicTimeTableWidget::BuildSettingsPanel(UVerticalBox* Page)
         Row(Label, Hint, C);
         return C;
     };
+    // This client's own: not a world setting, so no Save and no Defaults - a choice is kept the
+    // moment it is made, in this computer's GameUserSettings.ini.
+    Section(TEXT("Keys - this computer only"));
+    auto KeyCombo = [&](const TCHAR* Label, const TCHAR* Hint) -> UComboBoxString*
+    {
+        // The options are filled by RebuildHotkeyCombos: a key taken by another slot is left out.
+        UComboBoxString* C = WidgetTree->ConstructWidget<UComboBoxString>();
+        StyleCombo(C);
+        USizeBox* Size = WidgetTree->ConstructWidget<USizeBox>(); Size->SetWidthOverride(120); Size->SetContent(C);
+        Row(Label, Hint, Size);
+        return C;
+    };
+    HotkeyWindowCombo = KeyCombo(TEXT("Open the window"), TEXT("F1 by default. Opens the window on Dispatch, closes it again. Yours only: kept on this computer, not in the save. The game itself uses F11 for full screen, Steam F12 for a screenshot."));
+    HotkeyTabCombos.Reset();
+    const TCHAR* TabLabels[] = { TEXT("Dispatch tab"), TEXT("Trucks tab"), TEXT("Stations tab"), TEXT("Drones tab"), TEXT("Timetable tab"), TEXT("Groups tab"), TEXT("Settings tab") };
+    for (int32 Tab = 0; Tab < int32(EDTTTab::Count); ++Tab)
+    {
+        HotkeyTabCombos.Add(KeyCombo(TabLabels[Tab], Tab == 0 ? TEXT("A key of its own per tab: opens the window on that tab, switches an open window to it, and closes the window when it already shows it. None by default.") : TEXT("")));
+    }
+
+    Section(TEXT("Alerts"));
+    SettingChatAlerts = Check(TEXT("Report problems in chat"), TEXT("A line in everyone's chat when a request goes overdue, a station's mode fights its tag, a truck runs dry or a drone port cannot afford its trip. Once per event, and one summary when the world loads with something already wrong. On by default."));
+
     Section(TEXT("Requests"));
     SettingSolidRequest = Spin(TEXT("Solid request limit, stacks"), TEXT("A solid station without a number in its tag is called while it holds fewer stacks than this. (Res-N) in the name overrides it."), 0, 200, 1);
     SettingFluidRequest = Spin(TEXT("Fluid request limit, stacks of 50 000 L"), TEXT("A fluid station without a number in its tag is called while its tank holds fewer stacks than this (64 = a full tank). (Res-N) in the name is a percent."), 0, 200, 1);
@@ -379,6 +403,8 @@ void UDynamicTimeTableWidget::RefreshSettingsControls(bool bForce)
         }
         SettingNamingLanguage->SetSelectedIndex(Index);
     }
+    SettingChatAlerts->SetIsChecked(V.bChatAlerts);
+    RebuildHotkeyCombos();
     bRefreshingControls = false;
     bSettingsEdited = false;
 }
@@ -416,6 +442,7 @@ FDTTSettings UDynamicTimeTableWidget::ReadSettingsControls() const
     {
         V.NamingLanguage = NamingLanguageCodes[SettingNamingLanguage->GetSelectedIndex()];
     }
+    V.bChatAlerts = SettingChatAlerts->IsChecked();
     V.Sanitize();
     return V;
 }
@@ -423,6 +450,52 @@ FDTTSettings UDynamicTimeTableWidget::ReadSettingsControls() const
 void UDynamicTimeTableWidget::HandleSettingSpinChanged(float) { if (!bRefreshingControls) bSettingsEdited = true; }
 void UDynamicTimeTableWidget::HandleSettingCheckChanged(bool) { if (!bRefreshingControls) bSettingsEdited = true; }
 void UDynamicTimeTableWidget::HandleSettingComboChanged(FString, ESelectInfo::Type) { if (!bRefreshingControls) bSettingsEdited = true; }
+void UDynamicTimeTableWidget::RebuildHotkeyCombos()
+{
+    // Every slot offers None and the keys no other slot holds, and shows its own. The options
+    // are labels, so a slot is read back by its label, not by an index into the full list.
+    const UDTTHotkeys* Hotkeys = GetWorld() && GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>() ? GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>()->GetHotkeys() : nullptr;
+    if (!Hotkeys) return;
+    const bool bWasRefreshing = bRefreshingControls;
+    bRefreshingControls = true;
+    TArray<FKey> Slots;
+    Slots.Add(Hotkeys->WindowKey);
+    for (int32 Tab = 0; Tab < HotkeyTabCombos.Num(); ++Tab) Slots.Add(Hotkeys->TabKeys.IsValidIndex(Tab) ? Hotkeys->TabKeys[Tab] : EKeys::Invalid);
+    for (int32 Index = 0; Index < Slots.Num(); ++Index)
+    {
+        UComboBoxString* Combo = Index == 0 ? HotkeyWindowCombo.Get() : HotkeyTabCombos[Index - 1].Get();
+        if (!Combo) continue;
+        Combo->ClearOptions();
+        for (const FKey& Key : UDTTHotkeys::Choices())
+        {
+            bool bTaken = false;
+            for (int32 Other = 0; Other < Slots.Num(); ++Other) if (Other != Index && Key.IsValid() && Slots[Other] == Key) bTaken = true;
+            if (!bTaken) Combo->AddOption(UDTTHotkeys::KeyLabel(Key));
+        }
+        Combo->SetSelectedOption(UDTTHotkeys::KeyLabel(Slots[Index]));
+    }
+    bRefreshingControls = bWasRefreshing;
+}
+
+void UDynamicTimeTableWidget::HandleHotkeyComboChanged(FString, ESelectInfo::Type)
+{
+    // Applied at once, from every combo at once: which one changed does not matter.
+    if (bRefreshingControls) return;
+    UDTTHotkeys* Hotkeys = GetWorld() && GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>() ? GetWorld()->GetSubsystem<UDynamicTimeTableSubsystem>()->GetHotkeys() : nullptr;
+    if (!Hotkeys) return;
+    auto KeyOf = [&](UComboBoxString* Combo)
+    {
+        const FString Label = Combo ? Combo->GetSelectedOption() : FString();
+        for (const FKey& Key : UDTTHotkeys::Choices()) if (UDTTHotkeys::KeyLabel(Key) == Label) return Key;
+        return EKeys::Invalid;
+    };
+    TArray<FKey> Tabs;
+    for (UComboBoxString* Combo : HotkeyTabCombos) Tabs.Add(KeyOf(Combo));
+    Hotkeys->SetKeys(KeyOf(HotkeyWindowCombo), Tabs);
+    // The other slots lose or regain the key just chosen.
+    RebuildHotkeyCombos();
+    SetEditorStatus(TEXT("Keys saved on this computer."), false);
+}
 void UDynamicTimeTableWidget::HandleSettingsTabClicked() { SetActiveTab(EDTTTab::Settings); RefreshSettingsControls(true); }
 void UDynamicTimeTableWidget::HandleSettingsSaveClicked()
 {
@@ -461,6 +534,15 @@ void UDynamicTimeTableWidget::HandleSettingsDefaultsClicked()
     SettingIdleRecheck->SetValue(Defaults.IdleDispatchRecheckSeconds);
     SettingFuelCritical->SetValue(Defaults.FuelCriticalMarginLaps);
     SettingFuelSkip->SetValue(Defaults.FuelSkipMarginLaps);
+    SettingFuelLegMargin->SetValue(Defaults.FuelLegMarginFactor);
+    SettingFuelReach->SetValue(Defaults.FuelReachFraction);
+    SettingStayUntilEmpty->SetIsChecked(Defaults.bStayUntilEmpty);
+    SettingAutoName->SetIsChecked(Defaults.bAutoNameStations);
+    SettingAutoNameDebounce->SetValue(Defaults.AutoNameDebounceSeconds);
+    SettingAutoNameSweep->SetValue(Defaults.AutoNameSweepSeconds);
+    SettingAutoNameMaxNodes->SetValue(float(Defaults.AutoNameMaxNodes));
+    SettingAutoNameMaxProducts->SetValue(float(Defaults.AutoNameMaxProducts));
+    SettingChatAlerts->SetIsChecked(Defaults.bChatAlerts);
     if (SettingNamingLanguage) SettingNamingLanguage->SetSelectedIndex(FMath::Max(0, NamingLanguageCodes.IndexOfByKey(Defaults.NamingLanguage)));
     bRefreshingControls = false;
     bSettingsEdited = true;

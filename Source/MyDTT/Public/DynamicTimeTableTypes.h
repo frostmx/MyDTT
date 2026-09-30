@@ -536,6 +536,13 @@ struct FDTTDroneRow
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TArray<FDTTItemAmount> ExportItems;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TArray<FDTTItemAmount> ImportItems;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TArray<FDTTItemAmount> CargoItems;
+    /**
+     * The item of each side for the row's tiles: what lies there now, else what lay there last,
+     * else what the belts were seen to carry - so a side that is empty between two visits of the
+     * drone keeps its colour.
+     */
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TSoftClassPtr<UFGItemDescriptor> SendsItem;
+    UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") TSoftClassPtr<UFGItemDescriptor> ReceivesItem;
     /** Slots taken and slots there are; the fill is in stacks, a percentage, so one item in a slot is not a full slot. */
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") uint8 ExportSlots = 0;
     UPROPERTY(BlueprintReadOnly, Category = "Dynamic Time Table") uint8 ExportCapacity = 0;
@@ -743,6 +750,12 @@ struct FDTTSettings
      * so this is a setting rather than whatever culture the process happens to run in.
      */
     UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") FString NamingLanguage = TEXT("en");
+    /**
+     * A line in everyone's chat when something the window shows in red appears: a request nobody
+     * came for, a station whose mode fights its tag, a truck that ran dry, a drone port that
+     * cannot afford its trip. Said once per event.
+     */
+    UPROPERTY(SaveGame, BlueprintReadWrite, Category = "Dynamic Time Table") bool bChatAlerts = true;
 
     void Sanitize()
     {
@@ -783,7 +796,8 @@ struct FDTTSettings
             FuelLegMarginFactor == Other.FuelLegMarginFactor && FuelReachFraction == Other.FuelReachFraction &&
             bAutoNameStations == Other.bAutoNameStations && AutoNameDebounceSeconds == Other.AutoNameDebounceSeconds &&
             AutoNameSweepSeconds == Other.AutoNameSweepSeconds && AutoNameMaxNodes == Other.AutoNameMaxNodes &&
-            AutoNameMaxProducts == Other.AutoNameMaxProducts && NamingLanguage == Other.NamingLanguage;
+            AutoNameMaxProducts == Other.AutoNameMaxProducts && NamingLanguage == Other.NamingLanguage &&
+            bChatAlerts == Other.bChatAlerts;
     }
     bool operator!=(const FDTTSettings& Other) const { return !(*this == Other); }
     FString Describe() const
@@ -792,7 +806,7 @@ struct FDTTSettings
             "LeftoverHoldSeconds=%.0f StayUntilEmpty=%s TopUpIntervalSeconds=%.0f UnloadAtDepot=%s SkipProducerWhenCargoCovers=%s "
             "PoolDispatchIntervalSeconds=%.0f MaxRequestersPerLap=%d RequesterClaimTimeoutSeconds=%.0f OverdueRequestMinutes=%d "
             "IdleDispatchRecheckSeconds=%.0f FuelCriticalMarginLaps=%.2f FuelSkipMarginLaps=%.2f FuelLegMarginFactor=%.2f FuelReachFraction=%.2f "
-            "AutoNameStations=%s AutoNameDebounceSeconds=%.0f AutoNameSweepSeconds=%.0f AutoNameMaxNodes=%d AutoNameMaxProducts=%d NamingLanguage=%s"),
+            "AutoNameStations=%s AutoNameDebounceSeconds=%.0f AutoNameSweepSeconds=%.0f AutoNameMaxNodes=%d AutoNameMaxProducts=%d NamingLanguage=%s ChatAlerts=%s"),
             bExactQuantities ? TEXT("true") : TEXT("false"),
             SolidRequestStacks, FluidRequestStacks, RequestBufferStacks, bFluidFullLoad ? TEXT("true") : TEXT("false"),
             bDrainLeftovers ? TEXT("true") : TEXT("false"),
@@ -802,7 +816,7 @@ struct FDTTSettings
             RequesterClaimTimeoutSeconds, OverdueRequestMinutes, IdleDispatchRecheckSeconds, FuelCriticalMarginLaps, FuelSkipMarginLaps,
             FuelLegMarginFactor, FuelReachFraction,
             bAutoNameStations ? TEXT("true") : TEXT("false"), AutoNameDebounceSeconds, AutoNameSweepSeconds,
-            AutoNameMaxNodes, AutoNameMaxProducts, *NamingLanguage);
+            AutoNameMaxNodes, AutoNameMaxProducts, *NamingLanguage, bChatAlerts ? TEXT("true") : TEXT("false"));
     }
     /** "/dtt set <field> <value>": true when the field exists and parsed. */
     bool SetByName(const FString& Field, const FString& Value)
@@ -842,6 +856,7 @@ struct FDTTSettings
         if (F == TEXT("autonamemaxnodes")) return AsInt(AutoNameMaxNodes);
         if (F == TEXT("autonamemaxproducts")) return AsInt(AutoNameMaxProducts);
         if (F == TEXT("naminglanguage")) { NamingLanguage = Value.TrimStartAndEnd(); return !NamingLanguage.IsEmpty(); }
+        if (F == TEXT("chatalerts")) return AsBool(bChatAlerts);
         return false;
     }
 };

@@ -6,6 +6,7 @@
 #include "Resources/FGItemDescriptor.h"
 #include "Components/EditableTextBox.h"
 #include "Components/ScrollBox.h"
+#include "Algo/StableSort.h"
 
 using namespace DTTUI;
 
@@ -19,10 +20,27 @@ namespace
     constexpr float DTTColDroneBar = 84.0f;
     /** Two lines of a name: a port and its pair are both auto-named, and both may wrap. */
     constexpr float DTTDroneRowHeight = 56.0f;
+    /** The distance to the pair: "1.7 km" at the widest. */
+    constexpr float DTTColDroneDistance = 64.0f;
+
+    template <typename T>
+    int32 DTPOrder(const T& A, const T& B) { return A < B ? -1 : (B < A ? 1 : 0); }
+
+    FString DTPDistance(int32 Meters)
+    {
+        if (Meters >= 1000) return FString::Printf(TEXT("%.1f km"), Meters / 1000.0f);
+        return Meters > 0 ? FString::Printf(TEXT("%d m"), Meters) : FString(TEXT("-"));
+    }
 
     FString DTPSlots(int32 Used, int32 Capacity)
     {
         return Capacity > 0 ? FString::Printf(TEXT("%d / %d"), Used, Capacity) : FString(TEXT("-"));
+    }
+
+    /** The bar between the two sides of a port's name becomes a line break. */
+    FString DTPTwoLines(const FString& Name)
+    {
+        return Name.Replace(TEXT(" | "), TEXT("\n"));
     }
 
     bool DTPFlying(const FDTTDroneRow& Row)
@@ -43,15 +61,29 @@ namespace
 void UDynamicTimeTableWidget::BuildDroneHeader(UHorizontalBox* Row)
 {
     if (!Row) return;
+    // One caption per cell of the row, with the same widths and margins; every caption sorts,
+    // as on the Stations page.
+    DroneSortLabels.SetNum(int32(EDTTDroneSort::Count));
+    DroneSortCaptions.SetNum(int32(EDTTDroneSort::Count));
+    auto Sortable = [this, Row](EDTTDroneSort Column, const TCHAR* Caption, float Width,
+        EHorizontalAlignment Align = HAlign_Left, const FMargin& Margin = FMargin(0, 0, 6, 0))
+    {
+        FDTTRowTarget Target;
+        Target.Action = EDTTRowAction::DroneSort;
+        Target.Value = int32(Column);
+        DroneSortLabels[int32(Column)] = HeadButton(WidgetTree, Row, Caption, Width, Align, Margin, RowActionDelegate, Target);
+        DroneSortCaptions[int32(Column)] = Caption;
+    };
     HeadCell(WidgetTree, Row, FString(), DTTColRowTile, HAlign_Left, FMargin(0, 0, 8, 0));
     // Both names are ports, and an auto-name of a two-sided port runs to the full 96 characters:
     // the two share the free width and each may run onto a second line.
-    HeadCell(WidgetTree, Row, TEXT("PORT"), 0.0f);
-    HeadCell(WidgetTree, Row, TEXT("DRONE"), DTTColPhase);
-    HeadCell(WidgetTree, Row, TEXT("DESTINATION"), 0.0f);
-    HeadCell(WidgetTree, Row, TEXT("SENDS"), DTTColDroneBar, HAlign_Right);
-    HeadCell(WidgetTree, Row, TEXT("RECEIVES"), DTTColDroneBar, HAlign_Right);
-    HeadCell(WidgetTree, Row, TEXT("HOLD"), DTTColDroneBar, HAlign_Right);
+    Sortable(EDTTDroneSort::Port, TEXT("PORT"), 0.0f);
+    Sortable(EDTTDroneSort::Drone, TEXT("DRONE"), DTTColPhase);
+    Sortable(EDTTDroneSort::Destination, TEXT("DESTINATION"), 0.0f);
+    Sortable(EDTTDroneSort::Distance, TEXT("DIST"), DTTColDroneDistance, HAlign_Right);
+    Sortable(EDTTDroneSort::Sends, TEXT("SENDS"), DTTColDroneBar, HAlign_Right);
+    Sortable(EDTTDroneSort::Receives, TEXT("RECEIVES"), DTTColDroneBar, HAlign_Right);
+    Sortable(EDTTDroneSort::Hold, TEXT("HOLD"), DTTColDroneBar, HAlign_Right);
     HeadCell(WidgetTree, Row, FString(), DTTColChevron);
 }
 
@@ -80,15 +112,17 @@ void UDynamicTimeTableWidget::PopulateDroneCard(const FDTTDroneRow& Row, const F
     Toggle.CardKey = CardId;
     UHorizontalBox* Line = Sink.Row(Body, DTTDroneRowHeight, Toggle, FLinearColor::White);
 
-    // The tile is what the port is for: what it receives first, else what it sends, else what its
-    // drone happens to carry.
-    TSoftClassPtr<UFGItemDescriptor> TileItem;
-    if (Row.ImportItems.Num() > 0) TileItem = Row.ImportItems[0].ItemClass;
-    else if (Row.ExportItems.Num() > 0) TileItem = Row.ExportItems[0].ItemClass;
-    else if (Row.CargoItems.Num() > 0) TileItem = Row.CargoItems[0].ItemClass;
-    Sink.Tile(Line, IconFor(TileItem), TileColorFor(TileItem), DTTColRowTile);
+    // Two tiles, one over the other, in the order of the bars: what the port sends on top, what it
+    // receives below. Each keeps its place with nothing on that side, so the pair reads the same
+    // way in every row.
+    UVerticalBox* Tiles = Sink.VBox(Line);
+    if (Tiles) if (UHorizontalBoxSlot* S = Cast<UHorizontalBoxSlot>(Tiles->Slot)) S->SetVerticalAlignment(VAlign_Center);
+    Sink.Tile(Tiles, IconFor(Row.SendsItem), TileColorFor(Row.SendsItem), DTTColRowTile, FMargin(0, 0, 8, 2));
+    Sink.Tile(Tiles, IconFor(Row.ReceivesItem), TileColorFor(Row.ReceivesItem), DTTColRowTile, FMargin(0, 0, 8, 0));
 
-    Sink.Cell(Line, Row.Name, 14, DTTText, 0.0f, HAlign_Left, FMargin(0, 0, 6, 0), true);
+    // A two-sided auto-name is two blocks around a bar, sending then receiving - the order of
+    // the tiles and of the bars - and the row has two lines: one each.
+    Sink.Cell(Line, DTPTwoLines(Row.Name), 14, DTTText, 0.0f, HAlign_Left, FMargin(0, 0, 6, 0), true);
 
     EDTTPill Pill = EDTTPill::Dispatch;
     FString Label = UDynamicTimeTableSubsystem::DroneStatusLabel(Row.Status);
@@ -111,26 +145,21 @@ void UDynamicTimeTableWidget::PopulateDroneCard(const FDTTDroneRow& Row, const F
     if (!bDrone) { Pill = EDTTPill::Dispatch; Label = TEXT("No drone"); }
     Sink.Pill(Line, Label, Pill, DTTColPhase);
 
-    // Where the drone is against its pair. A port without a drone is a destination itself, and
-    // the count of ports flying to it is the only route it has.
+    // The pair the drone flies to, named plainly: where the drone is right now is the pill's
+    // business. A port without a drone is a destination itself, and the count of ports flying to
+    // it is the only route it has.
     FString Destination;
     FLinearColor DestinationColour = DTTGrey;
     if (!Row.PairedName.IsEmpty())
     {
-        const TCHAR* Prefix = TEXT("> ");
-        if (Row.Place == EDTTDronePlace::AtPair) Prefix = TEXT("at ");
-        else if (Row.Place == EDTTDronePlace::ToHome) Prefix = TEXT("< ");
-        Destination = FString::Printf(TEXT("%s%s"), Prefix, *Row.PairedName);
-        // The cell wraps, and a wrap between the number and its unit would strand an "m" on a
-        // line of its own: the space inside the distance is a non-breaking one.
-        if (Row.DistanceMeters >= 1000) Destination += FString::Printf(TEXT("  %.1f km"), Row.DistanceMeters / 1000.0f);
-        else if (Row.DistanceMeters > 0) Destination += FString::Printf(TEXT("  %d m"), Row.DistanceMeters);
+        Destination = DTPTwoLines(Row.PairedName);
         if (Row.Place == EDTTDronePlace::AtPair || Row.Place == EDTTDronePlace::ToHome) DestinationColour = DTTSteel;
     }
     else if (Row.InLinks > 0) Destination = FString::Printf(TEXT("< %d port%s here"), Row.InLinks, Row.InLinks == 1 ? TEXT(" flies") : TEXT("s fly"));
     else { Destination = TEXT("no destination"); DestinationColour = bDrone ? DTTYellow : DTTDim; }
     if (Row.Flags & EDTTDroneFlags::Queue) Destination += TEXT("  (queue)");
     Sink.Cell(Line, Destination, 13, DestinationColour, 0.0f, HAlign_Left, FMargin(0, 0, 6, 0), true);
+    Sink.Cell(Line, DTPDistance(Row.DistanceMeters), 13, Row.DistanceMeters > 0 ? DTTGrey : DTTDim, DTTColDroneDistance, HAlign_Right);
 
     Sink.CellBar(Line, DTPSlots(Row.ExportSlots, Row.ExportCapacity), Row.ExportSlots > 0 ? DTTText : DTTDim,
         Row.ExportFill / 100.0f, Row.ExportSlots > 0 ? DTTCyan : DTTDim, DTTColDroneBar);
@@ -233,6 +262,57 @@ void UDynamicTimeTableWidget::RefreshDroneDisplay()
         }
         if (!UDynamicTimeTableSubsystem::DroneRowMatches(Row, Filter)) continue;
         Shown.Add(&Row);
+    }
+
+    if (DroneSort != EDTTDroneSort::None)
+    {
+        // The drone column orders by what needs a look: no fuel, then holding cargo up, then the
+        // rest by status, ports without a drone last. A bar orders by how full it is.
+        auto DroneRank = [](const FDTTDroneRow& R)
+        {
+            if (!(R.Flags & EDTTDroneFlags::HasDrone)) return 100;
+            const EDroneStatus Status = EDroneStatus(R.Status);
+            if (Status == EDroneStatus::EDS_NOT_ENOUGH_FUEL) return 0;
+            if (Status == EDroneStatus::EDS_CANNOT_UNLOAD) return (R.Flags & EDTTDroneFlags::UnloadBlocksExport) ? 1 : 2;
+            return 10 + int32(Status);
+        };
+        auto Fill = [](uint8 Slots, uint8 Capacity, uint8 FillPercent) { return Capacity > 0 ? int32(FillPercent) * 1000 + Slots : -1; };
+        auto Compare = [&](const FDTTDroneRow& A, const FDTTDroneRow& B) -> int32
+        {
+            switch (DroneSort)
+            {
+            case EDTTDroneSort::Port: return A.Name.Compare(B.Name, ESearchCase::IgnoreCase);
+            case EDTTDroneSort::Drone: return DTPOrder(DroneRank(A), DroneRank(B));
+            case EDTTDroneSort::Destination: return A.PairedName.Compare(B.PairedName, ESearchCase::IgnoreCase);
+            case EDTTDroneSort::Distance: return DTPOrder(A.DistanceMeters, B.DistanceMeters);
+            case EDTTDroneSort::Sends: return DTPOrder(Fill(A.ExportSlots, A.ExportCapacity, A.ExportFill), Fill(B.ExportSlots, B.ExportCapacity, B.ExportFill));
+            case EDTTDroneSort::Receives: return DTPOrder(Fill(A.ImportSlots, A.ImportCapacity, A.ImportFill), Fill(B.ImportSlots, B.ImportCapacity, B.ImportFill));
+            case EDTTDroneSort::Hold: return DTPOrder(Fill(A.CargoSlots, A.CargoCapacity, A.CargoFill), Fill(B.CargoSlots, B.CargoCapacity, B.CargoFill));
+            default: return 0;
+            }
+        };
+        Algo::StableSort(Shown, [&](const FDTTDroneRow* A, const FDTTDroneRow* B)
+        {
+            int32 Result = Compare(*A, *B);
+            if (bDroneSortDescending) Result = -Result;
+            if (Result != 0) return Result < 0;
+            return A->Name.Compare(B->Name, ESearchCase::IgnoreCase) < 0;
+        });
+    }
+    for (int32 Column = 0; Column < DroneSortLabels.Num(); ++Column)
+    {
+        UTextBlock* Label = DroneSortLabels[Column].Get();
+        if (!Label || !DroneSortCaptions.IsValidIndex(Column)) continue;
+        const bool bOn = Column == int32(DroneSort);
+        Label->SetText(FText::FromString(bOn
+            ? DroneSortCaptions[Column] + TEXT(" ") + FString::Chr(bDroneSortDescending ? 0x25BC : 0x25B2)
+            : DroneSortCaptions[Column]));
+        Label->SetColorAndOpacity(FSlateColor(bOn ? DTTCyan : FLinearColor(0.72f, 0.78f, 0.82f)));
+    }
+
+    for (const FDTTDroneRow* RowPtr : Shown)
+    {
+        const FDTTDroneRow& Row = *RowPtr;
         const FString Id = Row.Port ? GetNameSafe(Row.Port) : FString::Printf(TEXT("name:%s"), *Row.Name);
         const bool bOpen = ExpandedDroneKey == Id;
         Ids.Add(Id);

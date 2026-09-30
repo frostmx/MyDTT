@@ -51,6 +51,8 @@ public:
     /** The DockActor hook dropped a hold on this station for another actor: a parked truck or a leftover drain lost its place. */
     void HandleHeldStationEvicted(class AFGBuildableDockingStation* Station, AActor* NewActor);
     const FDTTSettings& GetSettings() const { return Settings; }
+    /** This client's keys for the window; null on a dedicated server. */
+    class UDTTHotkeys* GetHotkeys() const { return Hotkeys; }
     /** Sanitizes and applies; false (with a message) when nothing changed. Server only. */
     bool ApplySettings(const FDTTSettings& NewSettings, const TCHAR* Source, FString* OutMessage = nullptr);
 
@@ -315,6 +317,16 @@ private:
      * port that is always there. A port has both sides at once, so up to two reaches.
      */
     TMap<TWeakObjectPtr<class AFGDroneStationInfo>, TArray<FDTTAutoNameReach>> AutoNameDroneMachines;
+    /**
+     * What each side of a port last held, so the row keeps its tile while the side stands empty
+     * between a drone's visits. Filled as the rows are built, which is why it is mutable.
+     */
+    struct FDTTDroneSideItems
+    {
+        TSoftClassPtr<class UFGItemDescriptor> Sends;
+        TSoftClassPtr<class UFGItemDescriptor> Receives;
+    };
+    mutable TMap<TWeakObjectPtr<class AFGDroneStationInfo>, FDTTDroneSideItems> DroneSideItemsSeen;
     /** Drone ports to walk again, and the ones to walk before the rest. */
     TSet<TWeakObjectPtr<class AFGDroneStationInfo>> AutoNameDirtyPorts;
     TArray<TWeakObjectPtr<class AFGDroneStationInfo>> AutoNameUrgentPorts;
@@ -615,6 +627,20 @@ private:
     /** Nothing but the station-window watch; does not run on a dedicated server. */
     void StartStationWindowWatch();
     void TickStationWindow();
+    UPROPERTY() TObjectPtr<class UDTTHotkeys> Hotkeys;
+
+    // Chat alerts: the window's red, said once in everyone's chat when it appears. Each kind
+    // keeps the set of what it has already said, and forgets an entry when the state has passed,
+    // so the next time it happens is said again. The first pass after a load only fills the sets
+    // and sums them up in one line.
+    void PollAlerts();
+    void BroadcastAlert(const FString& Text, const TCHAR* Kind, const FString& Name);
+    int32 AlertTick = 0;
+    static constexpr int32 AlertEverySeconds = 5;
+    bool bAlertsPrimed = false;
+    TSet<FGuid> AlertedModeMismatch;
+    TSet<TWeakObjectPtr<AFGWheeledVehicleIdentifier>> AlertedTrucksDry;
+    TSet<TWeakObjectPtr<class AFGDroneStationInfo>> AlertedPortsDry;
     void SchedulePendingRouteReevaluation();
     void ProcessPendingRouteReevaluations();
     void ProcessCurrentTruckTarget(AFGWheeledVehicleIdentifier* Vehicle, const TCHAR* Trigger);

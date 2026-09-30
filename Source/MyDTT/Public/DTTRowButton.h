@@ -35,6 +35,8 @@ enum class EDTTRowAction : uint8
     StationFilter,
     /** A caption of the Stations table; Value is an EDTTStationSort. Again reverses it. */
     StationSort,
+    /** A caption of the Drones table; Value is an EDTTDroneSort. */
+    DroneSort,
     /** The tick over the Stations table: every shown requester, or none of them. */
     StationSelectAll,
 };
@@ -44,6 +46,7 @@ enum class EDTTStationRoleFilter : uint8 { All, Producers, Requesters, Depots, F
 
 /** The columns the Stations table sorts by. None is the server's order, by name. */
 enum class EDTTStationSort : uint8 { None, Station, Resource, Group, Role, Mode, Stock, Limit, State, Wait, Count };
+enum class EDTTDroneSort : uint8 { None, Port, Drone, Destination, Distance, Sends, Receives, Hold, Count };
 
 /**
  * What a click is about. Client-side only and never replicated: what crosses to the server is the

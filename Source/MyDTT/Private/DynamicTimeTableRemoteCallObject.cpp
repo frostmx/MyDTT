@@ -182,7 +182,7 @@ void UDynamicTimeTableRemoteCallObject::SendSnapshot(int32 Sections)
     for (const auto& R : X.LapRows) Bytes += 68 + 4 * R.StopIds.Num();
     Bytes += 44 * X.QueueRows.Num() + 16 * X.ReasonRows.Num();
     // A drone row is numbers plus up to nine item lines, each a class reference and a count.
-    for (const auto& R : X.DroneRows) Bytes += 72 + 12 * (R.ExportItems.Num() + R.ImportItems.Num() + R.CargoItems.Num());
+    for (const auto& R : X.DroneRows) Bytes += 88 + 12 * (R.ExportItems.Num() + R.ImportItems.Num() + R.CargoItems.Num());
     UE_LOG(LogDynamicTimeTableRCO, Verbose, TEXT("SNAPSHOT_SIZE Sections=%d Groups=%d DispatchRows=%d TruckRows=%d StationRows=%d LapRows=%d QueueRows=%d DroneRows=%d DockNames=%d TruckNames=%d ApproxBytes=%lld"),
         X.Sections, X.Groups.Num(), X.DispatchRows.Num(), X.TruckRows.Num(), X.StationRows.Num(), X.LapRows.Num(), X.QueueRows.Num(), X.DroneRows.Num(),
         X.DockNames.Num(), X.TruckNames.Num(), Bytes);
@@ -297,44 +297,12 @@ void UDynamicTimeTableRemoteCallObject::Client_ReceiveSnapshot_Implementation(co
 void UDynamicTimeTableRemoteCallObject::Client_OperationResult_Implementation(bool O,const FString&M){OnOperationResult.Broadcast(O,M);}
 void UDynamicTimeTableRemoteCallObject::Client_OpenWindow_Implementation()
 {
-    AFGPlayerController* PC = GetTypedOuter<AFGPlayerController>();
-    if (!IsValid(PC) || !PC->IsLocalController()) return;
+    UDynamicTimeTableWidget::Toggle(GetTypedOuter<AFGPlayerController>());
+}
 
-    TArray<UUserWidget*> Widgets;
-    UWidgetBlueprintLibrary::GetAllWidgetsOfClass(
-        PC, Widgets, UDynamicTimeTableWidget::StaticClass(), true);
-
-    for (UUserWidget* Widget : Widgets)
-    {
-        if (IsValid(Widget))
-        {
-            Widget->RemoveFromParent();
-            if (UWorld* World = GetWorld())
-            {
-                World->GetTimerManager().ClearTimer(LiveUpdateTimerHandle);
-            }
-            return;
-        }
-    }
-
-    UDynamicTimeTableWidget* Window = CreateWidget<UDynamicTimeTableWidget>(
-        PC, UDynamicTimeTableWidget::StaticClass());
-    if (!IsValid(Window)) return;
-
-    Window->AddToViewport(1000);
-    FInputModeGameAndUI Mode;
-    Mode.SetWidgetToFocus(Window->TakeWidget());
-    Mode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-    Mode.SetHideCursorDuringCapture(false);
-    PC->SetInputMode(Mode);
-    PC->SetShowMouseCursor(true);
-    PC->bEnableClickEvents = true;
-    PC->bEnableMouseOverEvents = true;
-    PC->CurrentMouseCursor = EMouseCursor::Default;
-    PC->SetIgnoreMoveInput(true);
-    PC->SetIgnoreLookInput(true);
-
-    StartLiveUpdates();
+void UDynamicTimeTableRemoteCallObject::StopLiveUpdates()
+{
+    if (UWorld* World = GetWorld()) World->GetTimerManager().ClearTimer(LiveUpdateTimerHandle);
 }
 
 void UDynamicTimeTableRemoteCallObject::StartLiveUpdates()

@@ -75,6 +75,16 @@ public:
     virtual void OnEscapePressed_Implementation() override;
     virtual FReply NativeOnPreviewKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
 
+    /**
+     * Opens, closes or switches the one window of this player: the chat command, the client
+     * RPC and the hotkeys all come through here. Tab < 0 toggles the window; a tab opens the
+     * window on it, switches an open window to it, and closes a window already showing it.
+     */
+    static void Toggle(class AFGPlayerController* PC, int32 Tab = -1);
+    /** The window this player has open, if any. */
+    static UDynamicTimeTableWidget* FindOpen(APlayerController* PC);
+    EDTTTab GetActiveTab() const { return ActiveTab; }
+
     UFUNCTION(BlueprintCallable, Category = "Dynamic Time Table")
     void RefreshData();
 
@@ -123,6 +133,10 @@ private:
     UPROPERTY() TObjectPtr<UComboBoxString> SettingNamingLanguage;
     /** Culture codes behind SettingNamingLanguage's options, in the same order. */
     TArray<FString> NamingLanguageCodes;
+    UPROPERTY() TObjectPtr<UCheckBox> SettingChatAlerts;
+    /** This client's keys: the window's and one per tab, in EDTTTab order. Not a world setting. */
+    UPROPERTY() TObjectPtr<UComboBoxString> HotkeyWindowCombo;
+    UPROPERTY() TArray<TObjectPtr<UComboBoxString>> HotkeyTabCombos;
     UPROPERTY() TObjectPtr<UButton> SettingsSaveButton;
     UPROPERTY() TObjectPtr<UButton> SettingsDefaultsButton;
     UPROPERTY() TObjectPtr<UTextBlock> SettingsStatusText;
@@ -187,6 +201,11 @@ private:
     UPROPERTY() TArray<FDTTCardWidgets> TruckCards;
     UPROPERTY() TArray<FDTTCardWidgets> StationCards;
     UPROPERTY() TArray<FDTTCardWidgets> DroneCards;
+    /** The Drones table's order, as the Stations table has: a caption sorts, again reverses. */
+    EDTTDroneSort DroneSort = EDTTDroneSort::None;
+    bool bDroneSortDescending = false;
+    UPROPERTY() TArray<TObjectPtr<UTextBlock>> DroneSortLabels;
+    TArray<FString> DroneSortCaptions;
     UPROPERTY() TArray<FDTTCardWidgets> TimetableCards;
     /** Item icons by descriptor path; a miss is cached too so an unresolvable class is not loaded again every refresh. */
     UPROPERTY() TMap<FSoftObjectPath, TObjectPtr<UTexture2D>> IconCache;
@@ -354,6 +373,9 @@ private:
     UFUNCTION() void HandleSettingSpinChanged(float Value);
     UFUNCTION() void HandleSettingCheckChanged(bool bChecked);
     UFUNCTION() void HandleSettingComboChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+    UFUNCTION() void HandleHotkeyComboChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+    /** Fills every key slot with what the other slots have left free, and selects its own key. */
+    void RebuildHotkeyCombos();
     UFUNCTION() void HandleRecalculateClicked();
     UFUNCTION() void HandleCreateGroupClicked();
     UFUNCTION() void HandleRenameGroupClicked();

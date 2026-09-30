@@ -4,6 +4,8 @@
 #include "DTTCargoPaint.h"
 #include "DTTSaveDataActor.h"
 #include "DTTStationWindow.h"
+#include "DTTHotkeys.h"
+#include "FGChatManager.h"
 #include "DynamicTimeTableChatCommand.h"
 #include "MyDTTHooks.h"
 #include "Command/ChatCommandLibrary.h"
@@ -274,15 +276,20 @@ namespace
     }
 
     /**
-     * The sending side of a drone port that also receives: "(Plastic) Plant -30/m -> Battery |
-     * (Battery) +120/m". The group after the bar is cut off first, because the truck grammar
-     * above allows one sign and one tail and would read the whole thing as the player's text.
+     * The second side of a drone port that both sends and receives: "(Battery) Plant +120/m |
+     * (Plastic) -30/m -> Battery". The main block names what the port sends and carries the
+     * player's text; the group after the bar is what it receives, with the products, and is cut
+     * off first, because the truck grammar above allows one sign and one tail and would read the
+     * whole thing as the player's text. The sign of the group says which side it is: names
+     * written before the order was settled had the sending side after the bar, and they still
+     * read - bOutGroupReceives tells them apart, and the next pass rewrites them.
      */
-    bool DTSSplitDroneExport(const FString& FullName, FString& OutMain, FString& OutWord, FString& OutTail)
+    bool DTSSplitDroneGroup(const FString& FullName, FString& OutMain, FString& OutWord, FString& OutTail, bool& bOutGroupReceives)
     {
         OutMain = FullName.TrimStartAndEnd();
         OutWord.Reset();
         OutTail.Reset();
+        bOutGroupReceives = false;
         const int32 Bar = OutMain.Find(TEXT(" | ("), ESearchCase::CaseSensitive, ESearchDir::FromEnd);
         if (Bar == INDEX_NONE) return false;
         const FString Group = OutMain.Mid(Bar + 3);
@@ -290,14 +297,15 @@ namespace
         if (!Group.FindChar(TEXT(')'), Close)) return false;
         const FString Word = Group.Mid(1, Close - 1).TrimStartAndEnd();
         const FString Tail = Group.Mid(Close + 1).TrimStartAndEnd();
-        if (Word.IsEmpty() || !Tail.StartsWith(TEXT("+")) || !DTSIsAutoTail(Tail)) return false;
+        if (Word.IsEmpty() || !DTSIsAutoTail(Tail)) return false;
         OutWord = Word;
         OutTail = Tail;
+        bOutGroupReceives = Tail.StartsWith(TEXT("-"));
         OutMain = OutMain.Left(Bar).TrimEnd();
         return true;
     }
 
-    FString DTSJoinDroneExport(const FString& Main, const FString& Word, const FString& Tail)
+    FString DTSJoinDroneGroup(const FString& Main, const FString& Word, const FString& Tail)
     {
         return FString::Printf(TEXT("%s | (%s) %s"), *Main, *Word, *Tail);
     }
@@ -797,7 +805,7 @@ namespace
      * was just changed and the word is one of the game's own.
      */
     FString DTSComposeAutoName(const FString& CurrentName, const FDTTAutoNameResult& Result, bool bShared, bool bSameResource, bool bKeepWord,
-        const FString* WorldWord = nullptr)
+        const FString* WorldWord = nullptr, int32 MaxLength = DTSAutoNameMaxLength)
     {
         FString OldBase, OldResource;
         EDTTDispatchRole OldRole = EDTTDispatchRole::None;
@@ -850,7 +858,7 @@ namespace
         for (;;)
         {
             Name = FString::Printf(TEXT("%s %s"), *Head, *DTSMakeAutoTail(Result, bShared, ProductCount, bEllipsis));
-            if (Name.Len() <= DTSAutoNameMaxLength || ProductCount <= 0) break;
+            if (Name.Len() <= MaxLength || ProductCount <= 0) break;
             --ProductCount;
             bEllipsis = true;
         }
@@ -1006,26 +1014,43 @@ bool UDynamicTimeTableSubsystem::ProcessAutoNameForDronePort(AFGDroneStationInfo
     Limits.MaxProducts = GetSettings().AutoNameMaxProducts;
     Limits.bExplainAll = bExplainAll;
 
-    // The name in its parts: the sending group after the bar first, then the truck-style block
-    // of what is left. A one-sided port carries its one tag in front; the sign of the tail says
-    // which side that tag names.
-    FString Main, ExportWord, ExportTail;
-    const bool bHadExport = DTSSplitDroneExport(Current, Main, ExportWord, ExportTail);
+    // The name in its parts: the group after the bar first, then the truck-style block of what
+    // is left. The main block names what the port sends and carries the player's text, the group
+    // what it receives; a one-sided port has just the block, and the sign of its tail says which
+    // side that is. A name with the group on the sending side is from before the order was
+    // settled and is read the other way round.
+    FString Main, GroupWord, GroupTail;
+    bool bGroupReceives = false;
+    const bool bHadGroup = DTSSplitDroneGroup(Current, Main, GroupWord, GroupTail, bGroupReceives);
     FString PrevHead, PrevTag, PrevTail;
     const bool bHadAuto = DTSSplitAutoBlock(Main, PrevHead, PrevTag, PrevTail);
     const bool bAutoWasUnsure = bHadAuto && PrevTail.Contains(TEXT("?"));
-    const bool bExportWasUnsure = bHadExport && ExportTail.Contains(TEXT("?"));
-    const bool bMainIsExport = bHadAuto && !bHadExport && PrevTail.StartsWith(TEXT("+"));
+    const bool bGroupWasUnsure = bHadGroup && GroupTail.Contains(TEXT("?"));
+    const bool bMainSideKnown = bHadAuto || bHadGroup;
+    const bool bMainWasExport = bHadGroup ? bGroupReceives : (bHadAuto && PrevTail.StartsWith(TEXT("+")));
 
     FString TagBase, TagResource;
     EDTTDispatchRole TagRole = EDTTDispatchRole::None;
     int32 TagThreshold = 0;
     bool bTagStayUntilEmpty = false;
     const bool bHasTag = ParseDispatchTag(Main, TagBase, TagResource, TagRole, TagThreshold, &bTagStayUntilEmpty);
-    const TSubclassOf<UFGItemDescriptor> TagItem = (bHasTag && !bAutoWasUnsure) ? ResolveItemClassForResource(TagResource) : nullptr;
-    const TSubclassOf<UFGItemDescriptor> PreferredImport = bMainIsExport ? nullptr : TagItem;
-    TSubclassOf<UFGItemDescriptor> PreferredExport = bMainIsExport ? TagItem : nullptr;
-    if (bHadExport && !bExportWasUnsure) PreferredExport = ResolveItemClassForResource(ExportWord);
+    // The old word of each side. A tag on a block that carries no tail names whichever side the
+    // block ends up on; a scan may only be steered by a word that was not marked as a guess.
+    FString OldExportWord, OldImportWord;
+    bool bExportWordUnsure = false, bImportWordUnsure = false;
+    if (bHasTag && bMainSideKnown)
+    {
+        (bMainWasExport ? OldExportWord : OldImportWord) = TagResource;
+        (bMainWasExport ? bExportWordUnsure : bImportWordUnsure) = bAutoWasUnsure;
+    }
+    if (bHadGroup)
+    {
+        (bGroupReceives ? OldImportWord : OldExportWord) = GroupWord;
+        (bGroupReceives ? bImportWordUnsure : bExportWordUnsure) = bGroupWasUnsure;
+    }
+    TSubclassOf<UFGItemDescriptor> PreferredImport = (!OldImportWord.IsEmpty() && !bImportWordUnsure) ? ResolveItemClassForResource(OldImportWord) : nullptr;
+    TSubclassOf<UFGItemDescriptor> PreferredExport = (!OldExportWord.IsEmpty() && !bExportWordUnsure) ? ResolveItemClassForResource(OldExportWord) : nullptr;
+    if (bHasTag && !bMainSideKnown) PreferredImport = PreferredExport = ResolveItemClassForResource(TagResource);
 
     FDTTAutoNameResult Import, Export;
     FDTTAutoNameScanner::ScanDronePort(Station, Limits, PreferredImport, PreferredExport, Import, Export);
@@ -1051,45 +1076,68 @@ bool UDynamicTimeTableSubsystem::ProcessAutoNameForDronePort(AFGDroneStationInfo
     if (Import.bValid) { FDTTAutoNameReach Reach = ReachOf(Import); bSharedImport = SharesAutoNameChain(Reach, nullptr, Info); Reaches.Add(MoveTemp(Reach)); }
     if (Export.bValid) { FDTTAutoNameReach Reach = ReachOf(Export); bSharedExport = SharesAutoNameChain(Reach, nullptr, Info); Reaches.Add(MoveTemp(Reach)); }
 
-    // What the port receives is the main block of its name, spelled exactly like a requester
-    // dock; a port that only sends is spelled like a collecting dock. The one that does both puts
-    // the sending side after a bar, so the leading tag always says what is brought here.
-    const FDTTAutoNameResult& MainResult = Import.bValid ? Import : Export;
-    const bool bMainShared = Import.bValid ? bSharedImport : bSharedExport;
+    // What the port sends is the main block of its name, spelled exactly like a collecting dock,
+    // with the player's text; a port that only receives is spelled like a requester dock. The one
+    // that does both puts the receiving side after a bar, in the order of the window's bars.
+    const bool bMainIsExport = Export.bValid;
+    const FDTTAutoNameResult& MainResult = bMainIsExport ? Export : Import;
+    const bool bMainShared = bMainIsExport ? bSharedExport : bSharedImport;
+    if (bHasTag && !bMainSideKnown) (bMainIsExport ? OldExportWord : OldImportWord) = TagResource;
+    const FString& MainWord = bMainIsExport ? OldExportWord : OldImportWord;
+    const bool bMainWordUnsure = bMainIsExport ? bExportWordUnsure : bImportWordUnsure;
+    // The player's text with the main side's own word in front of it. When the tag already
+    // stands on this side it stays as written, threshold and all; when the side that carried
+    // the text changed, the block is put together again from the text and the word that used
+    // to sit behind the bar.
     FString Source = Main;
-    FString OldExportWord = bHadExport ? ExportWord : FString();
-    bool bTagForMain = bHasTag;
-    if (bMainIsExport && Import.bValid)
+    const bool bTagOnMain = bHasTag && (!bMainSideKnown || bMainWasExport == bMainIsExport);
+    if (!bTagOnMain)
     {
-        // The port used to only send and its tag named that; now it receives too, so the word
-        // moves behind the bar and the main block starts from the player's own text.
-        Source = PrevHead;
-        OldExportWord = TagResource;
-        bTagForMain = false;
+        const FString Text = bHadAuto ? PrevHead : (bHasTag ? TagBase : Main);
+        Source = MainWord.IsEmpty() ? Text : DTSJoinAutoBlock(Text, FString::Printf(TEXT("(%s)"), *MainWord), FString());
     }
-    const bool bOwnWord = bTagForMain && !ResolveItemClassForResource(TagResource);
-    const bool bSameResource = bTagForMain && MainResult.ItemClass && (bOwnWord || (TagItem && TagItem == MainResult.ItemClass));
+    const TSubclassOf<UFGItemDescriptor> MainWordItem = (MainWord.IsEmpty() || bMainWordUnsure) ? nullptr : ResolveItemClassForResource(MainWord);
+    const bool bOwnWord = !MainWord.IsEmpty() && !ResolveItemClassForResource(MainWord);
+    const bool bSameResource = !MainWord.IsEmpty() && MainResult.ItemClass && (bOwnWord || (MainWordItem && MainWordItem == MainResult.ItemClass));
     const bool bRelabel = bExplainAll || AutoNameRelabelPending;
-    const bool bKeepWord = bSameResource && !(bRelabel && ResolveItemClassByName(TagResource));
+    const bool bKeepWord = bSameResource && !(bRelabel && ResolveItemClassByName(MainWord));
     const FString* WorldWord = WorldWords ? WorldWords->Find(MainResult.ItemClass) : nullptr;
-    FString NewName = DTSComposeAutoName(Source, MainResult, bMainShared, bSameResource, bKeepWord, WorldWord);
+    FString NewName;
 
     if (Import.bValid && Export.bValid)
     {
-        // The word for what the port sends follows the same rule as a tag: the one already in the
-        // name while it still means this item, else the world's word, else the game's.
-        FString Word = Export.ResourceName;
-        if (!OldExportWord.IsEmpty())
+        // The word for what the port receives follows the same rule as a tag: the one already in
+        // the name while it still means this item, else the world's word, else the game's.
+        FString Word = Import.ResourceName;
+        if (!OldImportWord.IsEmpty())
         {
-            const TSubclassOf<UFGItemDescriptor> OldItem = ResolveItemClassForResource(OldExportWord);
-            const bool bOldSame = !OldItem || OldItem == Export.ItemClass;
-            if (bOldSame && !(bRelabel && ResolveItemClassByName(OldExportWord))) Word = OldExportWord;
+            const TSubclassOf<UFGItemDescriptor> OldItem = ResolveItemClassForResource(OldImportWord);
+            const bool bOldSame = !OldItem || OldItem == Import.ItemClass;
+            if (bOldSame && !(bRelabel && ResolveItemClassByName(OldImportWord))) Word = OldImportWord;
         }
-        if (Word == Export.ResourceName)
+        if (Word == Import.ResourceName)
         {
-            if (const FString* ExportWorldWord = WorldWords ? WorldWords->Find(Export.ItemClass) : nullptr) Word = *ExportWorldWord;
+            if (const FString* ImportWorldWord = WorldWords ? WorldWords->Find(Import.ItemClass) : nullptr) Word = *ImportWorldWord;
         }
-        NewName = DTSJoinDroneExport(NewName, DTSSanitizeProductName(Word), DTSMakeAutoTail(Export, bSharedExport, 0, false));
+        Word = DTSSanitizeProductName(Word);
+        // The whole name has to fit the vanilla field. The group's products give way first, then
+        // the main block is composed within what the group leaves it.
+        int32 ProductCount = Import.Products.Num();
+        bool bEllipsis = Import.bMoreProducts;
+        for (;;)
+        {
+            const FString Group = FString::Printf(TEXT("(%s) %s"), *Word, *DTSMakeAutoTail(Import, bSharedImport, ProductCount, bEllipsis));
+            const int32 MainBudget = DTSAutoNameMaxLength - Group.Len() - 3;
+            const FString MainBlock = DTSComposeAutoName(Source, MainResult, bMainShared, bSameResource, bKeepWord, WorldWord, MainBudget);
+            NewName = FString::Printf(TEXT("%s | %s"), *MainBlock, *Group);
+            if (NewName.Len() <= DTSAutoNameMaxLength || ProductCount <= 0) break;
+            --ProductCount;
+            bEllipsis = true;
+        }
+    }
+    else
+    {
+        NewName = DTSComposeAutoName(Source, MainResult, bMainShared, bSameResource, bKeepWord, WorldWord);
     }
 
     // A measurement, not a decision: recorded by a preview too, so the '*' marks agree with the
@@ -1448,10 +1496,11 @@ int32 UDynamicTimeTableSubsystem::StripAutoNames(TArray<FString>* OutLines)
         {
             if (!IsValid(Info)) continue;
             const FString Current = DronePortName(Info);
-            // The sending group goes whole, tag and all: the receiving tag stays for the same
-            // reason a dock's does.
-            FString Main, ExportWord, ExportTail;
-            DTSSplitDroneExport(Current, Main, ExportWord, ExportTail);
+            // The group after the bar goes whole, tag and all: the main block's tag stays for
+            // the same reason a dock's does.
+            FString Main, GroupWord, GroupTail;
+            bool bGroupReceives = false;
+            DTSSplitDroneGroup(Current, Main, GroupWord, GroupTail, bGroupReceives);
             const FString Bare = StripAutoBlock(Main);
             if (Bare == Current.TrimStartAndEnd()) continue;
             if (RenameDronePortGuarded(Info, Bare))
@@ -4398,6 +4447,11 @@ void UDynamicTimeTableSubsystem::StartStationWindowWatch()
 {
     UWorld* World = GetWorld();
     if (!IsValid(World) || World->GetNetMode() == NM_DedicatedServer) return;
+    if (!Hotkeys)
+    {
+        Hotkeys = NewObject<UDTTHotkeys>(this);
+        Hotkeys->Load();
+    }
     World->GetTimerManager().ClearTimer(StationWindowTimerHandle);
     World->GetTimerManager().SetTimer(StationWindowTimerHandle, this,
         &UDynamicTimeTableSubsystem::TickStationWindow, 0.3f, true);
@@ -4406,6 +4460,9 @@ void UDynamicTimeTableSubsystem::StartStationWindowWatch()
 void UDynamicTimeTableSubsystem::TickStationWindow()
 {
     FDTTStationWindow::Tick(GetWorld());
+    // The keys are bound from here rather than at begin play: a remote client's controller gets
+    // its input component later, and this timer is already looking at the client every 0.3 s.
+    if (Hotkeys) Hotkeys->EnsureInstalled(GetWorld());
 }
 
 void UDynamicTimeTableSubsystem::StartTruckPolling()
@@ -4435,6 +4492,11 @@ void UDynamicTimeTableSubsystem::PollTruckStates()
     {
         SpeedSampleTick = 0;
         SampleTruckSpeeds();
+    }
+    if (++AlertTick >= AlertEverySeconds)
+    {
+        AlertTick = 0;
+        PollAlerts();
     }
 
     for (auto It = TruckPollStates.CreateIterator(); It; ++It)
@@ -7263,11 +7325,116 @@ void UDynamicTimeTableSubsystem::UpdateRequesterWaitTimes()
             OverdueRequestsLogged.Add(Station.DockingPathNodeGuid);
             UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("DISPATCH_REQUEST_OVERDUE Station=\"%s\" Resource=\"%s\" WaitingSeconds=%d Limit=%dm"),
                 *Station.DisplayName, *Station.ResourceId, WaitingSeconds, Settings.OverdueRequestMinutes);
+            // The same edge the log uses: once per waiting episode.
+            if (Settings.bChatAlerts)
+            {
+                BroadcastAlert(FString::Printf(TEXT("Request overdue: \"%s\" has waited %d min for %s."),
+                    *Station.DisplayName, WaitingSeconds / 60, *Station.ResourceId), TEXT("Overdue"), Station.DisplayName);
+            }
         }
     }
     // Closed or claimed: the episode is over, the next one starts from zero and may be logged again.
     for (auto It = RequesterOpenSinceWorldSeconds.CreateIterator(); It; ++It)
         if (!Waiting.Contains(It.Key())) { OverdueRequestsLogged.Remove(It.Key()); It.RemoveCurrent(); }
+}
+
+void UDynamicTimeTableSubsystem::BroadcastAlert(const FString& Text, const TCHAR* Kind, const FString& Name)
+{
+    UE_LOG(LogDynamicTimeTableSubsystem, Warning, TEXT("ALERT Kind=%s Name=\"%s\" Text=\"%s\""), Kind, *Name, *Text);
+    // The game's own chat, to every player: a multicast on a game class, so a client without
+    // this mod reads it too, and the listening host sees it on its own screen.
+    AFGChatManager* Chat = AFGChatManager::Get(GetWorld());
+    if (!IsValid(Chat)) return;
+    FChatMessageStruct Message;
+    Message.MessageType = EFGChatMessageType::CMT_CustomMessage;
+    Message.MessageSender = FText::FromString(TEXT("dTT"));
+    Message.MessageSenderColor = FLinearColor(1.0f, 0.45f, 0.45f);
+    Message.MessageText = FText::FromString(Text);
+    Chat->BroadcastChatMessage(Message, nullptr);
+}
+
+void UDynamicTimeTableSubsystem::PollAlerts()
+{
+    if (!IsServer()) return;
+    // Every kind is walked even with alerts off, so the sets track the world and switching
+    // alerts on later does not announce everything that was already wrong.
+    const bool bSay = Settings.bChatAlerts && bAlertsPrimed;
+    int32 NewMode = 0, NewTrucks = 0, NewPorts = 0;
+
+    // A station whose LOAD/UNLOAD switch fights the role its tag gives it: the game will not
+    // serve it, and the window shows it red. Depots and fuel stops are not dispatch stations
+    // and have no role to fight.
+    TSet<FGuid> Mismatched;
+    for (const FDTTDispatchStation& Station : DispatchStations)
+    {
+        if (!Station.DockingPathNodeGuid.IsValid()) continue;
+        AFGDockingStationIdentifier* Identifier = Station.DockingStationIdentifier.Get();
+        if (!IsValid(Identifier) || !IsValid(Identifier->GetStation())) continue;
+        if (DoesDispatchStationMatchMode(Station)) continue;
+        Mismatched.Add(Station.DockingPathNodeGuid);
+        bool bKnown = false;
+        AlertedModeMismatch.Add(Station.DockingPathNodeGuid, &bKnown);
+        if (bKnown) continue;
+        ++NewMode;
+        if (bSay)
+        {
+            const bool bRequester = GetEffectiveDispatchRole(Station) == EDTTDispatchRole::Requester;
+            BroadcastAlert(FString::Printf(TEXT("Wrong mode: \"%s\" is tagged as a %s but stands in %s."),
+                *Station.DisplayName, bRequester ? TEXT("requester") : TEXT("producer"), bRequester ? TEXT("LOAD") : TEXT("UNLOAD")),
+                TEXT("WrongMode"), Station.DisplayName);
+        }
+    }
+    for (auto It = AlertedModeMismatch.CreateIterator(); It; ++It) if (!Mismatched.Contains(*It)) It.RemoveCurrent();
+
+    // A truck on autopilot whose tank the game reports empty: it stands where it ran dry.
+    TSet<TWeakObjectPtr<AFGWheeledVehicleIdentifier>> Dry;
+    if (AFGVehicleSubsystem* Vehicles = AFGVehicleSubsystem::Get(GetWorld()))
+    {
+        for (AFGWheeledVehicleIdentifier* Vehicle : Vehicles->GetAllVehicles())
+        {
+            if (!IsValid(Vehicle) || !Vehicle->IsAutopilotEnabled()) continue;
+            AFGWheeledVehicle* Wheeled = Vehicle->GetOwnerVehicle();
+            if (!IsValid(Wheeled) || Wheeled->HasFuel()) continue;
+            Dry.Add(Vehicle);
+            bool bKnown = false;
+            AlertedTrucksDry.Add(Vehicle, &bKnown);
+            if (bKnown) continue;
+            ++NewTrucks;
+            if (bSay) BroadcastAlert(FString::Printf(TEXT("Out of fuel: truck \"%s\" has stopped."), *DTSVehicleName(Vehicle)), TEXT("TruckDry"), DTSVehicleName(Vehicle));
+        }
+    }
+    for (auto It = AlertedTrucksDry.CreateIterator(); It; ++It) if (!It->IsValid() || !Dry.Contains(*It)) It.RemoveCurrent();
+
+    // A drone port whose drone waits for fuel it does not have.
+    TSet<TWeakObjectPtr<AFGDroneStationInfo>> Grounded;
+    if (AFGDroneSubsystem* Drones = AFGDroneSubsystem::Get(GetWorld()))
+    {
+        for (AFGDroneStationInfo* Info : Drones->GetAllStations())
+        {
+            if (!IsValid(Info) || Info->GetDroneStatus() != EDroneStatus::EDS_NOT_ENOUGH_FUEL) continue;
+            Grounded.Add(Info);
+            bool bKnown = false;
+            AlertedPortsDry.Add(Info, &bKnown);
+            if (bKnown) continue;
+            ++NewPorts;
+            if (bSay) BroadcastAlert(FString::Printf(TEXT("No fuel: drone port \"%s\" cannot afford its trip."), *DronePortName(Info)), TEXT("PortDry"), DronePortName(Info));
+        }
+    }
+    for (auto It = AlertedPortsDry.CreateIterator(); It; ++It) if (!It->IsValid() || !Grounded.Contains(*It)) It.RemoveCurrent();
+
+    // The first pass after a load: what is wrong already is one line, not one per thing.
+    if (!bAlertsPrimed)
+    {
+        bAlertsPrimed = true;
+        if (Settings.bChatAlerts && (NewMode + NewTrucks + NewPorts) > 0)
+        {
+            TArray<FString> Parts;
+            if (NewMode > 0) Parts.Add(FString::Printf(TEXT("%d station%s in the wrong mode"), NewMode, NewMode == 1 ? TEXT("") : TEXT("s")));
+            if (NewTrucks > 0) Parts.Add(FString::Printf(TEXT("%d truck%s out of fuel"), NewTrucks, NewTrucks == 1 ? TEXT("") : TEXT("s")));
+            if (NewPorts > 0) Parts.Add(FString::Printf(TEXT("%d drone port%s without fuel"), NewPorts, NewPorts == 1 ? TEXT("") : TEXT("s")));
+            BroadcastAlert(FString::Printf(TEXT("On load: %s."), *FString::Join(Parts, TEXT(", "))), TEXT("Summary"), FString());
+        }
+    }
 }
 
 void UDynamicTimeTableSubsystem::BuildStationRows(TArray<FDTTStationRow>& OutRows) const

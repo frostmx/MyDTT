@@ -136,6 +136,26 @@ void UDynamicTimeTableSubsystem::BuildDroneRows(TArray<FDTTDroneRow>& OutRows) c
         const FDTDHold Import = DTDReadHold(Station->GetOutputInventory());
         Row.ImportItems = Import.Items; Row.ImportSlots = Import.Slots; Row.ImportCapacity = Import.Capacity; Row.ImportFill = Import.Fill;
 
+        // The tile of a side survives the side being empty: what it holds now, else what it held
+        // when last seen, else what the auto-name walk found on its belts.
+        FDTTDroneSideItems& Seen = DroneSideItemsSeen.FindOrAdd(Info);
+        if (Export.Items.Num() > 0) Seen.Sends = Export.Items[0].ItemClass;
+        if (Import.Items.Num() > 0) Seen.Receives = Import.Items[0].ItemClass;
+        Row.SendsItem = Seen.Sends;
+        Row.ReceivesItem = Seen.Receives;
+        if (Row.SendsItem.IsNull() || Row.ReceivesItem.IsNull())
+        {
+            if (const TArray<FDTTAutoNameReach>* Reaches = AutoNameDroneMachines.Find(Info))
+            {
+                for (const FDTTAutoNameReach& Reach : *Reaches)
+                {
+                    if (!Reach.ItemClass) continue;
+                    TSoftClassPtr<UFGItemDescriptor>& Side = Reach.bRequester ? Row.ReceivesItem : Row.SendsItem;
+                    if (Side.IsNull()) Side = TSoftClassPtr<UFGItemDescriptor>(Reach.ItemClass.Get());
+                }
+            }
+        }
+
         if (DTDHasBelt(Station, EFactoryConnectionDirection::FCD_INPUT)) Row.Flags |= EDTTDroneFlags::ExportBelt;
         if (DTDHasBelt(Station, EFactoryConnectionDirection::FCD_OUTPUT)) Row.Flags |= EDTTDroneFlags::ImportBelt;
         if (Station->HasDronesInQueue()) Row.Flags |= EDTTDroneFlags::Queue;

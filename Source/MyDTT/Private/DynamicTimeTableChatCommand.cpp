@@ -343,57 +343,11 @@ EExecutionStatus ADynamicTimeTableChatCommand::ExecuteCommand_Implementation(
         return EExecutionStatus::COMPLETED;
     }
 
-    UFGGameUI* GameUI = Player->GetGameUI();
-    if (!IsValid(GameUI))
+    if (!IsValid(Player->GetGameUI()))
     {
         Sender->SendChatMessage(TEXT("dTT: Game UI is not ready."), FLinearColor::Red);
         return EExecutionStatus::UNCOMPLETED;
     }
-
-    TArray<UUserWidget*> ExistingWidgets;
-    UWidgetBlueprintLibrary::GetAllWidgetsOfClass(
-        Player,
-        ExistingWidgets,
-        UDynamicTimeTableWidget::StaticClass(),
-        true);
-
-    for (UUserWidget* ExistingWidget : ExistingWidgets)
-    {
-        if (IsValid(ExistingWidget))
-        {
-            ExistingWidget->RemoveFromParent();
-            UE_LOG(LogDynamicTimeTableChatCommand, Verbose, TEXT("dTT: existing virtual window closed by /dtt toggle."));
-            return EExecutionStatus::COMPLETED;
-        }
-    }
-
-    UDynamicTimeTableWidget* Window = CreateWidget<UDynamicTimeTableWidget>(
-        Player,
-        UDynamicTimeTableWidget::StaticClass());
-    if (!IsValid(Window))
-    {
-        Sender->SendChatMessage(TEXT("dTT: Could not create the virtual window."), FLinearColor::Red);
-        UE_LOG(LogDynamicTimeTableChatCommand, Error, TEXT("dTT: CreateWidget returned null."));
-        return EExecutionStatus::UNCOMPLETED;
-    }
-
-    // AddToViewport is used deliberately here. The Satisfactory AddInteractWidget
-    // Blueprint event only updates the stack for native widgets in this build and
-    // did not attach the pure C++ widget to the viewport.
-    Window->AddToViewport(1000);
-
-    FInputModeGameAndUI InputMode;
-    InputMode.SetWidgetToFocus(Window->TakeWidget());
-    InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
-    InputMode.SetHideCursorDuringCapture(false);
-    Player->SetInputMode(InputMode);
-    Player->SetShowMouseCursor(true);
-    Player->bEnableClickEvents = true;
-    Player->bEnableMouseOverEvents = true;
-    Player->CurrentMouseCursor = EMouseCursor::Default;
-    Player->SetIgnoreMoveInput(true);
-    Player->SetIgnoreLookInput(true);
-
-    UE_LOG(LogDynamicTimeTableChatCommand, Verbose, TEXT("dTT: virtual window attached directly to viewport."));
+    UDynamicTimeTableWidget::Toggle(Player);
     return EExecutionStatus::COMPLETED;
 }

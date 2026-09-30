@@ -74,7 +74,9 @@ public:
     // 17: the Timetable section - laps with the metres left of them, the queue of open requests
     //     in the dispatcher's own order, and what the last pool pass could not do.
     // 18: the Drones section - every drone port with its two inventories, its drone and its pair.
-    static constexpr int32 ProtocolVersion = 18;
+    // 19: a drone row carries the item of each side for its tiles.
+    // 20: the settings gain bChatAlerts.
+    static constexpr int32 ProtocolVersion = 20;
     // A section is cut here so that the whole snapshot stays well under the 64 KB reliable bunch.
     static constexpr int32 MaxSnapshotRows = 400;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -121,6 +123,9 @@ public:
     void RequestSendTruckNow(class AFGDockingStationIdentifier* Dock);
     UFUNCTION(Client, Reliable)
     void Client_OpenWindow();
+    /** The 1.5 s poll that feeds an open window on a remote client; the window's Toggle starts and stops it. */
+    void StartLiveUpdates();
+    void StopLiveUpdates();
 private:
     UPROPERTY(Replicated) bool bReplicationAnchor = true;
     UPROPERTY() FDTTClientSnapshot CachedSnapshot;
@@ -150,7 +155,6 @@ private:
     /** The same for a station operation, with the Stations rows instead. */
     void FinishStationOperation(bool bSuccess, const FString& Message);
     void SendSnapshot(int32 Sections);
-    void StartLiveUpdates();
     void PollLiveSnapshot();
 
     FTimerHandle LiveUpdateTimerHandle;

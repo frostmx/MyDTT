@@ -12,6 +12,8 @@ public class MyDTT : ModuleRules
             "CoreUObject",
             "Engine",
             "InputCore",
+            // The window's hotkeys: a mapping context and actions made at runtime.
+            "EnhancedInput",
             "FactoryGame",
             "SML"
         });
