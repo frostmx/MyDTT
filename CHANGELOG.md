@@ -1,5 +1,9 @@
 ﻿# Changelog
 
+## 4.1.1
+
+- Rebuilt for Satisfactory 1.2.5.1 (CL520140) and SML 3.12.1; no code changes.
+
 ## 4.1.0
 
 - Hotkeys: F1 opens and closes the window, and the Settings tab lets you choose any of F1-F12
